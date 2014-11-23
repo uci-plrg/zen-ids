@@ -12,7 +12,12 @@ To build php:
 
 1. ./buildconf
 2. ./configure
-3. ./make -j3
+      --prefix=/stash/script-safe/php
+      --enable-zend-monitor
+      --with-config-file-path=/stash/script-safe/php/conf.d
+      --with-config-file-scan-dir=/stash/script-safe/php/conf.d/ext
+3. make -j3
+4. make install
 
 Seems to require bison 2.7, which is not available on 14.04. This
 nonsense corrects it:
@@ -23,5 +28,29 @@ dpkg -i libbison-dev_2.7.1.dfsg-1_amd64.deb
 dpkg -i bison_2.7.1.dfsg-1_amd64.deb
 
 --------------
+
+An extension is defined as struct zend_extension in
+Zend/zend_extension.h. There are pointers to various functions for
+startup, shutdown, activate, op_array_handler, etc. These are called
+with:
+
+  - dispatcher functions zend_list_apply()
+  - zend_llist_apply_with_argument() 
+  - zend_llist_apply_with_del()
+
+Extensions are initialized in main/main.c:php_module_startup().
+
+----------------
+
+Created extension "opcode-monitor". Build with:
+
+  > cd ext/opmon
+  > ../../scripts/phpize
+  > ./configure 
+       --enable-opcode-monitor 
+       --prefix=/stash/script-safe/php
+       --with-php-config=/stash/script-safe/php/bin/php-config
+  > make -j3
+
 
 
