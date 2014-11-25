@@ -1,0 +1,7 @@
+1. How to identify nested eval statements? I was going to use the eval
+   opcode as a reference point, but once inside an eval it gets a little
+   nebulous. 
+2. How to identify scripts in a way that allows the server directories
+   to change? Hashing the whole path makes it brittle, but hashing a
+   relative path seems somewhat weaker. 
+   

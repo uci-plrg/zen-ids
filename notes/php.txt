@@ -52,5 +52,16 @@ Created extension "opcode-monitor". Build with:
        --with-php-config=/stash/script-safe/php/bin/php-config
   > make -j3
 
+-----------------
 
+The opcode at the currently executing line is generally referred to as
+`OPLINE` or `opline` and it is a zend_op. The zend_op and its constants
+are defined in Zend/zend_compile.h. A zend_op generally has two
+operands, each having a type (in a separate field), and an
+extended_type, the domains of which are also defined in zend_compile.h.
+
+The name of an included or required script is in the op1.zv, which is a
+`zval` defined in Zend/zend_types.h.
+
+Opcodes are defined in Zend/zend_vm_opcodes.h.
 
