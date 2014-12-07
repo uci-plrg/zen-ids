@@ -1,0 +1,7 @@
+#!/bin/bash
+
+./configure \
+    --enable-opcode-monitor \
+    --prefix=/stash/script-safe/php \
+    --with-php-config=/stash/script-safe/php/bin/php-config
+
