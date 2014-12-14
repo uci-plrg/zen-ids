@@ -1,0 +1,61 @@
+
+The opcode at the currently executing line is generally referred to as
+`OPLINE` or `opline` and it is a zend_op. The zend_op and its constants
+are defined in Zend/zend_compile.h. A zend_op has two operands of type
+znode_op whose type is specified in a separate field, and an
+extended_type, the domains of which are also defined in zend_compile.h.
+The zend_op.result is also a znode_op with separate result_type.
+
+  // znode_op types:
+  #define IS_CONST  (1<<0)
+  #define IS_TMP_VAR  (1<<1)
+  #define IS_VAR    (1<<2)
+  #define IS_UNUSED (1<<3)  /* Unused variable */
+  #define IS_CV   (1<<4)  /* Compiled variable */
+
+
+The name of an included or required script is in the op1.zv, which is a
+`zval` defined in Zend/zend_types.h.
+
+Opcodes are defined in Zend/zend_vm_opcodes.h.
+
+-------------
+
+The lex/yacc thing generates .[ch] files from a .l file. So these .[ch]
+files shouldn't be edited, only the corresponding .l file. 
+
+-------------
+
+Dynamic functions (aka lambdas) are generated in zend_builtin_functions.c:1783 (for php 7.0):
+
+  ZEND_FUNCTION(create_function)
+
+Evals come through zend_execute.h, though there is some case where they
+arrive on a more structured path via zend_eval_string{,l,l_ex,_ex}.
+
+=============
+
+Indirect branches
+-----------------
+
+0. zend_compile.c:683 zend_resolve_class_name()
+   zend_compile.c:732 zend_resolve_class_name_ast()
+1. zend_compile.c:750 zend_resolve_goto_label()
+2. zend_compile.c:2691 zend_compile_func_cufa() // cufa = call_user_func_array
+   zend_compile.c:2709 zend_compile_func_cuf() // cufa = call_user_func
+3. zend_compile.c:3109 zend_compile_return()
+4. zend_compile.c:3156 zend_compile_throw()
+5. zend_compile.c:3472 zend_compile_switch()
+6. zend_compile.c:4084 zend_begin_func_decl() // for lambdas
+7. zend_compile.c:5455 zend_compile_include_or_eval()
+. zend_compile.c:
+. zend_compile.c:
+. zend_compile.c:
+. zend_compile.c:
+. zend_compile.c:
+8. 
+
+
+
+
+
