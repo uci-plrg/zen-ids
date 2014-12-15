@@ -164,7 +164,14 @@ static void opcode_executing(const zend_op *op)
 static void opcode_processing(const zend_op *op, zend_bool compiling)
 {
   if (compiling) {
-    PRINT("[emit %s]\n", zend_get_opcode_name(op->opcode));
+    switch (op->opcode) {
+      case ZEND_DECLARE_FUNCTION:
+      case ZEND_DECLARE_LAMBDA_FUNCTION:
+      case ZEND_RECV:
+        break;
+      default:
+        PRINT("[emit %s]\n", zend_get_opcode_name(op->opcode));
+    }
   } else {
     opcode_executing(op);
   }
