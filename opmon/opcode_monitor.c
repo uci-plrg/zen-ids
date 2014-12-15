@@ -3,8 +3,10 @@
 #endif
 #include "php.h"
 #include "zend_types.h"
-#include "opcode_monitor_context.h"
+#include "interp_context.h"
+#include "compile_context.h"
 #include "php_opcode_monitor.h"
+#include "../lib/script_cfi_hashtable.h"
 
 #define EVAL_FLAG 0x80000000U
 #define UNKNOWN_CONTEXT_ID 0xffffffffU
@@ -95,17 +97,18 @@ static void opcode_executing(const zend_op *op)
   else
     op_index = (uint)(op - current_opcodes);
 
-  PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_context_name(), get_current_context_id(), op_index, op->lineno,
-      op->opcode, zend_get_opcode_name(op->opcode));
+  PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
+    op_index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
   
-  verify_context(current_opcodes, op_index);
+  verify_interp_context(current_opcodes, op_index);
 
   if (op->opcode == ZEND_INCLUDE_OR_EVAL) {
     switch (op->extended_value) {
       case ZEND_EVAL: {
         PRINT("  === entering `eval` context #%u\n", eval_id & ~EVAL_FLAG); 
-        set_staged_context("eval", eval_id++);
+        set_staged_interp_context(eval_id++);
       } break;
+      /*
       case ZEND_INCLUDE:
       case ZEND_INCLUDE_ONCE: {
         zval temp_filename, *inc_filename = op->op1.zv;
@@ -116,7 +119,7 @@ static void opcode_executing(const zend_op *op)
         }
         hash = hash_string(Z_STRVAL_P(inc_filename));
         PRINT("  === entering `include` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
-        set_staged_context(Z_STRVAL_P(inc_filename), hash);
+        set_staged_interp_context(hash);
       } break;
       case ZEND_REQUIRE:
       case ZEND_REQUIRE_ONCE: {
@@ -128,22 +131,24 @@ static void opcode_executing(const zend_op *op)
         }
         hash = hash_string(Z_STRVAL_P(inc_filename));
         PRINT("  === entering `require` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
-        set_staged_context(Z_STRVAL_P(inc_filename), hash);
+        set_staged_interp_context(hash);
       } break;
       default: {
         PRINT("  === entering unknown context\n");
-        set_staged_context("unknown", UNKNOWN_CONTEXT_ID);
+        set_staged_interp_context(UNKNOWN_CONTEXT_ID);
       }
+      */
     }
-    push_context(current_opcodes, op_index);
+    push_interp_context(current_opcodes, op_index);
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
     PRINT("  === init call to function %s\n", op->op2.zv->value.str->val);
-    set_staged_context(op->op2.zv->value.str->val, hash_string(op->op2.zv->value.str->val));
+    // lookup FQN (file_path|function_name) by function name
+    set_staged_interp_context(hash_string(op->op2.zv->value.str->val));
   } else if (op->opcode == ZEND_DO_FCALL) {
-    push_context(current_opcodes, op_index);
+    push_interp_context(current_opcodes, op_index);
   } else if (op->opcode == ZEND_RETURN) {
     PRINT("  === return\n");
-    pop_context();
+    pop_interp_context();
   } else if (op->opcode == ZEND_DECLARE_FUNCTION) {
     PRINT("  === declare function\n");
   } else if (op->opcode == ZEND_DECLARE_LAMBDA_FUNCTION) {
@@ -182,7 +187,7 @@ PHP_MINIT_FUNCTION(opcode_monitor)
   PRINT("Initializing the opcode monitor\n");
 
   register_opcode_monitor(opcode_processing);
-  initialize_opcode_monitor_context();
+  initialize_interp_context();
 }
 
 static PHP_GINIT_FUNCTION(opcode_monitor)

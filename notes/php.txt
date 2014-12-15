@@ -15,11 +15,12 @@ The best event hook seems to be zend_vm_execute.h:execute_ex().
 To build php, go to the top-level php directory and:
 
 1. ./buildconf
-2. ./configure
-      --prefix=/stash/script-safe/php
-      --enable-zend-monitor
-      --with-config-file-path=/stash/script-safe/php/conf.d
-      --with-config-file-scan-dir=/stash/script-safe/php/conf.d/ext
+2. ./current-config # it does this:
+      ./configure
+        --prefix=/stash/script-safe/php
+        --enable-zend-monitor
+        --with-config-file-path=/stash/script-safe/php/conf.d
+        --with-config-file-scan-dir=/stash/script-safe/php/conf.d/ext
 3. make -j3
 4. make install
 
@@ -46,14 +47,16 @@ Extensions are initialized in main/main.c:php_module_startup().
 
 ----------------
 
-Created extension "opcode-monitor". Build with:
+Created extension "opcode-monitor". Build with "./current-config", which
+does this:
 
   > cd ext/opmon
-  > ../../scripts/phpize
-  > ./configure 
-       --enable-opcode-monitor 
-       --prefix=/stash/script-safe/php
-       --with-php-config=/stash/script-safe/php/bin/php-config
+  > ../../php/scripts/phpize
+  > ./current-config # it does this:
+       configure 
+         --enable-opcode-monitor 
+         --prefix=/stash/script-safe/php
+         --with-php-config=/stash/script-safe/php/bin/php-config
   > make -j3
 
 -----------------
