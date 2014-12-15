@@ -3,8 +3,7 @@
 #endif
 #include "php.h"
 #include "zend_types.h"
-#include "interp_context.h"
-#include "compile_context.h"
+#include "event_handler.h"
 #include "php_opcode_monitor.h"
 #include "../lib/script_cfi_hashtable.h"
 
@@ -60,133 +59,15 @@ zend_module_entry opcode_monitor_module_entry = {
 ZEND_GET_MODULE(opcode_monitor)
 #endif
 
-static uint hash_string(const char *string)
-{
-  uint four;
-  uint hash = 0;
-  uint i = strlen(string);
+static zend_opcode_monitor_t monitor_functions;
 
-  while (i > 3) {
-    four = *(uint *)string;
-    i -= 4;
-    string += 4;
-    hash = hash ^ (hash << 5) ^ four;
-  }
-  
-  if (i > 0) {
-    four = 0;
-    while (i-- > 0)
-      four = (four << 8) & *string++;
-    hash = hash ^ (hash << 5) ^ four;
-  }
-  
-  return hash & ~EVAL_FLAG;
-}
-
-static void opcode_executing(const zend_op *op)
-{
-  uint op_index;
-  zend_op *current_opcodes;
-  uint hash;
-
-  if (EG(current_execute_data) != NULL && EG(current_execute_data)->func != NULL)
-    current_opcodes = EG(current_execute_data)->func->op_array.opcodes;
-
-  if (current_opcodes == NULL)
-    op_index = 0xffffffff;
-  else
-    op_index = (uint)(op - current_opcodes);
-
-  PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
-    op_index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
-  
-  verify_interp_context(current_opcodes, op_index);
-
-  if (op->opcode == ZEND_INCLUDE_OR_EVAL) {
-    switch (op->extended_value) {
-      case ZEND_EVAL: {
-        PRINT("  === entering `eval` context #%u\n", eval_id & ~EVAL_FLAG); 
-        set_staged_interp_context(eval_id++);
-      } break;
-      /*
-      case ZEND_INCLUDE:
-      case ZEND_INCLUDE_ONCE: {
-        zval temp_filename, *inc_filename = op->op1.zv;
-        ZVAL_UNDEF(&temp_filename);
-        if (Z_TYPE_P(inc_filename) != IS_STRING) {
-          ZVAL_STR(&temp_filename, zval_get_string(inc_filename));
-          inc_filename = &temp_filename;
-        }
-        hash = hash_string(Z_STRVAL_P(inc_filename));
-        PRINT("  === entering `include` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
-        set_staged_interp_context(hash);
-      } break;
-      case ZEND_REQUIRE:
-      case ZEND_REQUIRE_ONCE: {
-        zval temp_filename, *inc_filename = op->op1.zv;
-        ZVAL_UNDEF(&temp_filename);
-        if (Z_TYPE_P(inc_filename) != IS_STRING) {
-          ZVAL_STR(&temp_filename, zval_get_string(inc_filename));
-          inc_filename = &temp_filename;
-        }
-        hash = hash_string(Z_STRVAL_P(inc_filename));
-        PRINT("  === entering `require` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
-        set_staged_interp_context(hash);
-      } break;
-      default: {
-        PRINT("  === entering unknown context\n");
-        set_staged_interp_context(UNKNOWN_CONTEXT_ID);
-      }
-      */
-    }
-    push_interp_context(current_opcodes, op_index);
-  } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
-    PRINT("  === init call to function %s\n", op->op2.zv->value.str->val);
-    // lookup FQN (file_path|function_name) by function name
-    set_staged_interp_context(hash_string(op->op2.zv->value.str->val));
-  } else if (op->opcode == ZEND_DO_FCALL) {
-    push_interp_context(current_opcodes, op_index);
-  } else if (op->opcode == ZEND_RETURN) {
-    PRINT("  === return\n");
-    pop_interp_context();
-  } else if (op->opcode == ZEND_DECLARE_FUNCTION) {
-    PRINT("  === declare function\n");
-  } else if (op->opcode == ZEND_DECLARE_LAMBDA_FUNCTION) {
-    PRINT("  === ZEND_DECLARE_LAMBDA_FUNCTION\n");
-  } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
-    PRINT("  === ZEND_INIT_FCALL_BY_NAME\n");
-  } else if (op->opcode == ZEND_INIT_FCALL) {
-    PRINT("  === ZEND_INIT_FCALL\n");
-  } else if (op->opcode == ZEND_INIT_NS_FCALL_BY_NAME) {
-    PRINT("  === ZEND_INIT_NS_FCALL_BY_NAME\n");
-  } else if (op->opcode == ZEND_EXT_FCALL_BEGIN) {
-    PRINT("  === ZEND_EXT_FCALL_BEGIN\n");
-  } else if (op->opcode == ZEND_EXT_FCALL_END) {
-    PRINT("  === ZEND_EXT_FCALL_END\n");
-  }
-}
-
-static void opcode_processing(const zend_op *op, zend_bool compiling)
-{
-  if (compiling) {
-    switch (op->opcode) {
-      case ZEND_DECLARE_FUNCTION:
-      case ZEND_DECLARE_LAMBDA_FUNCTION:
-      case ZEND_RECV:
-        break;
-      default:
-        PRINT("[emit %s]\n", zend_get_opcode_name(op->opcode));
-    }
-  } else {
-    opcode_executing(op);
-  }
-}
 
 PHP_MINIT_FUNCTION(opcode_monitor)
 {
   PRINT("Initializing the opcode monitor\n");
 
-  register_opcode_monitor(opcode_processing);
+  init_event_handler(monitor_functions);
+  register_opcode_monitor(&monitor_functions);
   initialize_interp_context();
 }
 
