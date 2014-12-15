@@ -1,30 +1,11 @@
 #include "php_opcode_monitor.h"
 #include "interp_context.h"
 #include "compile_context.h"
+#include "lib/script_cfi_utils.h"
 #include "event_handler.h"
 
-static uint hash_string(const char *string)
-{
-  uint four;
-  uint hash = 0;
-  uint i = strlen(string);
-
-  while (i > 3) {
-    four = *(uint *)string;
-    i -= 4;
-    string += 4;
-    hash = hash ^ (hash << 5) ^ four;
-  }
-  
-  if (i > 0) {
-    four = 0;
-    while (i-- > 0)
-      four = (four << 8) & *string++;
-    hash = hash ^ (hash << 5) ^ four;
-  }
-  
-  return hash & ~EVAL_FLAG;
-}
+// todo: thread safety?
+static uint eval_id = EVAL_FLAG + 1;
 
 static void opcode_executing(const zend_op *op)
 {
@@ -60,7 +41,7 @@ static void opcode_executing(const zend_op *op)
           ZVAL_STR(&temp_filename, zval_get_string(inc_filename));
           inc_filename = &temp_filename;
         }
-        hash = hash_string(Z_STRVAL_P(inc_filename));
+        hash = HASH_STRING(Z_STRVAL_P(inc_filename));
         PRINT("  === entering `include` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
         set_staged_interp_context(hash);
       } break;
@@ -72,7 +53,7 @@ static void opcode_executing(const zend_op *op)
           ZVAL_STR(&temp_filename, zval_get_string(inc_filename));
           inc_filename = &temp_filename;
         }
-        hash = hash_string(Z_STRVAL_P(inc_filename));
+        hash = HASH_STRING(Z_STRVAL_P(inc_filename));
         PRINT("  === entering `require` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
         set_staged_interp_context(hash);
       } break;
@@ -86,7 +67,8 @@ static void opcode_executing(const zend_op *op)
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
     PRINT("  === init call to function %s\n", op->op2.zv->value.str->val);
     // lookup FQN (file_path|function_name) by function name
-    set_staged_interp_context(hash_string(op->op2.zv->value.str->val)); // can I grab this in ZEND_DO_FCALL? Then post-qualify the context
+    set_staged_interp_context(HASH_STRING(op->op2.zv->value.str->val)); 
+    // can't see this in ZEND_DO_FCALL... need to pend the context
   } else if (op->opcode == ZEND_DO_FCALL) {
     push_interp_context(current_opcodes, op_index);
   } else if (op->opcode == ZEND_RETURN) {
@@ -96,8 +78,6 @@ static void opcode_executing(const zend_op *op)
     PRINT("  === declare function\n");
   } else if (op->opcode == ZEND_DECLARE_LAMBDA_FUNCTION) {
     PRINT("  === ZEND_DECLARE_LAMBDA_FUNCTION\n");
-  } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
-    PRINT("  === ZEND_INIT_FCALL_BY_NAME\n");
   } else if (op->opcode == ZEND_INIT_FCALL) {
     PRINT("  === ZEND_INIT_FCALL\n");
   } else if (op->opcode == ZEND_INIT_NS_FCALL_BY_NAME) {
@@ -117,7 +97,9 @@ static void opcode_compiling(const zend_op *op)
     case ZEND_RECV:
       break;
     default:
-      PRINT("[emit %s]\n", zend_get_opcode_name(op->opcode));
+      PRINT("[emit %s for {%s|%s, 0x%x|0x%x}]\n", zend_get_opcode_name(op->opcode),
+            get_compilation_unit_path(), get_compilation_function_name(),
+            get_compilation_unit_hash(), get_compilation_function_hash());
   }
 }
 
@@ -145,11 +127,11 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   init_compile_context();
   
-  monitor.notify_opcode_interp = opcode_executing;
-  monitor.notify_opcode_compile = opcode_compiling;
-  monitor.notify_file_compile_start = file_compiling;
-  monitor.notify_file_compile_complete = file_compiled;
-  monitor.notify_function_compile_start = function_compiling;
-  monitor.notify_function_compile_complete = function_compiled;
+  monitor->notify_opcode_interp = opcode_executing;
+  monitor->notify_opcode_compile = opcode_compiling;
+  monitor->notify_file_compile_start = file_compiling;
+  monitor->notify_file_compile_complete = file_compiled;
+  monitor->notify_function_compile_start = function_compiling;
+  monitor->notify_function_compile_complete = function_compiled;
 }
 

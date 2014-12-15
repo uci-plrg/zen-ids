@@ -5,13 +5,8 @@
 #include "zend_types.h"
 #include "event_handler.h"
 #include "php_opcode_monitor.h"
-#include "../lib/script_cfi_hashtable.h"
-
-#define EVAL_FLAG 0x80000000U
-#define UNKNOWN_CONTEXT_ID 0xffffffffU
-
-// todo: thread safety?
-static uint eval_id = EVAL_FLAG + 1;
+#include "lib/script_cfi_hashtable.h"
+#include "lib/script_cfi_utils.h"
 
 #define EC(f) opcode_monitor_globals.execution_context.f
 
@@ -61,12 +56,11 @@ ZEND_GET_MODULE(opcode_monitor)
 
 static zend_opcode_monitor_t monitor_functions;
 
-
 PHP_MINIT_FUNCTION(opcode_monitor)
 {
   PRINT("Initializing the opcode monitor\n");
 
-  init_event_handler(monitor_functions);
+  init_event_handler(&monitor_functions);
   register_opcode_monitor(&monitor_functions);
   initialize_interp_context();
 }

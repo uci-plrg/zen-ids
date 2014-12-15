@@ -1,5 +1,6 @@
 #include "php.h"
 #include "php_opcode_monitor.h"
+#include "lib/script_cfi_utils.h"
 #include "interp_context.h"
 
 typedef struct _interp_context_t {
