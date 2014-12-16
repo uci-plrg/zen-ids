@@ -10,18 +10,6 @@
 #define TABLE_ALLOC(size) malloc(size)
 #define TABLE_FREE(ptr) free(ptr)
 
-static inline void *
-sctable_lookup(sctable_t *t, uint key)
-{
-    sctable_entry_t *e;
-    uint hindex = HASH_FUNC(key, t);
-    for (e = t->data[hindex]; e; e = e->next) {
-        if (e->key == key)
-            return e;
-    }
-    return NULL;
-}
-
 static void
 sctable_insert(sctable_t *t, sctable_entry_t *e)
 {
@@ -65,6 +53,18 @@ sctable_init(sctable_t *t)
     t->data = (sctable_entry_t **)
         TABLE_ALLOC(t->capacity * sizeof(sctable_entry_t *));
     memset(t->data, 0, t->capacity * sizeof(sctable_entry_t *));
+}
+
+void *
+sctable_lookup(sctable_t *t, uint key)
+{
+    sctable_entry_t *e;
+    uint hindex = HASH_FUNC(key, t);
+    for (e = t->data[hindex]; e; e = e->next) {
+        if (e->key == key)
+            return e->payload;
+    }
+    return NULL;
 }
 
 void

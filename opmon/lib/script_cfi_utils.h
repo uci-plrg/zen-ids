@@ -4,10 +4,11 @@
 #define PRINT(...) fprintf(stderr, "\t> "__VA_ARGS__)
 #define PX "0x%llx"
 
-#define EVAL_FLAG 0x80000000U
-#define UNKNOWN_CONTEXT_ID 0xffffffffU
+#define EVAL_PATH "<eval>"
+#define EVAL_FUNCTION_NAME "<eval>"
+#define EVAL_HASH 0x00000000U
 
-#define HASH_STRING(str) hash_string(str) & ~EVAL_FLAG
+#define UNKNOWN_CONTEXT_ID 0xffffffffU
 
 #define ASSERT(b) do { \
   if (!(b)) PRINT("Assert failure: %s", #b); \

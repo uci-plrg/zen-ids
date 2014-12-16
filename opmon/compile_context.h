@@ -7,10 +7,13 @@ void push_compilation_unit(const char *path);
 void pop_compilation_unit();
 void push_compilation_function(const char *function_name);
 void pop_compilation_function();
+void push_eval(uint eval_id);
 
 const char *get_compilation_unit_path();
 uint get_compilation_unit_hash();
 const char *get_compilation_function_name();
 uint get_compilation_function_hash();
+
+const char *get_function_declaration_path(const char *function_name);
 
 #endif

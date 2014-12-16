@@ -23,6 +23,9 @@ typedef struct _sctable_t {
 void
 sctable_init(sctable_t *t);
 
+void *
+sctable_lookup(sctable_t *t, uint key);
+
 void
 sctable_add(sctable_t *t, uint key, void *value);
 

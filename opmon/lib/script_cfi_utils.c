@@ -17,7 +17,7 @@ uint hash_string(const char *string)
   if (i > 0) {
     four = 0;
     while (i-- > 0)
-      four = (four << 8) & *string++;
+      four = (four << 8) | *string++;
     hash = hash ^ (hash << 5) ^ four;
   }
   
