@@ -1,6 +1,7 @@
 #include "php.h"
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_hashtable.h"
+#include "cfg.h"
 #include "compile_context.h"
 
 #define EVAL_ID "|eval|"
@@ -13,6 +14,7 @@ typedef struct _compilation_unit_t {
 typedef struct _compilation_function_t {
   const char *name;
   uint hash;
+  cfg_t *cfg;
 } compilation_function_t;
 
 typedef struct _function_fqn_t {
@@ -23,6 +25,7 @@ typedef struct _function_fqn_t {
 static compilation_unit_t unit_stack[256];
 static compilation_unit_t *unit_frame;
 static compilation_unit_t *current_unit;
+static compilation_unit_t *live_unit;
 
 static compilation_function_t function_stack[256];
 static compilation_function_t *function_frame;
@@ -39,6 +42,7 @@ void init_compile_context()
   
   function_frame = function_stack;
   function_frame->name = NULL;
+  function_frame->cfg = NULL;
   current_function = &no_function;
   
   function_table.hash_bits = 7;
@@ -58,18 +62,23 @@ void push_compilation_unit(const char *path)
   
   function_frame->name = "<none>";
   function_frame->hash = 0;
+  function_frame->cfg = cfg_new(current_unit->hash, function_frame->hash);
   current_function = function_frame;
   function_frame++;
 }
 
-void pop_compilation_unit()
+cfg_t *pop_compilation_unit()
 {
+  cfg_t *cfg = current_function->cfg;
+  
   PRINT("> Pop compilation unit\n");
   
   unit_frame--;
   current_unit = unit_frame - 1;
   
   pop_compilation_function();
+  
+  return cfg;
 }
 
 const char *get_compilation_unit_path() 
@@ -91,6 +100,7 @@ void push_compilation_function(const char *function_name)
   
   function_frame->name = function_name;
   function_frame->hash = hash_string(function_name);
+  function_frame->cfg = cfg_new(current_unit->hash, function_frame->hash);
   current_function = function_frame;
   function_frame++;
   
@@ -135,6 +145,7 @@ void push_eval(uint eval_id)
   
   function_frame->name = EVAL_FUNCTION_NAME;
   function_frame->hash = eval_id;
+  function_frame->cfg = cfg_new(current_unit->hash, function_frame->hash);
   current_function = function_frame;
   function_frame++;
 }
@@ -148,4 +159,24 @@ const char *get_function_declaration_path(const char *function_name)
     return "unknown";
   else
     return fqn->unit.path;
+}
+
+cfg_t *get_cfg(const char *function_name)
+{
+  function_fqn_t *fqn;
+
+  fqn = (function_fqn_t *) sctable_lookup(&function_table, hash_string(function_name));
+  if (fqn == NULL)
+    return NULL;
+  else
+    return fqn->function.cfg;
+}
+
+void add_compiled_opcode(zend_uchar opcode)
+{
+  cfg_add_node(current_function->cfg, opcode);
+  
+  PRINT("[emit %s for {%s|%s, 0x%x|0x%x}]\n", zend_get_opcode_name(opcode),
+        get_compilation_unit_path(), get_compilation_function_name(),
+        get_compilation_unit_hash(), get_compilation_function_hash());
 }
