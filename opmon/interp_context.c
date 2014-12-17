@@ -6,7 +6,7 @@
 typedef struct _interp_context_t {
   const char *name;
   uint id;
-  cfg_t *cfg;
+  routine_cfg_t *cfg;
 } interp_context_t;
 
 typedef struct _shadow_frame_t {
@@ -35,7 +35,7 @@ void initialize_interp_context()
   last_node = context_entry_node;
 }
 
-void push_interp_context(zend_op* op, uint branch_index, cfg_t *cfg)
+void push_interp_context(zend_op* op, uint branch_index, routine_cfg_t *cfg)
 {
   //ASSERT(staged_context.name != NULL);
   
@@ -51,7 +51,7 @@ void push_interp_context(zend_op* op, uint branch_index, cfg_t *cfg)
   last_node = context_entry_node;
 }
 
-void set_interp_cfg(cfg_t *cfg)
+void set_interp_cfg(routine_cfg_t *cfg)
 {
   current_context.cfg = cfg;
 }

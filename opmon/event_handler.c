@@ -8,7 +8,7 @@
 // todo: thread safety?
 static uint eval_id = 0;
 
-static cfg_t *pending_cfg = NULL;
+static routine_cfg_t *pending_cfg = NULL;
 
 static void opcode_executing(const zend_op *op)
 {
@@ -112,6 +112,11 @@ static void opcode_compiling(const zend_op *op)
   }
 }
 
+static void edge_compiling(uint from_index, uint to_index)
+{
+  add_compiled_edge(from_index, to_index);
+}
+
 static void file_compiling(const char *path)
 {
   if (path == NULL)
@@ -122,7 +127,7 @@ static void file_compiling(const char *path)
 
 static void file_compiled()
 {
-  cfg_t *compiled_cfg = pop_compilation_unit();
+  routine_cfg_t *compiled_cfg = pop_compilation_unit();
   set_interp_cfg(compiled_cfg);
 }
 
@@ -142,6 +147,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_opcode_compile = opcode_compiling;
+  monitor->notify_edge_compile = edge_compiling;
   monitor->notify_file_compile_start = file_compiling;
   monitor->notify_file_compile_complete = file_compiled;
   monitor->notify_function_compile_start = function_compiling;

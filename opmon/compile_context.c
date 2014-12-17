@@ -14,7 +14,7 @@ typedef struct _compilation_unit_t {
 typedef struct _compilation_function_t {
   const char *name;
   uint hash;
-  cfg_t *cfg;
+  routine_cfg_t *cfg;
 } compilation_function_t;
 
 typedef struct _function_fqn_t {
@@ -62,14 +62,14 @@ void push_compilation_unit(const char *path)
   
   function_frame->name = "<none>";
   function_frame->hash = 0;
-  function_frame->cfg = cfg_new(current_unit->hash, function_frame->hash);
+  function_frame->cfg = routine_cfg_new(current_unit->hash, function_frame->hash);
   current_function = function_frame;
   function_frame++;
 }
 
-cfg_t *pop_compilation_unit()
+routine_cfg_t *pop_compilation_unit()
 {
-  cfg_t *cfg = current_function->cfg;
+  routine_cfg_t *cfg = current_function->cfg;
   
   PRINT("> Pop compilation unit\n");
   
@@ -100,7 +100,7 @@ void push_compilation_function(const char *function_name)
   
   function_frame->name = function_name;
   function_frame->hash = hash_string(function_name);
-  function_frame->cfg = cfg_new(current_unit->hash, function_frame->hash);
+  function_frame->cfg = routine_cfg_new(current_unit->hash, function_frame->hash);
   current_function = function_frame;
   function_frame++;
   
@@ -145,7 +145,7 @@ void push_eval(uint eval_id)
   
   function_frame->name = EVAL_FUNCTION_NAME;
   function_frame->hash = eval_id;
-  function_frame->cfg = cfg_new(current_unit->hash, function_frame->hash);
+  function_frame->cfg = routine_cfg_new(current_unit->hash, function_frame->hash);
   current_function = function_frame;
   function_frame++;
 }
@@ -161,7 +161,7 @@ const char *get_function_declaration_path(const char *function_name)
     return fqn->unit.path;
 }
 
-cfg_t *get_cfg(const char *function_name)
+routine_cfg_t *get_cfg(const char *function_name)
 {
   function_fqn_t *fqn;
 
@@ -174,9 +174,18 @@ cfg_t *get_cfg(const char *function_name)
 
 void add_compiled_opcode(zend_uchar opcode)
 {
-  cfg_add_node(current_function->cfg, opcode);
+  routine_cfg_add_node(current_function->cfg, opcode);
   
   PRINT("[emit %s for {%s|%s, 0x%x|0x%x}]\n", zend_get_opcode_name(opcode),
+        get_compilation_unit_path(), get_compilation_function_name(),
+        get_compilation_unit_hash(), get_compilation_function_hash());
+}
+
+void add_compiled_edge(uint from_index, uint to_index)
+{
+  routine_cfg_add_edge(current_function->cfg, from_index, to_index);
+  
+  PRINT("[emit %d->%d for {%s|%s, 0x%x|0x%x}]\n", from_index, to_index,
         get_compilation_unit_path(), get_compilation_function_name(),
         get_compilation_unit_hash(), get_compilation_function_hash());
 }
