@@ -12,9 +12,9 @@ static cfg_t *pending_cfg = NULL;
 
 static void opcode_executing(const zend_op *op)
 {
-  uint op_index;
   zend_op *current_opcodes;
   uint hash;
+  cfg_node_t node = { op->opcode, 0 };
   
   //if (true) return;
 
@@ -22,15 +22,15 @@ static void opcode_executing(const zend_op *op)
     current_opcodes = EG(current_execute_data)->func->op_array.opcodes;
 
   if (current_opcodes == NULL)
-    op_index = 0xffffffff;
+    node.index = 0xffffffff;
   else
-    op_index = (uint)(op - current_opcodes);
+    node.index = (uint)(op - current_opcodes);
 
   PRINT("  === [%s]\n", zend_get_opcode_name(op->opcode));
   //PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
-  //  op_index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
+  //  node.index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
   
-  verify_interp_context(current_opcodes, op, op_index);
+  verify_interp_context(current_opcodes, node);
 
   if (op->opcode == ZEND_INCLUDE_OR_EVAL) {
     switch (op->extended_value) {
@@ -70,7 +70,7 @@ static void opcode_executing(const zend_op *op)
       }
       */
     }
-    push_interp_context(current_opcodes, op_index, NULL);
+    push_interp_context(current_opcodes, node.index, NULL);
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
     pending_cfg = get_cfg(op->op2.zv->value.str->val);
     const char *source_path = get_function_declaration_path(op->op2.zv->value.str->val);
@@ -79,7 +79,7 @@ static void opcode_executing(const zend_op *op)
     //set_staged_interp_context(hash_string(op->op2.zv->value.str->val)); 
     // can't see this in ZEND_DO_FCALL... need to pend the context
   } else if (op->opcode == ZEND_DO_FCALL) {
-    push_interp_context(current_opcodes, op_index, pending_cfg);
+    push_interp_context(current_opcodes, node.index, pending_cfg);
   } else if (op->opcode == ZEND_RETURN) {
     PRINT("  === return\n");
     pop_interp_context();
@@ -104,6 +104,8 @@ static void opcode_compiling(const zend_op *op)
     case ZEND_DECLARE_FUNCTION:
     case ZEND_DECLARE_LAMBDA_FUNCTION:
     case ZEND_RECV:
+      PRINT("[skip %s]\n", zend_get_opcode_name(op->opcode));
+      // index gets out of sync here
       break;
     default:
       add_compiled_opcode(op->opcode);

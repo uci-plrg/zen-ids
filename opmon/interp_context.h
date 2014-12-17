@@ -7,8 +7,6 @@ void initialize_interp_context();
 void push_interp_context(zend_op* context, uint branch_index, cfg_t *cfg);
 void set_interp_cfg(cfg_t *cfg);
 void pop_interp_context();
-void verify_interp_context(zend_op *context, zend_op *op, uint index);
-//const char *get_current_interp_context_name();
-//void set_pending_interp_context_name(const char *name);
+void verify_interp_context(zend_op *context, cfg_node_t node);
 
 #endif

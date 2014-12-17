@@ -3,6 +3,11 @@
 
 #include "php.h"
 
+typedef struct _cfg_node_t {
+  zend_uchar opcode;
+  uint index;
+} cfg_node_t;
+
 typedef struct _cfg_edge_t {
   uint from_index;
   uint to_index;

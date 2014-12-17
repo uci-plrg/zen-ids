@@ -11,7 +11,7 @@
 #define UNKNOWN_CONTEXT_ID 0xffffffffU
 
 #define ASSERT(b) do { \
-  if (!(b)) PRINT("Assert failure: %s", #b); \
+  if (!(b)) PRINT("Assert failure: %s\n", #b); \
 } while (0);
 
 typedef unsigned long long uint64;
