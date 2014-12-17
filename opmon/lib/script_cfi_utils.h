@@ -15,6 +15,7 @@
 } while (0);
 
 typedef unsigned long long uint64;
+typedef unsigned char bool;
 
 uint hash_string(const char *string);
 

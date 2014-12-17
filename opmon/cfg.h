@@ -24,17 +24,24 @@ typedef struct _routine_cfg_t {
 
 typedef struct _cfg_routine_edge_t {
   cfg_node_t from_node;
-  routine_cfg_t from_routine;
-  routine_cfg_t to_routine;
+  routine_cfg_t *from_routine;
+  routine_cfg_t *to_routine;
 } cfg_routine_edge_t;
 
 typedef struct _cfg_t {
-  routine_cfg_t routines[1]; // *
-  cfg_routine_edge_t edges[1]; // *
+  uint routine_count;
+  uint edge_count;
+  routine_cfg_t *routines[64];
+  cfg_routine_edge_t edges[64];
 } cfg_t;
 
 routine_cfg_t *routine_cfg_new(uint unit_hash, uint function_hash);
 void routine_cfg_add_node(routine_cfg_t *cfg, zend_uchar opcode);
 void routine_cfg_add_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
+
+cfg_t *cfg_new();
+void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine);
+void cfg_add_routine_edge(cfg_t *cfg, cfg_node_t from_node, 
+                          routine_cfg_t *from_routine, routine_cfg_t *to_routine);
 
 #endif
