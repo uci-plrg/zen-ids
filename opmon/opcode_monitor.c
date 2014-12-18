@@ -17,15 +17,22 @@ typedef struct _execution_context_t {
 
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
+  const char *dataset_dir;
 ZEND_END_MODULE_GLOBALS(opcode_monitor)
 
 #ifdef ZTS
-# define ReSG(v) TSRMG(opcode_monitor_globals, zend_opcode_monitor_globals *, v)
+# define OPMON_G(v) TSRMG(opcode_monitor_globals, zend_opcode_monitor_globals *, v)
 #else
-# define ReSG(v) (opcode_monitor_globals.v)
+# define OPMON_G(v) (opcode_monitor_globals.v)
 #endif
 
 ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
+
+PHP_INI_BEGIN()
+  STD_PHP_INI_ENTRY("opmon_dataset_dir", ".", PHP_INI_PERDIR, OnUpdateString, 
+                    dataset_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
+PHP_INI_END()
+
 static PHP_GINIT_FUNCTION(opcode_monitor);
 
 static zend_function_entry php_opcode_monitor_functions[] = {
@@ -59,10 +66,25 @@ static zend_opcode_monitor_t monitor_functions;
 PHP_MINIT_FUNCTION(opcode_monitor)
 {
   PRINT("Initializing the opcode monitor\n");
+  
+  REGISTER_INI_ENTRIES();
+  
+  PRINT("INI example: dataset dir is %s\n", INI_STR("opmon_dataset_dir"));
+  PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
 
   init_event_handler(&monitor_functions);
   register_opcode_monitor(&monitor_functions);
   initialize_interp_context();
+}
+
+PHP_MSHUTDOWN_FUNCTION(opcode_monitor)
+{
+  UNREGISTER_INI_ENTRIES();
+}
+
+PHP_MINFO_FUNCTION(opcode_monitor)
+{
+  DISPLAY_INI_ENTRIES();
 }
 
 static PHP_GINIT_FUNCTION(opcode_monitor)
