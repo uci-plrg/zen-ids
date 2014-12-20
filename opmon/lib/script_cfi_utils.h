@@ -14,6 +14,24 @@
   if (!(b)) PRINT("Assert failure: %s\n", #b); \
 } while (0);
 
+typedef struct _execution_context_t {
+  //const zend_op *base_op;
+  uint foo;
+} execution_context_t;
+
+ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
+  execution_context_t execution_context;
+  const char *dataset_dir;
+ZEND_END_MODULE_GLOBALS(opcode_monitor)
+
+ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
+
+#ifdef ZTS
+# define OPMON_G(v) TSRMG(opcode_monitor_globals, zend_opcode_monitor_globals *, v)
+#else
+# define OPMON_G(v) (opcode_monitor_globals.v)
+#endif
+
 typedef unsigned long long uint64;
 typedef unsigned char bool;
 

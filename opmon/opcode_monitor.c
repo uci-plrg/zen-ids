@@ -10,24 +10,6 @@
 
 #define EC(f) opcode_monitor_globals.execution_context.f
 
-typedef struct _execution_context_t {
-  //const zend_op *base_op;
-  uint foo;
-} execution_context_t;
-
-ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
-  execution_context_t execution_context;
-  const char *dataset_dir;
-ZEND_END_MODULE_GLOBALS(opcode_monitor)
-
-#ifdef ZTS
-# define OPMON_G(v) TSRMG(opcode_monitor_globals, zend_opcode_monitor_globals *, v)
-#else
-# define OPMON_G(v) (opcode_monitor_globals.v)
-#endif
-
-ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
-
 PHP_INI_BEGIN()
   STD_PHP_INI_ENTRY("opmon_dataset_dir", ".", PHP_INI_PERDIR, OnUpdateString, 
                     dataset_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
@@ -45,7 +27,7 @@ zend_module_entry opcode_monitor_module_entry = {
   PHP_OPCODE_MONITOR_EXTNAME,    
   php_opcode_monitor_functions,
   PHP_MINIT(opcode_monitor),     /* module startup */
-  NULL,                          /* module shutdown */
+  PHP_MSHUTDOWN(opcode_monitor), /* module shutdown */
   NULL,                          /* request startup */
   NULL,                          /* request shutdown */
   NULL,                          /* info */
@@ -80,6 +62,8 @@ PHP_MINIT_FUNCTION(opcode_monitor)
 PHP_MSHUTDOWN_FUNCTION(opcode_monitor)
 {
   UNREGISTER_INI_ENTRIES();
+  
+  destroy_event_handler();
 }
 
 PHP_MINFO_FUNCTION(opcode_monitor)

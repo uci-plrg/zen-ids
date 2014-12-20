@@ -13,6 +13,7 @@ if test "$PHP_OPCODE_MONITOR" != "no"; then
                  interp_context.c \
                  compile_context.c \
                  cfg.c \
+                 cfg_handler.c \
                  lib/script_cfi_utils.c \
                  lib/script_cfi_hashtable.c"
   PHP_NEW_EXTENSION(opmon, $opmon_sources, $ext_shared)

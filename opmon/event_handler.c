@@ -1,6 +1,7 @@
 #include "php_opcode_monitor.h"
 #include "interp_context.h"
 #include "compile_context.h"
+#include "cfg_handler.h"
 #include "cfg.h"
 #include "lib/script_cfi_utils.h"
 #include "event_handler.h"
@@ -144,7 +145,9 @@ static void function_compiled()
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   init_compile_context();
+  init_cfg_handler();
   
+  monitor->set_top_level_script = starting_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_opcode_compile = opcode_compiling;
   monitor->notify_edge_compile = edge_compiling;
@@ -154,3 +157,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_function_compile_complete = function_compiled;
 }
 
+void destroy_event_handler()
+{
+  destroy_cfg_handler();
+}

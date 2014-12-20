@@ -2,6 +2,7 @@
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_hashtable.h"
 #include "cfg.h"
+#include "cfg_handler.h"
 #include "compile_context.h"
 
 #define EVAL_ID "|eval|"
@@ -179,6 +180,15 @@ void add_compiled_opcode(zend_uchar opcode)
   PRINT("[emit %s for {%s|%s, 0x%x|0x%x}]\n", zend_get_opcode_name(opcode),
         get_compilation_unit_path(), get_compilation_function_name(),
         get_compilation_unit_hash(), get_compilation_function_hash());
+  
+  write_node(current_unit->hash, current_function->hash, opcode);
+  
+  switch (opcode) {
+    case ZEND_JMP:
+      break;
+    default:
+      add_compiled_edge(current_function->cfg->opcode_count, current_function->cfg->opcode_count+1);
+  }
 }
 
 void add_compiled_edge(uint from_index, uint to_index)
@@ -188,4 +198,6 @@ void add_compiled_edge(uint from_index, uint to_index)
   PRINT("[emit %d->%d for {%s|%s, 0x%x|0x%x}]\n", from_index, to_index,
         get_compilation_unit_path(), get_compilation_function_name(),
         get_compilation_unit_hash(), get_compilation_function_hash());
+  
+  write_op_edge(current_unit->hash, current_function->hash, from_index, to_index);
 }

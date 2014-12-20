@@ -3,6 +3,8 @@
 
 #include "php.h"
 
+void init_compile_context();
+
 void push_compilation_unit(const char *path);
 routine_cfg_t *pop_compilation_unit();
 void push_compilation_function(const char *function_name);

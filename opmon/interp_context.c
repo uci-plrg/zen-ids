@@ -1,6 +1,7 @@
 #include "php.h"
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_utils.h"
+#include "cfg_handler.h"
 #include "interp_context.h"
 
 typedef struct _interp_context_t {
@@ -29,6 +30,8 @@ static interp_context_t last_context = { NULL, 0, NULL };
 static const cfg_node_t context_entry_node = { CONTEXT_ENTRY, 0xffffffff };
 static cfg_node_t last_node;
 
+extern cfg_files_t cfg_files;
+
 static uint get_last_branch_index()
 {
   return (shadow_frame - 1)->continuation_index - 1;
@@ -42,6 +45,9 @@ static void app_cfg_add_edge(routine_cfg_t *from_cfg, routine_cfg_t *to_cfg, cfg
   PRINT("[emit 0x%x|0x%x|%d -> 0x%x|0x%x]\n", from_cfg->unit_hash, 
         from_cfg->function_hash, from_node.index, 
         to_cfg->unit_hash, to_cfg->function_hash);
+  
+  write_routine_edge(from_cfg->unit_hash, from_cfg->function_hash, from_node.index, 
+                     to_cfg->unit_hash, to_cfg->function_hash, 0 /* durf */);
 }
 
 void initialize_interp_context()

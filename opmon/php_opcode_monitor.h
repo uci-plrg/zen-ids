@@ -11,5 +11,6 @@ extern zend_module_entry opcode_monitor_module_entry;
 
 PHP_FUNCTION(opcode_monitor_string);
 PHP_MINIT_FUNCTION(opcode_monitor);
+PHP_MSHUTDOWN_FUNCTION(opcode_monitor);
 
 #endif
