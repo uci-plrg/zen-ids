@@ -36,32 +36,62 @@ void starting_script(const char *script_path)
 {
   uint index = 0;
   const char *script_filename;
-  char *cfg_file_extension;
-  char cfg_file_path[256], cfg_file_basename[256] = {0};
+  char *cfg_file_truncate;
+  char cfg_file_path[256] = {0}, run_id[24] = {0};
+  time_t timestamp;
+  struct tm *calendar;
+  struct stat dirinfo;
+
+  time(&timestamp);
+  calendar = localtime(&timestamp);
   
-  strcat(cfg_file_basename, OPMON_G(dataset_dir));
-  index += strlen(cfg_file_basename);
+  strcat(cfg_file_path, OPMON_G(dataset_dir));
+  index += strlen(cfg_file_path);
   
   if (script_path[strlen(script_path)-1] != '/')
-    cfg_file_basename[index++] = '/';
+    cfg_file_path[index++] = '/';
+  
+  strcat(cfg_file_path, "runs/");
+  
+  if (stat(cfg_file_path, &dirinfo) != 0)
+    mkdir(cfg_file_path, 0700);
 
   script_filename = strrchr(script_path, '/');
   if (script_filename == NULL)
     script_filename = script_path;
   else
     script_filename++;
-  strcat(cfg_file_basename, script_filename);
+  strcat(cfg_file_path, script_filename);
+
+  // .../script.2.1.php -> .../script.2.1
+  cfg_file_truncate = strrchr(cfg_file_path, '.');
+  if (cfg_file_truncate != NULL)
+    *cfg_file_truncate = '\0';
   
-  cfg_file_extension = strrchr(cfg_file_basename, '.');
-  if (cfg_file_extension != NULL)
-    *cfg_file_extension = '\0';
+  if (stat(cfg_file_path, &dirinfo) != 0)
+    mkdir(cfg_file_path, 0700);
   
-  sprintf(cfg_file_path, "%s.%s.dat", cfg_file_basename, "node");
-  cfg_files.node = fopen(cfg_file_path, "w");
-  sprintf(cfg_file_path, "%s.%s.dat", cfg_file_basename, "op-edge");
-  cfg_files.op_edge = fopen(cfg_file_path, "w");
-  sprintf(cfg_file_path, "%s.%s.dat", cfg_file_basename, "routine-edge");
-  cfg_files.routine_edge = fopen(cfg_file_path, "w");
+  sprintf(run_id, "/%d.%d-%d.%d/", 
+          calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
+  strcat(cfg_file_path, run_id);
+
+  PRINT("mkdir %s", cfg_file_path);
+  mkdir(cfg_file_path, 0700);
+  
+  cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
+
+#define OPEN_CFG_FILE(filename, file_field) \
+  do { \
+    *cfg_file_truncate = '\0'; \
+    strcat(cfg_file_path, (filename)); \
+    cfg_files.file_field = fopen(cfg_file_path, "w"); \
+  } while (0);
+
+  OPEN_CFG_FILE("/node.dat", node);
+  OPEN_CFG_FILE("/op-edge.dat", op_edge);
+  OPEN_CFG_FILE("/routine-edge.dat", routine_edge);
+  
+#undef OPEN_CFG_FILE
 }
 
 void write_node(uint unit_hash, uint function_hash, zend_uchar opcode)
