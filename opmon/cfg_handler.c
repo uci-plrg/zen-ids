@@ -10,9 +10,9 @@ static inline void fnull(size_t size, FILE *file)
   fwrite(NULL_BUFFER, 1, size, file);
 }
 
-static inline void fopcode(zend_uchar op)
+static inline void fopcode(zend_uchar op, FILE *file)
 {
-  fwrite(&op, sizeof(zend_uchar), 1, cfg_files.node);
+  fwrite(&op, sizeof(zend_uchar), 1, file);
   fnull(3, cfg_files.node);
 }
 
@@ -87,9 +87,9 @@ void starting_script(const char *script_path)
     cfg_files.file_field = fopen(cfg_file_path, "w"); \
   } while (0);
 
-  OPEN_CFG_FILE("/node.dat", node);
-  OPEN_CFG_FILE("/op-edge.dat", op_edge);
-  OPEN_CFG_FILE("/routine-edge.dat", routine_edge);
+  OPEN_CFG_FILE("/node.run", node);
+  OPEN_CFG_FILE("/op-edge.run", op_edge);
+  OPEN_CFG_FILE("/routine-edge.run", routine_edge);
   
 #undef OPEN_CFG_FILE
 }
@@ -99,7 +99,7 @@ void write_node(uint unit_hash, uint function_hash, zend_uchar opcode)
   PRINT("Write node 0x%x 0x%x | 0x%01x to cfg\n", unit_hash, function_hash, opcode);
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.node);
   fwrite(&function_hash, sizeof(uint), 1, cfg_files.node);
-  fopcode(opcode);
+  fopcode(opcode, cfg_files.node);
   fnull(sizeof(uint), cfg_files.node);
 }
 
