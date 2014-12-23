@@ -94,13 +94,13 @@ void starting_script(const char *script_path)
 #undef OPEN_CFG_FILE
 }
 
-void write_node(uint unit_hash, uint function_hash, zend_uchar opcode)
+void write_node(uint unit_hash, uint function_hash, zend_uchar opcode, uint index)
 {
   PRINT("Write node 0x%x 0x%x | 0x%01x to cfg\n", unit_hash, function_hash, opcode);
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.node);
   fwrite(&function_hash, sizeof(uint), 1, cfg_files.node);
   fopcode(opcode, cfg_files.node);
-  fnull(sizeof(uint), cfg_files.node);
+  fwrite(&index, sizeof(uint), 1, cfg_files.node);
 }
 
 void write_op_edge(uint unit_hash, uint function_hash, uint from_index, uint to_index)

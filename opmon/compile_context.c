@@ -175,13 +175,14 @@ routine_cfg_t *get_cfg(const char *function_name)
 
 void add_compiled_opcode(zend_uchar opcode)
 {
+  uint index = current_function->cfg->opcode_count;
   routine_cfg_add_node(current_function->cfg, opcode);
   
   PRINT("[emit %s for {%s|%s, 0x%x|0x%x}]\n", zend_get_opcode_name(opcode),
         get_compilation_unit_path(), get_compilation_function_name(),
         get_compilation_unit_hash(), get_compilation_function_hash());
   
-  write_node(current_unit->hash, current_function->hash, opcode);
+  write_node(current_unit->hash, current_function->hash, opcode, index);
   
   switch (opcode) {
     case ZEND_JMP:
