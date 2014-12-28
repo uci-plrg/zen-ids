@@ -48,7 +48,7 @@ void starting_script(const char *script_path)
   strcat(cfg_file_path, OPMON_G(dataset_dir));
   index += strlen(cfg_file_path);
   
-  if (script_path[strlen(script_path)-1] != '/')
+  if (cfg_file_path[strlen(cfg_file_path)-1] != '/')
     cfg_file_path[index++] = '/';
   
   strcat(cfg_file_path, "runs/");

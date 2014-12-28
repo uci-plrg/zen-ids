@@ -12,25 +12,28 @@ The best event hook seems to be zend_vm_execute.h:execute_ex().
 
 -------------
 
+*First thing: the initial build requires to remove the php extension "opcode_monitor" from Zend/Zend.m4 (at the end). After building, check out the file again to restore the opcode monitor integration. 
+
 To build php, go to the top-level php directory and:
 
 1. ./buildconf
 2. ./current-config # it does this:
       ./configure
-        --prefix=/stash/script-safe/php
+        --prefix=$PHP_HOME
         --enable-zend-monitor
-        --with-config-file-path=/stash/script-safe/php/conf.d
-        --with-config-file-scan-dir=/stash/script-safe/php/conf.d/ext
+        --with-config-file-path=$PHP_HOME/conf.d
+        --with-config-file-scan-dir=$PHP_HOME/conf.d/ext
 3. make -j3
 4. make install
 
 Seems to require bison 2.7, which is not available on 14.04. This
-nonsense corrects it:
+nonsense is corrected by fix-bison (run him as root!):
 
 wget http://launchpadlibrarian.net/140087283/libbison-dev_2.7.1.dfsg-1_amd64.deb
 wget http://launchpadlibrarian.net/140087282/bison_2.7.1.dfsg-1_amd64.deb
 dpkg -i libbison-dev_2.7.1.dfsg-1_amd64.deb
 dpkg -i bison_2.7.1.dfsg-1_amd64.deb
+
 
 --------------
 
@@ -55,8 +58,8 @@ does this:
   > ./current-config # it does this:
        configure 
          --enable-opcode-monitor 
-         --prefix=/stash/script-safe/php
-         --with-php-config=/stash/script-safe/php/bin/php-config
+         --prefix=$PHP_HOME
+         --with-php-config=$PHP_HOME/bin/php-config
   > make -j3
 
 -----------------

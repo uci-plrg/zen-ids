@@ -2,6 +2,6 @@
 
 ./configure \
     --enable-opcode-monitor \
-    --prefix=/stash/script-safe/php \
-    --with-php-config=/stash/script-safe/php/bin/php-config
+    --prefix=$PHP_HOME \
+    --with-php-config=$PHP_HOME/bin/php-config
 
