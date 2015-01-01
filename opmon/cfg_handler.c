@@ -1,8 +1,17 @@
 #include "php.h"
+
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include "lib/script_cfi_utils.h"
 #include "cfg_handler.h"
 
 static cfg_files_t cfg_files;
+
+static size_t dataset_size;
+static void *dataset;
 
 static inline void fnull(size_t size, FILE *file)
 {
@@ -30,43 +39,54 @@ void destroy_cfg_handler()
     fclose(cfg_files.op_edge);
     fclose(cfg_files.routine_edge);
   }
+  
+  if (dataset != NULL)
+    munmap(dataset, dataset_size);
 }
 
-void starting_script(const char *script_path)
+static void setup_base_path(char *path, const char *category, const char *script_path)
 {
-  uint index = 0;
+  char *path_truncate;
   const char *script_filename;
-  char *cfg_file_truncate;
-  char cfg_file_path[256] = {0}, run_id[24] = {0};
-  time_t timestamp;
-  struct tm *calendar;
   struct stat dirinfo;
-
-  time(&timestamp);
-  calendar = localtime(&timestamp);
   
-  strcat(cfg_file_path, OPMON_G(dataset_dir));
-  index += strlen(cfg_file_path);
+  strcat(path, OPMON_G(dataset_dir));
   
-  if (cfg_file_path[strlen(cfg_file_path)-1] != '/')
-    cfg_file_path[index++] = '/';
+  uint len = strlen(path);
+  if (path[len-1] != '/')
+    path[len] = '/';
   
-  strcat(cfg_file_path, "runs/");
+  strcat(path, category);
+  strcat(path, "/");
   
-  if (stat(cfg_file_path, &dirinfo) != 0)
-    mkdir(cfg_file_path, 0700);
+  if (stat(path, &dirinfo) != 0)
+    mkdir(path, 0700);
 
   script_filename = strrchr(script_path, '/');
   if (script_filename == NULL)
     script_filename = script_path;
   else
     script_filename++;
-  strcat(cfg_file_path, script_filename);
+  strcat(path, script_filename);
 
   // .../script.2.1.php -> .../script.2.1
-  cfg_file_truncate = strrchr(cfg_file_path, '.');
-  if (cfg_file_truncate != NULL)
-    *cfg_file_truncate = '\0';
+  path_truncate = strrchr(path, '.');
+  if (path_truncate != NULL)
+    *path_truncate = '\0';
+}
+
+static void open_output_files(const char *script_path)
+{
+  char cfg_file_path[256] = {0}, run_id[24] = {0};
+  char *cfg_file_truncate;
+  struct stat dirinfo;
+  time_t timestamp;
+  struct tm *calendar;
+
+  time(&timestamp);
+  calendar = localtime(&timestamp);
+
+  setup_base_path(cfg_file_path, "runs", script_path);
   
   if (stat(cfg_file_path, &dirinfo) != 0)
     mkdir(cfg_file_path, 0700);
@@ -75,7 +95,6 @@ void starting_script(const char *script_path)
           calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
   strcat(cfg_file_path, run_id);
 
-  PRINT("mkdir %s", cfg_file_path);
   mkdir(cfg_file_path, 0700);
   
   cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
@@ -92,6 +111,39 @@ void starting_script(const char *script_path)
   OPEN_CFG_FILE("/routine-edge.run", routine_edge);
   
 #undef OPEN_CFG_FILE
+}
+
+void load_dataset(const char *script_path)
+{
+  char dataset_path[256] = {0};
+  struct stat fileinfo;
+  int dataset_file;
+  
+  setup_base_path(dataset_path, "sets", script_path);
+  strcat(dataset_path, ".set");
+  
+  if (stat(dataset_path, &fileinfo) != 0) {
+    PRINT("Failed to obtain file info for path %s. Skipping dataset operations.\n", dataset_path);
+    dataset = NULL;
+    return;
+  }
+  dataset_size = fileinfo.st_size;
+  
+  dataset_file = open(dataset_path, O_RDONLY);
+  if (dataset_file == -1) {
+    PRINT("Failed to open the dataset at path %s. Skipping dataset operations.\n", dataset_path);
+    dataset = NULL;
+    return;
+  }
+  
+  dataset = mmap(NULL, dataset_size, PROT_READ, MAP_SHARED, dataset_file, 0);
+  PRINT("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
+}
+
+void starting_script(const char *script_path)
+{
+  open_output_files(script_path);
+  load_dataset(script_path);
 }
 
 void write_node(uint unit_hash, uint function_hash, zend_uchar opcode, uint index)

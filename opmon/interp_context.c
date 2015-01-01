@@ -23,7 +23,6 @@ static shadow_frame_t *shadow_frame;
 static shadow_frame_t *last_pop;
 
 static interp_context_t current_context = { "<root>", 0, NULL };
-//static interp_context_t staged_context = { NULL, 0, NULL };
 static interp_context_t last_context = { NULL, 0, NULL };
 
 #define CONTEXT_ENTRY 0xff
@@ -61,8 +60,6 @@ void initialize_interp_context()
 
 void push_interp_context(zend_op* op, uint branch_index, routine_cfg_t *cfg)
 {
-  //ASSERT(staged_context.name != NULL);
-  
   if (cfg != NULL && current_context.cfg != NULL) {
     cfg_node_t from_node = { current_context.cfg->opcodes[branch_index], branch_index };
     app_cfg_add_edge(current_context.cfg, cfg, from_node);
@@ -75,10 +72,8 @@ void push_interp_context(zend_op* op, uint branch_index, routine_cfg_t *cfg)
   shadow_frame->context = current_context;
   
   shadow_frame++;
-  //current_context = staged_context;
   last_context = current_context;
   current_context.cfg = cfg;
-  //staged_context.name = NULL;
   
   last_node = context_entry_node;
 }
