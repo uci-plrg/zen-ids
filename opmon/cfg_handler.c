@@ -1,6 +1,5 @@
 #include "php.h"
 
-#include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -9,9 +8,6 @@
 #include "cfg_handler.h"
 
 static cfg_files_t cfg_files;
-
-static size_t dataset_size;
-static void *dataset;
 
 static inline void fnull(size_t size, FILE *file)
 {
@@ -39,40 +35,6 @@ void destroy_cfg_handler()
     fclose(cfg_files.op_edge);
     fclose(cfg_files.routine_edge);
   }
-  
-  if (dataset != NULL)
-    munmap(dataset, dataset_size);
-}
-
-static void setup_base_path(char *path, const char *category, const char *script_path)
-{
-  char *path_truncate;
-  const char *script_filename;
-  struct stat dirinfo;
-  
-  strcat(path, OPMON_G(dataset_dir));
-  
-  uint len = strlen(path);
-  if (path[len-1] != '/')
-    path[len] = '/';
-  
-  strcat(path, category);
-  strcat(path, "/");
-  
-  if (stat(path, &dirinfo) != 0)
-    mkdir(path, 0700);
-
-  script_filename = strrchr(script_path, '/');
-  if (script_filename == NULL)
-    script_filename = script_path;
-  else
-    script_filename++;
-  strcat(path, script_filename);
-
-  // .../script.2.1.php -> .../script.2.1
-  path_truncate = strrchr(path, '.');
-  if (path_truncate != NULL)
-    *path_truncate = '\0';
 }
 
 static void open_output_files(const char *script_path)
@@ -111,33 +73,6 @@ static void open_output_files(const char *script_path)
   OPEN_CFG_FILE("/routine-edge.run", routine_edge);
   
 #undef OPEN_CFG_FILE
-}
-
-void load_dataset(const char *script_path)
-{
-  char dataset_path[256] = {0};
-  struct stat fileinfo;
-  int dataset_file;
-  
-  setup_base_path(dataset_path, "sets", script_path);
-  strcat(dataset_path, ".set");
-  
-  if (stat(dataset_path, &fileinfo) != 0) {
-    PRINT("Failed to obtain file info for path %s. Skipping dataset operations.\n", dataset_path);
-    dataset = NULL;
-    return;
-  }
-  dataset_size = fileinfo.st_size;
-  
-  dataset_file = open(dataset_path, O_RDONLY);
-  if (dataset_file == -1) {
-    PRINT("Failed to open the dataset at path %s. Skipping dataset operations.\n", dataset_path);
-    dataset = NULL;
-    return;
-  }
-  
-  dataset = mmap(NULL, dataset_size, PROT_READ, MAP_SHARED, dataset_file, 0);
-  PRINT("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
 }
 
 void starting_script(const char *script_path)

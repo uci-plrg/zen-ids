@@ -34,7 +34,10 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 
 typedef unsigned long long uint64;
 typedef unsigned char bool;
+typedef char byte;
+typedef uint64 uint_ptr_t;
 
 uint hash_string(const char *string);
+void setup_base_path(char *path, const char *category, const char *script_path);
 
 #endif

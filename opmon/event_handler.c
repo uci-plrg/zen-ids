@@ -146,6 +146,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   init_compile_context();
   init_cfg_handler();
+  init_dataset_handler();
   
   monitor->set_top_level_script = starting_script;
   monitor->notify_opcode_interp = opcode_executing;
@@ -160,4 +161,5 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 void destroy_event_handler()
 {
   destroy_cfg_handler();
+  destroy_dataset_handler();
 }

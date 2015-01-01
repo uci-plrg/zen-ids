@@ -1,5 +1,6 @@
-
 #include "php.h"
+
+#include "script_cfi_utils.h"
 
 uint hash_string(const char *string)
 {
@@ -23,3 +24,35 @@ uint hash_string(const char *string)
   
   return hash;
 }
+
+void setup_base_path(char *path, const char *category, const char *script_path)
+{
+  char *path_truncate;
+  const char *script_filename;
+  struct stat dirinfo;
+  
+  strcat(path, OPMON_G(dataset_dir));
+  
+  uint len = strlen(path);
+  if (path[len-1] != '/')
+    path[len] = '/';
+  
+  strcat(path, category);
+  strcat(path, "/");
+  
+  if (stat(path, &dirinfo) != 0)
+    mkdir(path, 0700);
+
+  script_filename = strrchr(script_path, '/');
+  if (script_filename == NULL)
+    script_filename = script_path;
+  else
+    script_filename++;
+  strcat(path, script_filename);
+
+  // .../script.2.1.php -> .../script.2.1
+  path_truncate = strrchr(path, '.');
+  if (path_truncate != NULL)
+    *path_truncate = '\0';
+}
+
