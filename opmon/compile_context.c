@@ -12,15 +12,15 @@ typedef struct _compilation_unit_t {
   uint hash;
 } compilation_unit_t;
 
-typedef struct _compilation_function_t {
+typedef struct _compilation_routine_t {
   const char *name;
   uint hash;
   routine_cfg_t *cfg;
-} compilation_function_t;
+} compilation_routine_t;
 
 typedef struct _function_fqn_t {
   compilation_unit_t unit;
-  compilation_function_t function;
+  compilation_routine_t function;
 } function_fqn_t;
 
 static compilation_unit_t unit_stack[256];
@@ -28,12 +28,12 @@ static compilation_unit_t *unit_frame;
 static compilation_unit_t *current_unit;
 static compilation_unit_t *live_unit;
 
-static compilation_function_t function_stack[256];
-static compilation_function_t *function_frame;
-static compilation_function_t *current_function;
-static compilation_function_t no_function = { "<none>", 0 };
+static compilation_routine_t routine_stack[256];
+static compilation_routine_t *routine_frame;
+static compilation_routine_t *current_routine;
+static compilation_routine_t no_routine = { "<none>", 0 };
 
-static sctable_t function_table;
+static sctable_t routine_table;
 
 void init_compile_context()
 {
@@ -41,13 +41,13 @@ void init_compile_context()
   unit_frame->path = NULL;
   current_unit = NULL;
   
-  function_frame = function_stack;
-  function_frame->name = NULL;
-  function_frame->cfg = NULL;
-  current_function = &no_function;
+  routine_frame = routine_stack;
+  routine_frame->name = NULL;
+  routine_frame->cfg = NULL;
+  current_routine = &no_routine;
   
-  function_table.hash_bits = 7;
-  sctable_init(&function_table);
+  routine_table.hash_bits = 7;
+  sctable_init(&routine_table);
 }
 
 void push_compilation_unit(const char *path)
@@ -61,16 +61,16 @@ void push_compilation_unit(const char *path)
   current_unit = unit_frame;
   unit_frame++;
   
-  function_frame->name = "<none>";
-  function_frame->hash = 0;
-  function_frame->cfg = routine_cfg_new(current_unit->hash, function_frame->hash);
-  current_function = function_frame;
-  function_frame++;
+  routine_frame->name = "<none>";
+  routine_frame->hash = 0;
+  routine_frame->cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
+  current_routine = routine_frame;
+  routine_frame++;
 }
 
 routine_cfg_t *pop_compilation_unit()
 {
-  routine_cfg_t *cfg = current_function->cfg;
+  routine_cfg_t *cfg = current_routine->cfg;
   
   PRINT("> Pop compilation unit\n");
   
@@ -99,40 +99,40 @@ void push_compilation_function(const char *function_name)
   
   PRINT("> Push compilation function %s\n", function_name);
   
-  function_frame->name = function_name;
-  function_frame->hash = hash_string(function_name);
-  function_frame->cfg = routine_cfg_new(current_unit->hash, function_frame->hash);
-  current_function = function_frame;
-  function_frame++;
+  routine_frame->name = function_name;
+  routine_frame->hash = hash_string(function_name);
+  routine_frame->cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
+  current_routine = routine_frame;
+  routine_frame++;
   
   fqn = malloc(sizeof(function_fqn_t));
   fqn->unit = *current_unit;
   buffer = malloc(strlen(current_unit->path) + 1);
   strcpy(buffer, current_unit->path);
   fqn->unit.path = buffer;
-  fqn->function = *current_function;
-  buffer = malloc(strlen(current_function->name) + 1);
-  strcpy(buffer, current_function->name);
+  fqn->function = *current_routine;
+  buffer = malloc(strlen(current_routine->name) + 1);
+  strcpy(buffer, current_routine->name);
   fqn->function.name = buffer;
-  sctable_add(&function_table, current_function->hash, fqn);
+  sctable_add(&routine_table, current_routine->hash, fqn);
 }
 
 void pop_compilation_function()
 {
   PRINT("> Pop compilation function\n");
   
-  function_frame--;
-  current_function = function_frame - 1;
+  routine_frame--;
+  current_routine = routine_frame - 1;
 }
 
 const char *get_compilation_function_name() 
 {
-  return current_function->name;
+  return current_routine->name;
 }
 
-uint get_compilation_function_hash()
+uint get_compilation_routine_hash()
 {
-  return current_function->hash;
+  return current_routine->hash;
 }
 
 void push_eval(uint eval_id)
@@ -144,18 +144,18 @@ void push_eval(uint eval_id)
   current_unit = unit_frame;
   unit_frame++;
   
-  function_frame->name = EVAL_FUNCTION_NAME;
-  function_frame->hash = eval_id;
-  function_frame->cfg = routine_cfg_new(current_unit->hash, function_frame->hash);
-  current_function = function_frame;
-  function_frame++;
+  routine_frame->name = EVAL_FUNCTION_NAME;
+  routine_frame->hash = eval_id;
+  routine_frame->cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
+  current_routine = routine_frame;
+  routine_frame++;
 }
 
 const char *get_function_declaration_path(const char *function_name)
 {
   function_fqn_t *fqn;
 
-  fqn = (function_fqn_t *) sctable_lookup(&function_table, hash_string(function_name));
+  fqn = (function_fqn_t *) sctable_lookup(&routine_table, hash_string(function_name));
   if (fqn == NULL)
     return "unknown";
   else
@@ -166,7 +166,7 @@ routine_cfg_t *get_cfg(const char *function_name)
 {
   function_fqn_t *fqn;
 
-  fqn = (function_fqn_t *) sctable_lookup(&function_table, hash_string(function_name));
+  fqn = (function_fqn_t *) sctable_lookup(&routine_table, hash_string(function_name));
   if (fqn == NULL)
     return NULL;
   else
@@ -175,30 +175,30 @@ routine_cfg_t *get_cfg(const char *function_name)
 
 void add_compiled_opcode(zend_uchar opcode)
 {
-  uint index = current_function->cfg->opcode_count;
-  routine_cfg_add_node(current_function->cfg, opcode);
+  uint index = current_routine->cfg->opcode_count;
+  routine_cfg_add_node(current_routine->cfg, opcode);
   
   PRINT("[emit %s for {%s|%s, 0x%x|0x%x}]\n", zend_get_opcode_name(opcode),
         get_compilation_unit_path(), get_compilation_function_name(),
-        get_compilation_unit_hash(), get_compilation_function_hash());
+        get_compilation_unit_hash(), get_compilation_routine_hash());
   
-  write_node(current_unit->hash, current_function->hash, opcode, index);
+  write_node(current_unit->hash, current_routine->hash, opcode, index);
   
   switch (opcode) {
     case ZEND_JMP:
       break;
     default:
-      add_compiled_edge(current_function->cfg->opcode_count, current_function->cfg->opcode_count+1);
+      add_compiled_edge(current_routine->cfg->opcode_count, current_routine->cfg->opcode_count+1);
   }
 }
 
 void add_compiled_edge(uint from_index, uint to_index)
 {
-  routine_cfg_add_edge(current_function->cfg, from_index, to_index);
+  routine_cfg_add_edge(current_routine->cfg, from_index, to_index);
   
   PRINT("[emit %d->%d for {%s|%s, 0x%x|0x%x}]\n", from_index, to_index,
         get_compilation_unit_path(), get_compilation_function_name(),
-        get_compilation_unit_hash(), get_compilation_function_hash());
+        get_compilation_unit_hash(), get_compilation_routine_hash());
   
-  write_op_edge(current_unit->hash, current_function->hash, from_index, to_index);
+  write_op_edge(current_unit->hash, current_routine->hash, from_index, to_index);
 }

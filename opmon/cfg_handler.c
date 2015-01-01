@@ -81,36 +81,36 @@ void starting_script(const char *script_path)
   load_dataset(script_path);
 }
 
-void write_node(uint unit_hash, uint function_hash, zend_uchar opcode, uint index)
+void write_node(uint unit_hash, uint routine_hash, zend_uchar opcode, uint index)
 {
-  PRINT("Write node 0x%x 0x%x | 0x%01x to cfg\n", unit_hash, function_hash, opcode);
+  PRINT("Write node 0x%x 0x%x | 0x%01x to cfg\n", unit_hash, routine_hash, opcode);
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.node);
-  fwrite(&function_hash, sizeof(uint), 1, cfg_files.node);
+  fwrite(&routine_hash, sizeof(uint), 1, cfg_files.node);
   fopcode(opcode, cfg_files.node);
   fwrite(&index, sizeof(uint), 1, cfg_files.node);
 }
 
-void write_op_edge(uint unit_hash, uint function_hash, uint from_index, uint to_index)
+void write_op_edge(uint unit_hash, uint routine_hash, uint from_index, uint to_index)
 {
-  PRINT("Write op-edge 0x%x 0x%x | 0x%x -> 0x%x to cfg\n", unit_hash, function_hash, from_index, to_index);
+  PRINT("Write op-edge 0x%x 0x%x | 0x%x -> 0x%x to cfg\n", unit_hash, routine_hash, from_index, to_index);
   
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.op_edge);
-  fwrite(&function_hash, sizeof(uint), 1, cfg_files.op_edge);
+  fwrite(&routine_hash, sizeof(uint), 1, cfg_files.op_edge);
   fwrite(&from_index, sizeof(uint), 1, cfg_files.op_edge);
   fwrite(&to_index, sizeof(uint), 1, cfg_files.op_edge);
 }
 
-void write_routine_edge(uint from_unit_hash, uint from_function_hash, uint from_index, 
-                        uint to_unit_hash, uint to_function_hash, uint to_index)
+void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_index, 
+                        uint to_unit_hash, uint to_routine_hash, uint to_index)
 {
   PRINT("Write routine-edge {0x%x 0x%x 0x%x} -> {0x%x 0x%x 0x%x} to cfg\n", 
-        from_unit_hash, from_function_hash, from_index, 
-        to_unit_hash, to_function_hash, to_index);
+        from_unit_hash, from_routine_hash, from_index, 
+        to_unit_hash, to_routine_hash, to_index);
   
   fwrite(&from_unit_hash, sizeof(uint), 1, cfg_files.routine_edge);
-  fwrite(&from_function_hash, sizeof(uint), 1, cfg_files.routine_edge);
+  fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&from_index, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&to_unit_hash, sizeof(uint), 1, cfg_files.routine_edge);
-  fwrite(&to_function_hash, sizeof(uint), 1, cfg_files.routine_edge);
+  fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&to_index, sizeof(uint), 1, cfg_files.routine_edge);
 }

@@ -1,10 +1,10 @@
 #include "cfg.h"
 
-routine_cfg_t *routine_cfg_new(uint unit_hash, uint function_hash)
+routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash)
 {
   routine_cfg_t *cfg = malloc(sizeof(routine_cfg_t));
   cfg->unit_hash = unit_hash;
-  cfg->function_hash = function_hash;
+  cfg->routine_hash = routine_hash;
   cfg->opcode_count = cfg->edge_count = 0;
   return cfg;
 }

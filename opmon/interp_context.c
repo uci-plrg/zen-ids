@@ -42,11 +42,11 @@ static void app_cfg_add_edge(routine_cfg_t *from_cfg, routine_cfg_t *to_cfg, cfg
   cfg_add_routine_edge(app_cfg, from_node, from_cfg, to_cfg);
   
   PRINT("[emit 0x%x|0x%x|%d -> 0x%x|0x%x]\n", from_cfg->unit_hash, 
-        from_cfg->function_hash, from_node.index, 
-        to_cfg->unit_hash, to_cfg->function_hash);
+        from_cfg->routine_hash, from_node.index, 
+        to_cfg->unit_hash, to_cfg->routine_hash);
   
-  write_routine_edge(from_cfg->unit_hash, from_cfg->function_hash, from_node.index, 
-                     to_cfg->unit_hash, to_cfg->function_hash, 0 /* durf */);
+  write_routine_edge(from_cfg->unit_hash, from_cfg->routine_hash, from_node.index, 
+                     to_cfg->unit_hash, to_cfg->routine_hash, 0 /* durf */);
 }
 
 void initialize_interp_context()
@@ -64,7 +64,7 @@ void push_interp_context(zend_op* op, uint branch_index, routine_cfg_t *cfg)
     cfg_node_t from_node = { current_context.cfg->opcodes[branch_index], branch_index };
     app_cfg_add_edge(current_context.cfg, cfg, from_node);
     
-    PRINT("# Push interp context 0x%x|0x%x\n", cfg->unit_hash, cfg->function_hash);
+    PRINT("# Push interp context 0x%x|0x%x\n", cfg->unit_hash, cfg->routine_hash);
   }
   
   shadow_frame->op = op;
@@ -82,7 +82,7 @@ void set_interp_cfg(routine_cfg_t *cfg)
 {
   uint branch_index = get_last_branch_index();
   
-  PRINT("# Push interp context 0x%x|0x%x\n", cfg->unit_hash, cfg->function_hash);
+  PRINT("# Push interp context 0x%x|0x%x\n", cfg->unit_hash, cfg->routine_hash);
   
   if (last_context.cfg != NULL) {
     cfg_node_t from_node = { last_context.cfg->opcodes[branch_index], branch_index };
@@ -104,7 +104,7 @@ void pop_interp_context()
     PRINT("# Pop interp context to null\n");
   } else {
     PRINT("# Pop interp context to 0x%x|0x%x\n", 
-          current_context.cfg->unit_hash, current_context.cfg->function_hash);
+          current_context.cfg->unit_hash, current_context.cfg->routine_hash);
   }
   
   last_node = context_entry_node;
@@ -146,7 +146,7 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
       default:
         if (node.opcode != current_context.cfg->opcodes[node.index]) {
           PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
-                zend_get_opcode_name(current_context.cfg->opcodes[node.index]), index,
+                zend_get_opcode_name(current_context.cfg->opcodes[node.index]), node.index,
                 zend_get_opcode_name(node.opcode));
         }
     }
@@ -163,10 +163,10 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
   }
   if (verify_frame->continuation_index != node.index) {
     PRINT("Error! Returned to index %d but expected index %d!\n",
-          index, verify_frame->continuation_index);
+          node.index, verify_frame->continuation_index);
     return;
   }
   
-  PRINT("Verified return from %s to %s.%d\n", (uint64) last_context.name, 
+  PRINT("Verified return from %s to %s.%d\n", last_context.name, 
         current_context.name, node.index);
 }
