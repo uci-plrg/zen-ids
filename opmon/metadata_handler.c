@@ -7,16 +7,16 @@
 
 #include "lib/script_cfi_utils.h"
 #include "dataset.h"
-#include "dataset_handler.h"
+#include "metadata_handler.h"
 
 static size_t dataset_size;
 static void *dataset;
 
-void init_dataset_handler()
+void init_metadata_handler()
 {
 }
 
-void destroy_dataset_handler()
+void destroy_metadata_handler()
 {
   if (dataset != NULL)
     munmap(dataset, dataset_size);

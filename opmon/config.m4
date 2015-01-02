@@ -13,7 +13,7 @@ if test "$PHP_OPCODE_MONITOR" != "no"; then
                  interp_context.c \
                  compile_context.c \
                  dataset.c \
-                 dataset_handler.c \
+                 metadata_handler.c \
                  cfg.c \
                  cfg_handler.c \
                  lib/script_cfi_utils.c \
