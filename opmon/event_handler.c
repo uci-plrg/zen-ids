@@ -9,7 +9,7 @@
 // todo: thread safety?
 static uint eval_id = 0;
 
-static routine_cfg_t *pending_cfg = NULL;
+static control_flow_metadata_t *pending_cfm = NULL;
 
 static void opcode_executing(const zend_op *op)
 {
@@ -71,16 +71,16 @@ static void opcode_executing(const zend_op *op)
       }
       */
     }
-    push_interp_context(current_opcodes, node.index, NULL);
+    push_interp_context(current_opcodes, node.index, null_cfm);
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
-    pending_cfg = get_cfg(op->op2.zv->value.str->val);
+    pending_cfm = get_cfm(op->op2.zv->value.str->val);
     const char *source_path = get_function_declaration_path(op->op2.zv->value.str->val);
     PRINT("  === init call to function %s|%s\n", source_path, op->op2.zv->value.str->val);
     // lookup FQN (file_path|function_name) by function name
     //set_staged_interp_context(hash_string(op->op2.zv->value.str->val)); 
     // can't see this in ZEND_DO_FCALL... need to pend the context
   } else if (op->opcode == ZEND_DO_FCALL) {
-    push_interp_context(current_opcodes, node.index, pending_cfg);
+    push_interp_context(current_opcodes, node.index, *pending_cfm);
   } else if (op->opcode == ZEND_RETURN) {
     PRINT("  === return\n");
     pop_interp_context();
@@ -128,7 +128,7 @@ static void file_compiling(const char *path)
 
 static void file_compiled()
 {
-  control_flow_metadata_t *compiled_cfm = pop_compilation_unit();
+  control_flow_metadata_t compiled_cfm = pop_compilation_unit();
   set_interp_cfm(compiled_cfm);
 }
 

@@ -74,9 +74,9 @@ void push_compilation_unit(const char *path)
   routine_frame++;
 }
 
-control_flow_metadata_t *pop_compilation_unit()
+control_flow_metadata_t pop_compilation_unit()
 {
-  control_flow_metadata_t *cfm = &current_routine->cfm;
+  control_flow_metadata_t cfm = current_routine->cfm;
   
   PRINT("> Pop compilation unit\n");
   

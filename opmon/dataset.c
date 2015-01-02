@@ -12,7 +12,7 @@ typedef struct _dataset_call_target_t {
 
 typedef struct _dataset_call_targets_t {
   uint target_count;
-  dataset_call_target_t *targets;
+  dataset_call_target_t targets[1];
 } dataset_call_targets_t;
 
 typedef struct _dataset_node_t {
@@ -95,4 +95,18 @@ void dataset_routine_verify_opcode(dataset_routine_t *dataset, uint index,
     PRINT("<MON> Opcode mismatch at index %d: expected %d but found %d\n", index, 
           node->opcode, opcode);
   }
+}
+
+bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index, 
+                                 uint to_unit_hash, uint to_routine_hash)
+{
+  uint i;
+  dataset_node_t *node = &dataset->nodes[from_index];
+  dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
+  
+  for (i = 0; i < targets->target_count; i++) {
+    if (targets->targets[i].unit_hash == to_unit_hash && targets->targets[i].routine_hash == to_routine_hash)
+      return true;
+  }
+  return false;
 }

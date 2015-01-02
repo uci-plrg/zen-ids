@@ -8,7 +8,7 @@
 typedef struct _interp_context_t {
   const char *name;
   uint id;
-  control_flow_metadata_t *cfm;
+  control_flow_metadata_t cfm;
 } interp_context_t;
 
 typedef struct _shadow_frame_t {
@@ -39,16 +39,29 @@ static uint get_last_branch_index()
 
 static void app_cfg_add_edge(control_flow_metadata_t *from_cfm, routine_cfg_t *to_cfg, cfg_node_t from_node)
 {
+  bool write_edge = true;
   cfg_add_routine(app_cfg, to_cfg);
   cfg_add_routine_edge(app_cfg, from_node, from_cfm->cfg, to_cfg);
   
-  PRINT("[emit 0x%x|0x%x|%d -> 0x%x|0x%x]\n", from_cfm->cfg->unit_hash, 
-        from_cfm->cfg->routine_hash, from_node.index, 
-        to_cfg->unit_hash, to_cfg->routine_hash);
+  if (from_cfm->dataset != NULL) {
+    if (dataset_verify_routine_edge(from_cfm->dataset, from_node.index, 
+                                    to_cfg->unit_hash, to_cfg->routine_hash)) {
+      write_edge = false;
+      PRINT("<MON> Verified routine edge [0x%x|0x%x|%d -> 0x%x|0x%x]\n", 
+            from_cfm->cfg->unit_hash,
+            from_cfm->cfg->routine_hash, from_node.index, 
+            to_cfg->unit_hash, to_cfg->routine_hash);
+    }
+  }
   
-  // todo: only if it doesn't exist in the dataset
-  write_routine_edge(from_cfm->cfg->unit_hash, from_cfm->cfg->routine_hash, from_node.index, 
-                     to_cfg->unit_hash, to_cfg->routine_hash, 0 /* durf */);
+  if (write_edge) {
+    PRINT("<MON> New routine edge [0x%x|0x%x|%d -> 0x%x|0x%x]\n", 
+          from_cfm->cfg->unit_hash, 
+          from_cfm->cfg->routine_hash, from_node.index, 
+          to_cfg->unit_hash, to_cfg->routine_hash);
+    write_routine_edge(from_cfm->cfg->unit_hash, from_cfm->cfg->routine_hash, from_node.index, 
+                       to_cfg->unit_hash, to_cfg->routine_hash, 0 /* durf */);
+  }
 }
 
 void initialize_interp_context()
@@ -60,13 +73,14 @@ void initialize_interp_context()
   last_node = context_entry_node;
 }
 
-void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t *cfm)
+void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t cfm)
 {
-  if (cfm != NULL && current_context.cfm != NULL) {
-    cfg_node_t from_node = { current_context.cfm->cfg->opcodes[branch_index], branch_index };
-    app_cfg_add_edge(current_context.cfm, cfm->cfg, from_node);
+  if (cfm.cfg != NULL && current_context.cfm.cfg != NULL) {
+    cfg_node_t from_node = { current_context.cfm.cfg->opcodes[branch_index], branch_index };
     
-    PRINT("# Push interp context 0x%x|0x%x\n", cfm->cfg->unit_hash, cfm->cfg->routine_hash);
+    PRINT("# Push interp context 0x%x|0x%x\n", cfm.cfg->unit_hash, cfm.cfg->routine_hash);
+    
+    app_cfg_add_edge(&current_context.cfm, cfm.cfg, from_node);
   }
   
   shadow_frame->op = op;
@@ -80,15 +94,18 @@ void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t
   last_node = context_entry_node;
 }
 
-void set_interp_cfm(control_flow_metadata_t *cfm)
+void set_interp_cfm(control_flow_metadata_t cfm)
 {
   uint branch_index = get_last_branch_index();
   
-  PRINT("# Push interp context 0x%x|0x%x\n", cfm->cfg->unit_hash, cfm->cfg->routine_hash);
+  PRINT("# Set interp context 0x%x|0x%x\n", cfm.cfg->unit_hash, cfm.cfg->routine_hash);
   
-  if (last_context.cfm != NULL && last_context.cfm->cfg != NULL) {
-    cfg_node_t from_node = { last_context.cfm->cfg->opcodes[branch_index], branch_index };
-    app_cfg_add_edge(last_context.cfm, cfm->cfg, from_node);
+  if (last_context.cfm.cfg != NULL) {
+    cfg_node_t from_node = { last_context.cfm.cfg->opcodes[branch_index], branch_index };
+    
+    PRINT("# Adding edge from last context\n");
+    
+    app_cfg_add_edge(&last_context.cfm, cfm.cfg, from_node);
   } else {
     PRINT("[skip routine edge because the last context has no cfg]\n");
   }
@@ -96,17 +113,18 @@ void set_interp_cfm(control_flow_metadata_t *cfm)
   current_context.cfm = cfm;
 }
 
+// in general, do popped objects need to be freed?
 void pop_interp_context()
 {
   last_pop = --shadow_frame;
   last_context = current_context;
   current_context = shadow_frame->context;
   
-  if (last_context.cfm != NULL && last_context.cfm->cfg != NULL) {
+  if (last_context.cfm.cfg != NULL) {
     PRINT("# Pop interp context to null\n");
   } else {
     PRINT("# Pop interp context to 0x%x|0x%x\n", 
-          current_context.cfm->cfg->unit_hash, current_context.cfm->cfg->routine_hash);
+          current_context.cfm.cfg->unit_hash, current_context.cfm.cfg->routine_hash);
   }
   
   last_node = context_entry_node;
@@ -127,8 +145,8 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
       if (node.index != (from_node.index + 1)) {
         bool found = false;
         uint i;
-        for (i = 0; i < current_context.cfm->cfg->edge_count; i++) {
-          cfg_opcode_edge_t *edge = &current_context.cfm->cfg->edges[i];
+        for (i = 0; i < current_context.cfm.cfg->edge_count; i++) {
+          cfg_opcode_edge_t *edge = &current_context.cfm.cfg->edges[i];
           if (edge->from_index == from_node.index && edge->to_index == node.index) {
             found = true;
             break;
@@ -146,9 +164,9 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
       case ZEND_RECV:
         break;
       default:
-        if (node.opcode != current_context.cfm->cfg->opcodes[node.index]) {
+        if (node.opcode != current_context.cfm.cfg->opcodes[node.index]) {
           PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
-                zend_get_opcode_name(current_context.cfm->cfg->opcodes[node.index]), node.index,
+                zend_get_opcode_name(current_context.cfm.cfg->opcodes[node.index]), node.index,
                 zend_get_opcode_name(node.opcode));
         }
     }
