@@ -3,6 +3,8 @@
 #include "lib/script_cfi_hashtable.h"
 #include "cfg.h"
 #include "cfg_handler.h"
+#include "dataset.h"
+#include "dataset_handler.h"
 #include "compile_context.h"
 
 #define EVAL_ID "|eval|"
@@ -15,7 +17,9 @@ typedef struct _compilation_unit_t {
 typedef struct _compilation_routine_t {
   const char *name;
   uint hash;
+  uint index;
   routine_cfg_t *cfg;
+  dataset_routine_t *dataset;
 } compilation_routine_t;
 
 typedef struct _function_fqn_t {
@@ -63,7 +67,9 @@ void push_compilation_unit(const char *path)
   
   routine_frame->name = "<none>";
   routine_frame->hash = 0;
+  routine_frame->dataset = dataset_routine_lookup(current_unit->hash, 0);
   routine_frame->cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
+  routine_frame->index = 0;
   current_routine = routine_frame;
   routine_frame++;
 }
@@ -101,7 +107,9 @@ void push_compilation_function(const char *function_name)
   
   routine_frame->name = function_name;
   routine_frame->hash = hash_string(function_name);
+  routine_frame->dataset = dataset_routine_lookup(current_unit->hash, routine_frame->hash);
   routine_frame->cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
+  routine_frame->index = 0;
   current_routine = routine_frame;
   routine_frame++;
   
@@ -182,14 +190,20 @@ void add_compiled_opcode(zend_uchar opcode)
         get_compilation_unit_path(), get_compilation_function_name(),
         get_compilation_unit_hash(), get_compilation_routine_hash());
   
-  write_node(current_unit->hash, current_routine->hash, opcode, index);
-  
   switch (opcode) {
     case ZEND_JMP:
       break;
     default:
       add_compiled_edge(current_routine->cfg->opcode_count, current_routine->cfg->opcode_count+1);
   }
+  
+  if (current_routine->dataset == NULL) {
+    write_node(current_unit->hash, current_routine->hash, opcode, index);
+  } else {
+    dataset_routine_verify_opcode(current_routine->dataset, current_routine->index, opcode);
+  }
+  
+  current_routine->index++;
 }
 
 void add_compiled_edge(uint from_index, uint to_index)
@@ -200,5 +214,8 @@ void add_compiled_edge(uint from_index, uint to_index)
         get_compilation_unit_path(), get_compilation_function_name(),
         get_compilation_unit_hash(), get_compilation_routine_hash());
   
-  write_op_edge(current_unit->hash, current_routine->hash, from_index, to_index);
+  if (current_routine->dataset == NULL)
+    write_op_edge(current_unit->hash, current_routine->hash, from_index, to_index);
+  else
+    dataset_routine_verify_compiled_edge(current_routine->dataset, from_index, to_index);
 }

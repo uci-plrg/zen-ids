@@ -8,6 +8,7 @@ typedef struct _interp_context_t {
   const char *name;
   uint id;
   routine_cfg_t *cfg;
+  // dataset_routine_t *dataset; // todo
 } interp_context_t;
 
 typedef struct _shadow_frame_t {
@@ -45,6 +46,7 @@ static void app_cfg_add_edge(routine_cfg_t *from_cfg, routine_cfg_t *to_cfg, cfg
         from_cfg->routine_hash, from_node.index, 
         to_cfg->unit_hash, to_cfg->routine_hash);
   
+  // todo: only if it doesn't exist in the dataset
   write_routine_edge(from_cfg->unit_hash, from_cfg->routine_hash, from_node.index, 
                      to_cfg->unit_hash, to_cfg->routine_hash, 0 /* durf */);
 }
@@ -74,6 +76,7 @@ void push_interp_context(zend_op* op, uint branch_index, routine_cfg_t *cfg)
   shadow_frame++;
   last_context = current_context;
   current_context.cfg = cfg;
+  // current_context.dataset = ??; // todo
   
   last_node = context_entry_node;
 }
@@ -91,6 +94,7 @@ void set_interp_cfg(routine_cfg_t *cfg)
     PRINT("[skip routine edge because the last context has no cfg]\n");
   }
   
+  // current_context.dataset = ??; // todo
   current_context.cfg = cfg;
 }
 

@@ -14,6 +14,9 @@
   if (!(b)) PRINT("Assert failure: %s\n", #b); \
 } while (0);
 
+#define p2int(p) ((uint_ptr_t) (p))
+#define int2p(p) ((byte *) (p))
+
 typedef struct _execution_context_t {
   //const zend_op *base_op;
   uint foo;

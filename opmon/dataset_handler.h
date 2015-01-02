@@ -6,5 +6,4 @@ void destroy_dataset_handler();
 
 void load_dataset(const char *script_path);
 
-
 #endif

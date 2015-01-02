@@ -46,9 +46,11 @@ void load_dataset(const char *script_path)
   }
   
   dataset = mmap(NULL, dataset_size, PROT_READ, MAP_SHARED, dataset_file, 0);
+  if (dataset == NULL) {
+    PRINT("Failed to map the dataset at path %s. Skipping dataset operations.\n", dataset_path);
+    return;
+  }
   PRINT("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
   
   install_dataset(dataset);
 }
-
-
