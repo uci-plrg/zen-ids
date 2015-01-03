@@ -6,9 +6,6 @@
 #include "lib/script_cfi_utils.h"
 #include "event_handler.h"
 
-// todo: thread safety?
-static uint eval_id = 0;
-
 static control_flow_metadata_t *pending_cfm = NULL;
 
 static void opcode_executing(const zend_op *op)
@@ -34,12 +31,6 @@ static void opcode_executing(const zend_op *op)
   verify_interp_context(current_opcodes, node);
 
   if (op->opcode == ZEND_INCLUDE_OR_EVAL) {
-    switch (op->extended_value) {
-      case ZEND_EVAL: {
-        eval_id++;
-        PRINT("  === entering `eval` context #%u\n", eval_id); 
-      } break;
-    }
     push_interp_context(current_opcodes, node.index, null_cfm);
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
     pending_cfm = get_cfm(op->op2.zv->value.str->val);
@@ -69,18 +60,6 @@ static void opcode_compiling(const zend_op *op, uint index)
 {
   PRINT("Compiling opcode %s at %d\n", zend_get_opcode_name(op->opcode), index);
 
-  /*
-  switch (op->opcode) {
-    case ZEND_DECLARE_FUNCTION:
-    //case ZEND_DECLARE_LAMBDA_FUNCTION:
-    //case ZEND_RECV:
-      PRINT("[skip compilation of %s]\n", zend_get_opcode_name(op->opcode));
-      // index gets out of sync here
-      break;
-    default:
-      add_compiled_opcode(op->opcode, index);
-  }
-  */
   add_compiled_opcode(op->opcode, index);
 }
 
@@ -91,10 +70,14 @@ static void edge_compiling(uint from_index, uint to_index)
 
 static void file_compiling(const char *path)
 {
-  if (path == NULL)
+  if (path == NULL) {
+    uint eval_id = get_next_eval_id();
+    
+    PRINT("  === entering `eval` context #%u\n", eval_id); 
     push_eval(eval_id);
-  else
+  } else {
     push_compilation_unit(path);
+  }
 }
 
 static void file_compiled()

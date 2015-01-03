@@ -131,6 +131,9 @@ void pop_compilation_function()
   
   PRINT("> Pop compilation function\n");
   
+  if (current_routine->cfm.cfg->unit_hash == EVAL_HASH)
+    dataset_match_eval(&current_routine->cfm);
+  
   if (current_routine->cfm.dataset == NULL) {
     for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
       PRINT("[emit %s at %d for {%s|%s, 0x%x|0x%x}]\n", 
@@ -140,15 +143,12 @@ void pop_compilation_function()
       write_node(current_unit->hash, current_routine->hash, 
                  current_routine->cfm.cfg->opcodes[i], i);
     }
-  } else {
-    if (current_routine->cfm.cfg->unit_hash != EVAL_HASH) {
-      for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
-        dataset_routine_verify_opcode(current_routine->cfm.dataset, i, 
-                                      current_routine->cfm.cfg->opcodes[i]);
-      }
+  } else if (current_routine->cfm.cfg->unit_hash != EVAL_HASH) {
+    for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
+      dataset_routine_verify_opcode(current_routine->cfm.dataset, i, 
+                                    current_routine->cfm.cfg->opcodes[i]);
     }
   }
-  
   
   routine_frame--;
   current_routine = routine_frame - 1;
@@ -175,6 +175,7 @@ void push_eval(uint eval_id)
   
   routine_frame->name = EVAL_FUNCTION_NAME;
   routine_frame->hash = eval_id;
+  routine_frame->cfm.dataset = NULL;
   routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
   current_routine = routine_frame;
   routine_frame++;

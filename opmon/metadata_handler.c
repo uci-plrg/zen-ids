@@ -12,6 +12,8 @@
 static size_t dataset_size;
 static void *dataset;
 
+static uint eval_id = 1;
+
 void init_metadata_handler()
 {
 }
@@ -53,4 +55,11 @@ void load_dataset(const char *script_path)
   PRINT("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
   
   install_dataset(dataset);
+  eval_id = dataset_get_eval_count() + 1;
+}
+
+uint get_next_eval_id()
+{
+  // todo: thread safety?
+  return eval_id++;
 }
