@@ -138,30 +138,29 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
   last_node = node;
   
   if (last_pop == NULL) {
-    if (from_node.opcode == CONTEXT_ENTRY) {
-      if (node.index != 0)
-        PRINT("Error! Expected index 0 on context entry, but found %d\n", node.index);
-    } else {
-      if (node.index != (from_node.index + 1)) {
-        bool found = false;
-        uint i;
-        for (i = 0; i < current_context.cfm.cfg->edge_count; i++) {
-          cfg_opcode_edge_t *edge = &current_context.cfm.cfg->edges[i];
-          if (edge->from_index == from_node.index && edge->to_index == node.index) {
-            found = true;
-            break;
-          }
+    if ((from_node.opcode != CONTEXT_ENTRY) && (node.index != (from_node.index + 1))) {
+      bool found = false;
+      uint i;
+      for (i = 0; i < current_context.cfm.cfg->edge_count; i++) {
+        cfg_opcode_edge_t *edge = &current_context.cfm.cfg->edges[i];
+        if (edge->from_index == from_node.index && edge->to_index == node.index) {
+          found = true;
+          break;
         }
-        if (!found) 
-          PRINT("Error! Expected index %d but found %d\n", from_node.index + 1, node.index);
       }
+      if (!found) 
+        PRINT("Error! Expected index %d but found %d\n", from_node.index + 1, node.index);
     }
     
+    /*
     switch (node.opcode) {
       case ZEND_INCLUDE_OR_EVAL:
       case ZEND_DECLARE_FUNCTION:
       case ZEND_DECLARE_LAMBDA_FUNCTION:
       case ZEND_RECV:
+        PRINT("Executing a disappearing opcode: %s at %d in [0x%x|0x%x]\n", 
+              zend_get_opcode_name(node.opcode), node.index, 
+              current_context.cfm.cfg->unit_hash, current_context.cfm.cfg->routine_hash);
         break;
       default:
         if (node.opcode != current_context.cfm.cfg->opcodes[node.index]) {
@@ -169,6 +168,12 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
                 zend_get_opcode_name(current_context.cfm.cfg->opcodes[node.index]), node.index,
                 zend_get_opcode_name(node.opcode));
         }
+    }
+    */
+    if (node.opcode != current_context.cfm.cfg->opcodes[node.index]) {
+      PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
+            zend_get_opcode_name(current_context.cfm.cfg->opcodes[node.index]), node.index,
+            zend_get_opcode_name(node.opcode));
     }
     return;
   }

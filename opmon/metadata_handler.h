@@ -4,6 +4,7 @@
 #include "cfg.h"
 #include "dataset.h"
 
+// this should always be a simple bundle of pointers, since it is passed by value
 typedef struct _control_flow_metadata_t {
   routine_cfg_t *cfg;
   dataset_routine_t *dataset;

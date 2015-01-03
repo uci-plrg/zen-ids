@@ -38,47 +38,13 @@ static void opcode_executing(const zend_op *op)
       case ZEND_EVAL: {
         eval_id++;
         PRINT("  === entering `eval` context #%u\n", eval_id); 
-        //set_staged_interp_context(eval_id++);
       } break;
-      /*
-      case ZEND_INCLUDE:
-      case ZEND_INCLUDE_ONCE: {
-        zval temp_filename, *inc_filename = op->op1.zv;
-        ZVAL_UNDEF(&temp_filename);
-        if (Z_TYPE_P(inc_filename) != IS_STRING) {
-          ZVAL_STR(&temp_filename, zval_get_string(inc_filename));
-          inc_filename = &temp_filename;
-        }
-        hash = hash_string(Z_STRVAL_P(inc_filename));
-        PRINT("  === entering `include` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
-        //set_staged_interp_context(hash);
-      } break;
-      case ZEND_REQUIRE:
-      case ZEND_REQUIRE_ONCE: {
-        zval temp_filename, *inc_filename = op->op1.zv;
-        ZVAL_UNDEF(&temp_filename);
-        if (Z_TYPE_P(inc_filename) != IS_STRING) {
-          ZVAL_STR(&temp_filename, zval_get_string(inc_filename));
-          inc_filename = &temp_filename;
-        }
-        hash = hash_string(Z_STRVAL_P(inc_filename));
-        PRINT("  === entering `require` context for %s(0x%x)\n", Z_STRVAL_P(inc_filename), hash); 
-        //set_staged_interp_context(hash);
-      } break;
-      default: {
-        PRINT("  === entering unknown context\n");
-        //set_staged_interp_context(UNKNOWN_CONTEXT_ID);
-      }
-      */
     }
     push_interp_context(current_opcodes, node.index, null_cfm);
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
     pending_cfm = get_cfm(op->op2.zv->value.str->val);
     const char *source_path = get_function_declaration_path(op->op2.zv->value.str->val);
     PRINT("  === init call to function %s|%s\n", source_path, op->op2.zv->value.str->val);
-    // lookup FQN (file_path|function_name) by function name
-    //set_staged_interp_context(hash_string(op->op2.zv->value.str->val)); 
-    // can't see this in ZEND_DO_FCALL... need to pend the context
   } else if (op->opcode == ZEND_DO_FCALL) {
     push_interp_context(current_opcodes, node.index, *pending_cfm);
   } else if (op->opcode == ZEND_RETURN) {
@@ -99,18 +65,23 @@ static void opcode_executing(const zend_op *op)
   }
 }
 
-static void opcode_compiling(const zend_op *op)
+static void opcode_compiling(const zend_op *op, uint index)
 {
+  PRINT("Compiling opcode %s at %d\n", zend_get_opcode_name(op->opcode), index);
+
+  /*
   switch (op->opcode) {
     case ZEND_DECLARE_FUNCTION:
-    case ZEND_DECLARE_LAMBDA_FUNCTION:
-    case ZEND_RECV:
-      PRINT("[skip %s]\n", zend_get_opcode_name(op->opcode));
+    //case ZEND_DECLARE_LAMBDA_FUNCTION:
+    //case ZEND_RECV:
+      PRINT("[skip compilation of %s]\n", zend_get_opcode_name(op->opcode));
       // index gets out of sync here
       break;
     default:
-      add_compiled_opcode(op->opcode);
+      add_compiled_opcode(op->opcode, index);
   }
+  */
+  add_compiled_opcode(op->opcode, index);
 }
 
 static void edge_compiling(uint from_index, uint to_index)

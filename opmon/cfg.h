@@ -36,7 +36,7 @@ typedef struct _cfg_t {
 } cfg_t;
 
 routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash);
-void routine_cfg_add_node(routine_cfg_t *cfg, zend_uchar opcode);
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, uint index);
 void routine_cfg_add_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
 
 cfg_t *cfg_new();

@@ -80,10 +80,10 @@ control_flow_metadata_t pop_compilation_unit()
   
   PRINT("> Pop compilation unit\n");
   
+  pop_compilation_function();
+  
   unit_frame--;
   current_unit = unit_frame - 1;
-  
-  pop_compilation_function();
   
   return cfm;
 }
@@ -127,13 +127,34 @@ void push_compilation_function(const char *function_name)
 
 void pop_compilation_function()
 {
+  uint i;
+  
   PRINT("> Pop compilation function\n");
+  
+  if (current_routine->cfm.dataset == NULL) {
+    for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
+      PRINT("[emit %s at %d for {%s|%s, 0x%x|0x%x}]\n", 
+            zend_get_opcode_name(current_routine->cfm.cfg->opcodes[i]), i,
+            get_compilation_unit_path(), get_compilation_routine_name(),
+            get_compilation_unit_hash(), get_compilation_routine_hash());
+      write_node(current_unit->hash, current_routine->hash, 
+                 current_routine->cfm.cfg->opcodes[i], i);
+    }
+  } else {
+    if (current_routine->cfm.cfg->unit_hash != EVAL_HASH) {
+      for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
+        dataset_routine_verify_opcode(current_routine->cfm.dataset, i, 
+                                      current_routine->cfm.cfg->opcodes[i]);
+      }
+    }
+  }
+  
   
   routine_frame--;
   current_routine = routine_frame - 1;
 }
 
-const char *get_compilation_function_name() 
+const char *get_compilation_routine_name() 
 {
   return current_routine->name;
 }
@@ -181,29 +202,19 @@ control_flow_metadata_t *get_cfm(const char *function_name)
     return &fqn->function.cfm;
 }
 
-void add_compiled_opcode(zend_uchar opcode)
+void add_compiled_opcode(zend_uchar opcode, uint index)
 {
-  uint index = current_routine->cfm.cfg->opcode_count;
-  routine_cfg_add_node(current_routine->cfm.cfg, opcode);
-  
-  PRINT("[emit %s for {%s|%s, 0x%x|0x%x}]\n", zend_get_opcode_name(opcode),
-        get_compilation_unit_path(), get_compilation_function_name(),
-        get_compilation_unit_hash(), get_compilation_routine_hash());
+  routine_cfg_assign_opcode(current_routine->cfm.cfg, opcode, index);
   
   switch (opcode) {
     case ZEND_JMP:
+    case ZEND_RETURN:
       break;
     default:
       add_compiled_edge(current_routine->cfm.cfg->opcode_count, current_routine->cfm.cfg->opcode_count+1);
   }
   
-  if (current_routine->cfm.dataset == NULL) {
-    write_node(current_unit->hash, current_routine->hash, opcode, index);
-  } else {
-    dataset_routine_verify_opcode(current_routine->cfm.dataset, current_routine->index, opcode);
-  }
-  
-  current_routine->index++;
+  current_routine->index = MAX(current_routine->index, index);
 }
 
 void add_compiled_edge(uint from_index, uint to_index)
@@ -211,7 +222,7 @@ void add_compiled_edge(uint from_index, uint to_index)
   routine_cfg_add_edge(current_routine->cfm.cfg, from_index, to_index);
   
   PRINT("[emit %d->%d for {%s|%s, 0x%x|0x%x}]\n", from_index, to_index,
-        get_compilation_unit_path(), get_compilation_function_name(),
+        get_compilation_unit_path(), get_compilation_routine_name(),
         get_compilation_unit_hash(), get_compilation_routine_hash());
   
   if (current_routine->cfm.dataset == NULL)

@@ -20,7 +20,7 @@ uint get_compilation_routine_hash();
 const char *get_function_declaration_path(const char *function_name);
 control_flow_metadata_t *get_cfm(const char *function_name);
 
-void add_compiled_opcode(zend_uchar opcode);
+void add_compiled_opcode(zend_uchar opcode, uint index);
 void add_compiled_edge(uint from_index, uint to_index);
 
 #endif

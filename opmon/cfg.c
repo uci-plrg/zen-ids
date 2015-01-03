@@ -9,10 +9,10 @@ routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash)
   return cfg;
 }
 
-void routine_cfg_add_node(routine_cfg_t *cfg, zend_uchar opcode)
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, uint index)
 {
-  cfg->opcodes[cfg->opcode_count] = opcode;
-  cfg->opcode_count++;
+  cfg->opcodes[index] = opcode;
+  cfg->opcode_count = MAX(cfg->opcode_count, index+1);
 }
 
 void routine_cfg_add_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
