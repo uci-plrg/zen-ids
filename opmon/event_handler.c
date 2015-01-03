@@ -8,6 +8,37 @@
 
 static control_flow_metadata_t *pending_cfm = NULL;
 
+static void init_call(const zend_op *op)
+{
+  if (op->op2_type == IS_CONST) {
+    pending_cfm = get_cfm(op->op2.zv->value.str->val);
+    
+    if (pending_cfm == NULL) {
+      PRINT("  === init call to builtin function %s\n", op->op2.zv->value.str->val);
+    } else {
+      const char *source_path = get_function_declaration_path(op->op2.zv->value.str->val);
+      PRINT("  === init call to function %s|%s\n", source_path, op->op2.zv->value.str->val);
+    }
+  } else {
+    pending_cfm = NULL;
+    
+    if (op->op2_type == IS_CV) {
+      zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
+      const char *variable = EX_VAR(op->op2.var)->value.str->val;
+      
+      pending_cfm = get_cfm(variable);
+      if (pending_cfm == NULL) {
+        PRINT("  === init call to builtin function %s\n", variable);
+      } else {
+        const char *source_path = get_function_declaration_path(variable);
+        PRINT("  === init call to function %s|%s\n", source_path, variable);
+      }
+    } else {
+      PRINT("  === init call to function identified by unknown reference\n");
+    }
+  }
+}
+
 static void opcode_executing(const zend_op *op)
 {
   zend_op *current_opcodes;
@@ -33,11 +64,12 @@ static void opcode_executing(const zend_op *op)
   if (op->opcode == ZEND_INCLUDE_OR_EVAL) {
     push_interp_context(current_opcodes, node.index, null_cfm);
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
-    pending_cfm = get_cfm(op->op2.zv->value.str->val);
-    const char *source_path = get_function_declaration_path(op->op2.zv->value.str->val);
-    PRINT("  === init call to function %s|%s\n", source_path, op->op2.zv->value.str->val);
+    PRINT("  === ZEND_INIT_FCALL_BY_NAME\n");
+    
+    init_call(op);
   } else if (op->opcode == ZEND_DO_FCALL) {
-    push_interp_context(current_opcodes, node.index, *pending_cfm);
+    if (pending_cfm != NULL)
+      push_interp_context(current_opcodes, node.index, *pending_cfm);
   } else if (op->opcode == ZEND_RETURN) {
     PRINT("  === return\n");
     pop_interp_context();
@@ -47,6 +79,8 @@ static void opcode_executing(const zend_op *op)
     PRINT("  === ZEND_DECLARE_LAMBDA_FUNCTION\n");
   } else if (op->opcode == ZEND_INIT_FCALL) {
     PRINT("  === ZEND_INIT_FCALL\n");
+    
+    init_call(op);
   } else if (op->opcode == ZEND_INIT_NS_FCALL_BY_NAME) {
     PRINT("  === ZEND_INIT_NS_FCALL_BY_NAME\n");
   } else if (op->opcode == ZEND_EXT_FCALL_BEGIN) {
