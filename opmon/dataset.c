@@ -46,6 +46,7 @@ typedef struct _dataset_hashtable_t {
 
 static uint_ptr_t dataset_mapping = 0;
 static dataset_hashtable_t *hashtable;
+static uint *eval_list;
 
 #define RESOLVE_PTR(ptr, type) ((type *)(dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
 
@@ -53,12 +54,15 @@ void install_dataset(void *dataset)
 {
   dataset_mapping = (uint_ptr_t) dataset;
   hashtable = RESOLVE_PTR(*(uint *) dataset_mapping, dataset_hashtable_t);
+  eval_list = (uint *)(hashtable->table + (hashtable->mask + 1));
 }
 
 dataset_routine_t *dataset_routine_lookup(uint unit_hash, uint routine_hash)
 {
   if (dataset_mapping == 0) {
     return NULL;
+  } else if (unit_hash == EVAL_HASH) {
+    return RESOLVE_PTR(eval_list[routine_hash], dataset_routine_t);
   } else {
     uint index = (unit_hash ^ routine_hash) & hashtable->mask;
     dataset_routine_t *routine;
