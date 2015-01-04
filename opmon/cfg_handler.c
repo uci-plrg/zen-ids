@@ -15,10 +15,15 @@ static inline void fnull(size_t size, FILE *file)
   fwrite(NULL_BUFFER, 1, size, file);
 }
 
-static inline void fopcode(zend_uchar op, FILE *file)
+static inline void fopcode(cfg_opcode_t *opcode, FILE *file)
 {
-  fwrite(&op, sizeof(zend_uchar), 1, file);
-  fnull(3, cfg_files.node);
+  fwrite(&opcode->opcode, sizeof(zend_uchar), 1, file);
+  if (opcode->opcode == ZEND_INCLUDE_OR_EVAL) {
+    fwrite(&opcode->extended_value, sizeof(zend_uchar), 1, file);
+    fnull(2, file);
+  } else {
+    fnull(3, file);
+  }
 }
 
 void init_cfg_handler()
@@ -81,9 +86,9 @@ void starting_script(const char *script_path)
   load_dataset(script_path);
 }
 
-void write_node(uint unit_hash, uint routine_hash, zend_uchar opcode, uint index)
+void write_node(uint unit_hash, uint routine_hash, cfg_opcode_t *opcode, uint index)
 {
-  PRINT("Write node 0x%x 0x%x | 0x%01x to cfg\n", unit_hash, routine_hash, opcode);
+  PRINT("Write node 0x%x 0x%x | 0x%01x to cfg\n", unit_hash, routine_hash, opcode->opcode);
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.node);
   fwrite(&routine_hash, sizeof(uint), 1, cfg_files.node);
   fopcode(opcode, cfg_files.node);

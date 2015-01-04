@@ -2,6 +2,7 @@
 #define _CFG_H_ 1
 
 #include "php.h"
+#include "lib/script_cfi_utils.h"
 
 typedef struct _cfg_node_t {
   zend_uchar opcode;
@@ -13,12 +14,17 @@ typedef struct _cfg_opcode_edge_t {
   uint to_index;
 } cfg_opcode_edge_t;
 
+typedef struct _cfg_opcode_t {
+  zend_uchar opcode;
+  byte extended_value;
+} cfg_opcode_t;
+
 typedef struct _routine_cfg_t {
   uint unit_hash;
   uint routine_hash;
   uint opcode_count;
   uint edge_count;
-  zend_uchar opcodes[256];
+  cfg_opcode_t opcodes[256];
   cfg_opcode_edge_t edges[256];
 } routine_cfg_t;
 
@@ -36,7 +42,8 @@ typedef struct _cfg_t {
 } cfg_t;
 
 routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash);
-void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, uint index);
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, 
+                               zend_uchar extended_value, uint index);
 void routine_cfg_add_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
 
 cfg_t *cfg_new();

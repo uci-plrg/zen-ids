@@ -45,8 +45,6 @@ static void opcode_executing(const zend_op *op)
   uint hash;
   cfg_node_t node = { op->opcode, 0 };
   
-  //if (true) return;
-
   if (EG(current_execute_data) != NULL && EG(current_execute_data)->func != NULL)
     current_opcodes = EG(current_execute_data)->func->op_array.opcodes;
 
@@ -94,7 +92,7 @@ static void opcode_compiling(const zend_op *op, uint index)
 {
   PRINT("Compiling opcode %s at %d\n", zend_get_opcode_name(op->opcode), index);
 
-  add_compiled_opcode(op->opcode, index);
+  add_compiled_op(op, index);
 }
 
 static void edge_compiling(uint from_index, uint to_index)

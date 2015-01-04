@@ -137,16 +137,16 @@ void pop_compilation_function()
   if (current_routine->cfm.dataset == NULL) {
     for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
       PRINT("[emit %s at %d for {%s|%s, 0x%x|0x%x}]\n", 
-            zend_get_opcode_name(current_routine->cfm.cfg->opcodes[i]), i,
+            zend_get_opcode_name(current_routine->cfm.cfg->opcodes[i].opcode), i,
             get_compilation_unit_path(), get_compilation_routine_name(),
             get_compilation_unit_hash(), get_compilation_routine_hash());
       write_node(current_unit->hash, current_routine->hash, 
-                 current_routine->cfm.cfg->opcodes[i], i);
+                 &current_routine->cfm.cfg->opcodes[i], i);
     }
   } else if (current_routine->cfm.cfg->unit_hash != EVAL_HASH) {
     for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
       dataset_routine_verify_opcode(current_routine->cfm.dataset, i, 
-                                    current_routine->cfm.cfg->opcodes[i]);
+                                    current_routine->cfm.cfg->opcodes[i].opcode);
     }
   }
   
@@ -203,11 +203,11 @@ control_flow_metadata_t *get_cfm(const char *function_name)
     return &fqn->function.cfm;
 }
 
-void add_compiled_opcode(zend_uchar opcode, uint index)
+void add_compiled_op(const zend_op *op, uint index)
 {
-  routine_cfg_assign_opcode(current_routine->cfm.cfg, opcode, index);
+  routine_cfg_assign_opcode(current_routine->cfm.cfg, op->opcode, op->extended_value, index);
   
-  switch (opcode) {
+  switch (op->opcode) {
     case ZEND_JMP:
     case ZEND_RETURN:
       break;

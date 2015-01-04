@@ -9,9 +9,11 @@ routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash)
   return cfg;
 }
 
-void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, uint index)
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, 
+                               zend_uchar extended_value, uint index)
 {
-  cfg->opcodes[index] = opcode;
+  cfg->opcodes[index].opcode = opcode;
+  cfg->opcodes[index].extended_value = extended_value;
   cfg->opcode_count = MAX(cfg->opcode_count, index+1);
 }
 

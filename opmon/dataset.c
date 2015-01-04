@@ -103,7 +103,7 @@ void dataset_match_eval(control_flow_metadata_t *cfm)
       continue;
     match = true;
     for (j = 0; j < routine->node_count; j++) {
-      if (routine->nodes[j].opcode != cfm->cfg->opcodes[j]) {
+      if (routine->nodes[j].opcode != cfm->cfg->opcodes[j].opcode) {
         match = false;
         break;
       }
