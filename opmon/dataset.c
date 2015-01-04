@@ -11,14 +11,31 @@ typedef struct _dataset_call_target_t {
   uint routine_hash;
 } dataset_call_target_t;
 
+typedef struct _dataset_eval_target_t {
+  uint eval_id;
+} dataset_eval_target_t;
+
 typedef struct _dataset_call_targets_t {
   uint target_count;
   dataset_call_target_t targets[1];
 } dataset_call_targets_t;
 
+typedef struct _dataset_eval_targets_t {
+  uint target_count;
+  dataset_eval_target_t targets[1];
+} dataset_eval_targets_t;
+
+typedef enum _dataset_node_type_t {
+  DATASET_NODE_TYPE_NORMAL,
+  DATASET_NODE_TYPE_BRANCH,
+  DATASET_NODE_TYPE_CALL,
+  DATASET_NODE_TYPE_EVAL
+} dataset_node_type_t;
+
 typedef struct _dataset_node_t {
   zend_uchar opcode;
-  zend_uchar pad[3];
+  zend_uchar type;
+  zend_uchar pad[2];
   union {
     uint zero; // [normal node]
     uint target_index; // [branch node]
@@ -150,11 +167,22 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
 {
   uint i;
   dataset_node_t *node = &dataset->nodes[from_index];
-  dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
   
-  for (i = 0; i < targets->target_count; i++) {
-    if (targets->targets[i].unit_hash == to_unit_hash && targets->targets[i].routine_hash == to_routine_hash)
-      return true;
+  if (node->type == DATASET_NODE_TYPE_CALL) {
+    dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
+    
+    for (i = 0; i < targets->target_count; i++) {
+      if (targets->targets[i].unit_hash == to_unit_hash && 
+          targets->targets[i].routine_hash == to_routine_hash)
+        return true;
+    }
+  } else if (node->type == DATASET_NODE_TYPE_EVAL) {
+    dataset_eval_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_eval_targets_t);
+    for (i = 0; i < targets->target_count; i++) {
+      if (targets->targets[i].eval_id == to_unit_hash)
+        return true;
+    }
   }
+  
   return false;
 }

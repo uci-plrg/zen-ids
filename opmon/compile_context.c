@@ -65,7 +65,7 @@ void push_compilation_unit(const char *path)
   current_unit = unit_frame;
   unit_frame++;
   
-  routine_frame->name = "<none>";
+  routine_frame->name = "<script-body>";
   routine_frame->hash = 0;
   routine_frame->cfm.dataset = dataset_routine_lookup(current_unit->hash, 0);
   routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
@@ -102,6 +102,11 @@ void push_compilation_function(const char *function_name)
 {
   function_fqn_t *fqn;
   char *buffer;
+  
+  if (current_unit->hash == EVAL_HASH)
+    return; // handle lambda functions the same as plain evals
+  
+  // function_name = EVAL_FUNCTION_NAME;
   
   PRINT("> Push compilation function %s\n", function_name);
   
