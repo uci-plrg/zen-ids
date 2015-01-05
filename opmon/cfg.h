@@ -37,8 +37,8 @@ typedef struct _cfg_routine_edge_t {
 typedef struct _cfg_t {
   uint routine_count;
   uint edge_count;
-  routine_cfg_t *routines[64];
-  cfg_routine_edge_t edges[64];
+  routine_cfg_t *routines[256];
+  cfg_routine_edge_t edges[256];
 } cfg_t;
 
 routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash);

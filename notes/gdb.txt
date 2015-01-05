@@ -1,0 +1,10 @@
+For operands of type IS_VAR that contain a string, read this way:
+
+    ((zval *) (((char *) executor_globals->current_execute_data) + op->op2.var))->value.str->val
+
+The string may be null-preceded (!) When it is an empty string, check the
+str->length and if it is longer than 0, read this way:
+
+    (((zval *) (((char *) executor_globals->current_execute_data) + op->op2.var))->value.str->val + 1)
+
+

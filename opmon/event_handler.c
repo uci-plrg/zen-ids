@@ -7,7 +7,7 @@
 #include "event_handler.h"
 
 static control_flow_metadata_t *pending_cfm = NULL;
-static control_flow_metadata_t *create_function = (control_flow_metadata_t *)int2p(1);
+static control_flow_metadata_t *call_to_eval = (control_flow_metadata_t *)int2p(1);
 
 static void init_call(const zend_op *op)
 {
@@ -18,7 +18,7 @@ static void init_call(const zend_op *op)
     if (pending_cfm == NULL) {
       if (strcmp("create_function", function_name) == 0) {
         PRINT("  === init call to create_function\n");
-        pending_cfm = create_function;
+        pending_cfm = call_to_eval;
       } else {
         PRINT("  === init call to builtin function %s\n", function_name);
       }
@@ -26,13 +26,14 @@ static void init_call(const zend_op *op)
       const char *source_path = get_function_declaration_path(function_name);
       PRINT("  === init call to function %s|%s\n", source_path, function_name);
     }
-  } else {
-    pending_cfm = NULL;
+  } else if (op->op2_type == IS_CV || op->op2_type == IS_VAR) {
+    zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
+    const char *variable = EX_VAR(op->op2.var)->value.str->val;
     
-    if (op->op2_type == IS_CV || op->op2_type == IS_VAR) {
-      zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
-      const char *variable = EX_VAR(op->op2.var)->value.str->val;
-      
+    if (*variable == '\0' && strncmp(variable+1, "lambda_", 7) == 0) {
+      PRINT("  === init call to %s (executing as an eval)\n", variable+1);
+      pending_cfm = get_cfm(variable+1);
+    } else {
       pending_cfm = get_cfm(variable);
       if (pending_cfm == NULL) {
         PRINT("  === init call to builtin function %s\n", variable);
@@ -40,9 +41,10 @@ static void init_call(const zend_op *op)
         const char *source_path = get_function_declaration_path(variable);
         PRINT("  === init call to function %s|%s\n", source_path, variable);
       }
-    } else {
-      PRINT("  === init call to function identified by unknown reference\n");
     }
+  } else {
+    pending_cfm = NULL;
+    PRINT("  === init call to function identified by unknown reference\n");
   }
 }
 
@@ -60,7 +62,7 @@ static void opcode_executing(const zend_op *op)
     node.index = 0xffffffff;
   else
     node.index = (uint)(op - current_opcodes);
-
+  
   if (current_cfg == NULL) {
     PRINT("  === executing %s at index %d of %s on line %d\n", zend_get_opcode_name(node.opcode), 
           node.index, get_current_interp_context_name(), op->lineno);
@@ -78,11 +80,10 @@ static void opcode_executing(const zend_op *op)
     push_interp_context(current_opcodes, node.index, null_cfm);
   } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
     PRINT("  === ZEND_INIT_FCALL_BY_NAME\n");
-    
     init_call(op);
   } else if (op->opcode == ZEND_DO_FCALL) {
     if (pending_cfm != NULL) {
-      if (pending_cfm == create_function) {
+      if (pending_cfm == call_to_eval) {
         push_interp_context(current_opcodes, node.index, null_cfm);
       } else {
         push_interp_context(current_opcodes, node.index, *pending_cfm);
@@ -97,7 +98,6 @@ static void opcode_executing(const zend_op *op)
     PRINT("  === ZEND_DECLARE_LAMBDA_FUNCTION\n");
   } else if (op->opcode == ZEND_INIT_FCALL) {
     PRINT("  === ZEND_INIT_FCALL\n");
-    
     init_call(op);
   } else if (op->opcode == ZEND_INIT_NS_FCALL_BY_NAME) {
     PRINT("  === ZEND_INIT_NS_FCALL_BY_NAME\n");

@@ -38,7 +38,7 @@ sctable_resize(sctable_t *t)
         }
     }
 
-    TABLE_FREE(old_data);
+    TABLE_FREE(old_data); // todo! fix segfault
 }
 
 void

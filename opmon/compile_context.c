@@ -8,6 +8,7 @@
 #include "compile_context.h"
 
 #define EVAL_ID "|eval|"
+#define LAMBDA_NAME_LENGTH 16
 
 typedef struct _compilation_unit_t {
   const char *path;
@@ -118,27 +119,45 @@ void push_compilation_function(const char *function_name)
 {
   function_fqn_t *fqn;
   char *buffer;
-  
+  uint routine_key;
+
   if (current_unit->hash == EVAL_HASH) {
-    push_eval(get_next_eval_id()); // handle lambda functions the same as plain evals
-    return; 
+    char *lambda_name = malloc(LAMBDA_NAME_LENGTH);
+    sprintf(lambda_name, "lambda_%d", EG(lambda_count)+1);
+    
+    PRINT("Push lambda function %s\n", lambda_name);
+    
+    unit_frame->path = EVAL_PATH;
+    unit_frame->hash = EVAL_HASH;
+    current_unit = unit_frame;
+    unit_frame++;
+    
+    routine_frame->name = lambda_name;
+    routine_frame->hash = get_next_eval_id();
+    routine_frame->cfm.dataset = NULL;
+    routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
+    current_routine = routine_frame;
+    routine_frame++;
+    
+    routine_key = hash_string(lambda_name);
+  } else {
+    PRINT("Push compilation function %s\n", function_name);
+    
+    
+    routine_frame->name = function_name;
+    routine_frame->hash = hash_string(function_name);
+    routine_frame->cfm.dataset = dataset_routine_lookup(current_unit->hash, routine_frame->hash);
+    routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
+    routine_frame->index = 0;
+    current_routine = routine_frame;
+    routine_frame++;
+
+    routine_key = current_routine->hash;
   }
-  
-  // function_name = EVAL_FUNCTION_NAME;
-  
-  PRINT("Push compilation function %s\n", function_name);
   
   if (CG(active_op_array) != NULL)
     PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
-  
-  routine_frame->name = function_name;
-  routine_frame->hash = hash_string(function_name);
-  routine_frame->cfm.dataset = dataset_routine_lookup(current_unit->hash, routine_frame->hash);
-  routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
-  routine_frame->index = 0;
-  current_routine = routine_frame;
-  routine_frame++;
-  
+    
   fqn = malloc(sizeof(function_fqn_t));
   fqn->unit = *current_unit;
   buffer = malloc(strlen(current_unit->path) + 1);
@@ -148,7 +167,7 @@ void push_compilation_function(const char *function_name)
   buffer = malloc(strlen(current_routine->name) + 1);
   strcpy(buffer, current_routine->name);
   fqn->function.name = buffer;
-  sctable_add(&routine_table, current_routine->hash, fqn);
+  sctable_add(&routine_table, routine_key, fqn);
 }
 
 void pop_compilation_function()
@@ -182,6 +201,11 @@ void pop_compilation_function()
       dataset_routine_verify_opcode(current_routine->cfm.dataset, i, 
                                     current_routine->cfm.cfg->opcodes[i].opcode);
     }
+  }
+  
+  if (current_unit->hash == EVAL_HASH && current_routine->name != EVAL_FUNCTION_NAME) {
+    char *lambda_name = (char *)current_routine->name;
+    free(lambda_name);
   }
   
   last_pop = current_routine;
@@ -274,10 +298,10 @@ void add_compiled_op(const zend_op *op, uint index)
     case ZEND_FETCH_DIM_R:
       break;
     case ZEND_ASSIGN_DIM:
-      add_compiled_edge(current_routine->cfm.cfg->opcode_count-1, current_routine->cfm.cfg->opcode_count+1);
+      add_compiled_edge(index, index+2);
       break;
     default:
-      add_compiled_edge(current_routine->cfm.cfg->opcode_count, current_routine->cfm.cfg->opcode_count+1);
+      add_compiled_edge(index, index+1);
   }
   
   current_routine->index = MAX(current_routine->index, index);
