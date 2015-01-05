@@ -8,7 +8,7 @@
 #include "compile_context.h"
 
 #define EVAL_ID "|eval|"
-#define LAMBDA_NAME_LENGTH 16
+#define ROUTINE_NAME_LENGTH 256
 
 typedef struct _compilation_unit_t {
   const char *path;
@@ -115,37 +115,36 @@ uint get_compilation_unit_hash()
   return current_unit->hash;
 }
 
-void push_compilation_function(const char *function_name)
+void push_compilation_function(const char *classname, const char *function_name)
 {
   function_fqn_t *fqn;
-  char *buffer;
+  char *buffer, *routine_name = malloc(ROUTINE_NAME_LENGTH);
   uint routine_key;
 
   if (current_unit->hash == EVAL_HASH) {
-    char *lambda_name = malloc(LAMBDA_NAME_LENGTH);
-    sprintf(lambda_name, "lambda_%d", EG(lambda_count)+1);
+    sprintf(routine_name, "lambda_%d", EG(lambda_count)+1);
     
-    PRINT("Push lambda function %s\n", lambda_name);
+    PRINT("Push lambda function %s\n", routine_name);
     
     unit_frame->path = EVAL_PATH;
     unit_frame->hash = EVAL_HASH;
     current_unit = unit_frame;
     unit_frame++;
     
-    routine_frame->name = lambda_name;
+    routine_frame->name = routine_name;
     routine_frame->hash = get_next_eval_id();
     routine_frame->cfm.dataset = NULL;
     routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
     current_routine = routine_frame;
     routine_frame++;
     
-    routine_key = hash_string(lambda_name);
+    routine_key = hash_string(routine_name);
   } else {
-    PRINT("Push compilation function %s\n", function_name);
+    sprintf(routine_name, "%s:%s", classname, function_name);
+    PRINT("Push compilation function %s\n", routine_name);
     
-    
-    routine_frame->name = function_name;
-    routine_frame->hash = hash_string(function_name);
+    routine_frame->name = routine_name;
+    routine_frame->hash = hash_string(routine_name);
     routine_frame->cfm.dataset = dataset_routine_lookup(current_unit->hash, routine_frame->hash);
     routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
     routine_frame->index = 0;
@@ -203,10 +202,8 @@ void pop_compilation_function()
     }
   }
   
-  if (current_unit->hash == EVAL_HASH && current_routine->name != EVAL_FUNCTION_NAME) {
-    char *lambda_name = (char *)current_routine->name;
-    free(lambda_name);
-  }
+  if (current_unit->hash != EVAL_HASH && current_routine->hash != 0)
+    free((char *)current_routine->name);
   
   last_pop = current_routine;
   routine_frame--;
@@ -298,6 +295,7 @@ void add_compiled_op(const zend_op *op, uint index)
     case ZEND_FETCH_DIM_R:
       break;
     case ZEND_ASSIGN_DIM:
+    case ZEND_NEW:
       add_compiled_edge(index, index+2);
       break;
     default:

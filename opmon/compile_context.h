@@ -8,7 +8,7 @@ void init_compile_context();
 
 void push_compilation_unit(const char *path);
 control_flow_metadata_t pop_compilation_unit();
-void push_compilation_function(const char *function_name);
+void push_compilation_function(const char *classname, const char *function_name);
 void pop_compilation_function();
 void push_eval(uint eval_id);
 

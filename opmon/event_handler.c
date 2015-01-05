@@ -11,8 +11,35 @@ static control_flow_metadata_t *call_to_eval = (control_flow_metadata_t *)int2p(
 
 static void init_call(const zend_op *op)
 {
+  // todo: handle operands separately so all permutations are supported
   if (op->op2_type == IS_CONST) {
-    const char *function_name = op->op2.zv->value.str->val;
+    char function_name[256];
+    const char *original_function_name = op->op2.zv->value.str->val;
+    uint i, j = 0, original_function_length = strlen(original_function_name);
+    
+    if (op->opcode == ZEND_INIT_METHOD_CALL && (op->op1_type == IS_CV || op->op1_type == IS_VAR)) {
+      zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
+      const char *type = EX_VAR(op->op1.var)->value.obj->ce->name->val;
+      
+      strcpy(function_name, type);
+      strcat(function_name, ":");
+      j = strlen(function_name);
+      /*
+      uint type_length = strlen(type);
+      
+      for (i = 0; i < type_length; i++) {
+        function_name[i] = tolower(type[i]);
+      }
+      function_name[i++] = ':';
+      j = i;
+      */
+    }      
+    
+    for (i = 0; i < original_function_length; i++) {
+      function_name[i+j] = tolower(original_function_name[i]);
+    }      
+    function_name[i+j] = '\0';
+    
     pending_cfm = get_cfm(function_name);
     
     if (pending_cfm == NULL) {
@@ -76,35 +103,44 @@ static void opcode_executing(const zend_op *op)
   
   verify_interp_context(current_opcodes, node);
 
-  if (op->opcode == ZEND_INCLUDE_OR_EVAL) {
-    push_interp_context(current_opcodes, node.index, null_cfm);
-  } else if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
-    PRINT("  === ZEND_INIT_FCALL_BY_NAME\n");
-    init_call(op);
-  } else if (op->opcode == ZEND_DO_FCALL) {
-    if (pending_cfm != NULL) {
-      if (pending_cfm == call_to_eval) {
-        push_interp_context(current_opcodes, node.index, null_cfm);
-      } else {
-        push_interp_context(current_opcodes, node.index, *pending_cfm);
+  switch (op->opcode) {
+    case ZEND_INCLUDE_OR_EVAL:
+      push_interp_context(current_opcodes, node.index, null_cfm);
+      break;
+    case ZEND_INIT_FCALL:
+    case ZEND_INIT_METHOD_CALL:
+    case ZEND_INIT_FCALL_BY_NAME:
+      PRINT("  === ZEND_INIT_FCALL | ZEND_INIT_METHOD_CALL | ZEND_INIT_FCALL_BY_NAME\n");
+      init_call(op);
+      break;
+    case ZEND_DO_FCALL:
+      if (pending_cfm != NULL) {
+        if (pending_cfm == call_to_eval) {
+          push_interp_context(current_opcodes, node.index, null_cfm);
+        } else {
+          push_interp_context(current_opcodes, node.index, *pending_cfm);
+        }
       }
-    }
-  } else if (op->opcode == ZEND_RETURN) {
-    PRINT("  === return\n");
-    pop_interp_context();
-  } else if (op->opcode == ZEND_DECLARE_FUNCTION) {
-    PRINT("  === declare function\n");
-  } else if (op->opcode == ZEND_DECLARE_LAMBDA_FUNCTION) {
-    PRINT("  === ZEND_DECLARE_LAMBDA_FUNCTION\n");
-  } else if (op->opcode == ZEND_INIT_FCALL) {
-    PRINT("  === ZEND_INIT_FCALL\n");
-    init_call(op);
-  } else if (op->opcode == ZEND_INIT_NS_FCALL_BY_NAME) {
-    PRINT("  === ZEND_INIT_NS_FCALL_BY_NAME\n");
-  } else if (op->opcode == ZEND_EXT_FCALL_BEGIN) {
-    PRINT("  === ZEND_EXT_FCALL_BEGIN\n");
-  } else if (op->opcode == ZEND_EXT_FCALL_END) {
-    PRINT("  === ZEND_EXT_FCALL_END\n");
+      break;
+    case ZEND_RETURN:
+      PRINT("  === return\n");
+      pop_interp_context();
+      break;
+    case ZEND_DECLARE_FUNCTION:
+      PRINT("  === declare function\n");
+      break;
+    case ZEND_DECLARE_LAMBDA_FUNCTION:
+      PRINT("  === ZEND_DECLARE_LAMBDA_FUNCTION\n");
+      break;
+    case ZEND_INIT_NS_FCALL_BY_NAME:
+      PRINT("  === ZEND_INIT_NS_FCALL_BY_NAME\n");
+      break;
+    case ZEND_EXT_FCALL_BEGIN:
+      PRINT("  === ZEND_EXT_FCALL_BEGIN\n");
+      break;
+    case ZEND_EXT_FCALL_END:
+      PRINT("  === ZEND_EXT_FCALL_END\n");
+      break;
   }
 }
 
@@ -142,9 +178,9 @@ static void file_compiled()
   set_interp_cfm(compiled_cfm);
 }
 
-static void function_compiling(const char *function_name)
+static void function_compiling(const char *classname, const char *function_name)
 {
-  push_compilation_function(function_name);
+  push_compilation_function(classname, function_name);
 }
 
 static void function_compiled()
