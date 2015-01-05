@@ -34,7 +34,7 @@ static compilation_unit_t *live_unit;
 static compilation_routine_t routine_stack[256];
 static compilation_routine_t *routine_frame;
 static compilation_routine_t *current_routine;
-static compilation_routine_t no_routine = { "<none>", 0 };
+static compilation_routine_t *last_pop;
 
 static sctable_t routine_table;
 
@@ -42,13 +42,17 @@ void init_compile_context()
 {
   unit_frame = unit_stack;
   unit_frame->path = NULL;
+  unit_frame++;
   current_unit = NULL;
   
   routine_frame = routine_stack;
-  routine_frame->name = NULL;
+  routine_frame->name = "<base>";
   routine_frame->cfm.cfg = NULL;
   routine_frame->cfm.dataset = NULL;
-  current_routine = &no_routine;
+  current_routine = routine_frame;
+  routine_frame++;
+  
+  last_pop = NULL;
   
   routine_table.hash_bits = 7;
   sctable_init(&routine_table);
@@ -58,7 +62,10 @@ void push_compilation_unit(const char *path)
 {
   ASSERT(path != NULL);
   
-  PRINT("> Push compilation unit %s\n", path);
+  PRINT("Push compilation unit %s\n", path);
+  
+  if (CG(active_op_array) != NULL)
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
   
   unit_frame->path = path;
   unit_frame->hash = hash_string(path);
@@ -72,10 +79,19 @@ void push_compilation_unit(const char *path)
   routine_frame->index = 0;
   current_routine = routine_frame;
   routine_frame++;
+  
+  last_pop = NULL;
 }
 
 control_flow_metadata_t pop_compilation_unit()
 {
+  /*
+  if (unit_frame == unit_stack) {
+    PRINT("Skipping pop of compilation unit because the unit stack is at base.\n");
+    return;
+  }
+  */
+  
   control_flow_metadata_t cfm = current_routine->cfm;
   
   PRINT("> Pop compilation unit\n");
@@ -103,12 +119,17 @@ void push_compilation_function(const char *function_name)
   function_fqn_t *fqn;
   char *buffer;
   
-  if (current_unit->hash == EVAL_HASH)
-    return; // handle lambda functions the same as plain evals
+  if (current_unit->hash == EVAL_HASH) {
+    push_eval(get_next_eval_id()); // handle lambda functions the same as plain evals
+    return; 
+  }
   
   // function_name = EVAL_FUNCTION_NAME;
   
-  PRINT("> Push compilation function %s\n", function_name);
+  PRINT("Push compilation function %s\n", function_name);
+  
+  if (CG(active_op_array) != NULL)
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
   
   routine_frame->name = function_name;
   routine_frame->hash = hash_string(function_name);
@@ -134,6 +155,14 @@ void pop_compilation_function()
 {
   uint i;
   
+  /*
+  if (current_routine == routine_stack) {
+    push_eval(get_next_eval_id());
+    PRINT("Warning: pop of compilation routine while the stack is at base. Pushing eval instead.\n");
+    return;
+  }
+  */
+  
   PRINT("> Pop compilation function\n");
   
   if (current_routine->cfm.cfg->unit_hash == EVAL_HASH)
@@ -155,6 +184,7 @@ void pop_compilation_function()
     }
   }
   
+  last_pop = current_routine;
   routine_frame--;
   current_routine = routine_frame - 1;
 }
@@ -171,7 +201,10 @@ uint get_compilation_routine_hash()
 
 void push_eval(uint eval_id)
 {
-  PRINT("> Push eval 0x%x\n", eval_id);
+  PRINT("Push eval 0x%x\n", eval_id);
+  
+  if (CG(active_op_array) != NULL)
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
   
   unit_frame->path = EVAL_PATH;
   unit_frame->hash = EVAL_HASH;
@@ -210,11 +243,38 @@ control_flow_metadata_t *get_cfm(const char *function_name)
 
 void add_compiled_op(const zend_op *op, uint index)
 {
+  if (zend_get_opcode_name(op->opcode) == NULL) {
+    PRINT("Warning: skipping compilation of internal opcode 0x%x\n", op->opcode);
+    return;
+  }
+  
+  PRINT("Compiling opcode 0x%x %s at %d of (%s|%s) [0x%x|0x%x]\n", op->opcode, zend_get_opcode_name(op->opcode), 
+        index, current_unit->path, current_routine->name, current_unit->hash, current_routine->hash);
+  
+  if (CG(active_op_array) != NULL)
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
+  
+  /*
+  if (current_routine->cfm.cfg == NULL) {
+    if (last_pop != NULL && index < last_pop->cfm.cfg->opcode_count)
+      routine_cfg_assign_opcode(last_pop->cfm.cfg, op->opcode, op->extended_value, index);
+    else {
+      PRINT("Error! Attempt to assign opcode %s to op %d with no current cfg\n", 
+            zend_get_opcode_name(op->opcode), index);
+    }
+    return;
+  }
+  */
+  
   routine_cfg_assign_opcode(current_routine->cfm.cfg, op->opcode, op->extended_value, index);
   
   switch (op->opcode) {
     case ZEND_JMP:
     case ZEND_RETURN:
+    case ZEND_FETCH_DIM_R:
+      break;
+    case ZEND_ASSIGN_DIM:
+      add_compiled_edge(current_routine->cfm.cfg->opcode_count-1, current_routine->cfm.cfg->opcode_count+1);
       break;
     default:
       add_compiled_edge(current_routine->cfm.cfg->opcode_count, current_routine->cfm.cfg->opcode_count+1);

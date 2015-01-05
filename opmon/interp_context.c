@@ -73,6 +73,16 @@ void initialize_interp_context()
   last_node = context_entry_node;
 }
 
+const char *get_current_interp_context_name()
+{
+  return current_context.name;
+}
+
+routine_cfg_t *get_current_interp_routine_cfg()
+{
+  return current_context.cfm.cfg;
+}
+
 void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t cfm)
 {
   if (cfm.cfg != NULL)
@@ -109,8 +119,16 @@ void set_interp_cfm(control_flow_metadata_t cfm)
     PRINT("# Adding edge from last context\n");
     
     app_cfg_add_edge(&last_context.cfm, cfm.cfg, from_node);
+  /*
+  if (current_context.cfm.cfg != NULL) {
+    cfg_node_t from_node = { current_context.cfm.cfg->opcodes[branch_index].opcode, branch_index };
+    
+    PRINT("# Adding edge from the current context to the new one\n");
+    
+    app_cfg_add_edge(&current_context.cfm, cfm.cfg, from_node);
+  */
   } else {
-    PRINT("[skip routine edge because the last context has no cfg]\n");
+    PRINT("[skip routine edge because the current context has no cfg]\n");
   }
   
   current_context.cfm = cfm;

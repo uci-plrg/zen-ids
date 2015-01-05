@@ -142,7 +142,8 @@ void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset,
                                           uint from_index, uint to_index)
 {
   dataset_node_t *node = &dataset->nodes[from_index];
-  if (to_index == (from_index + 1) || node->target_index == to_index) {
+  if (to_index == (from_index + 1) || node->target_index == to_index || 
+      (node->opcode == ZEND_ASSIGN_DIM && to_index == (from_index + 2))) {
     PRINT("<MON> Verified compiled edge from %d to %d\n", from_index, to_index);
   } else {
     PRINT("<MON> Opcode edge mismatch at index %d: expected target %d but found target %d\n", 
