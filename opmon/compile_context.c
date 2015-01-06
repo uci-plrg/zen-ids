@@ -291,3 +291,4 @@ void add_compiled_edge(uint from_index, uint to_index)
   else
     dataset_routine_verify_compiled_edge(current_routine->cfm.dataset, from_index, to_index);
 }
+
