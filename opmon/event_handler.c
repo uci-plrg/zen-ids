@@ -4,6 +4,7 @@
 #include "cfg_handler.h"
 #include "cfg.h"
 #include "lib/script_cfi_utils.h"
+#include "lib/script_cfi_array.h"
 #include "event_handler.h"
 
 static control_flow_metadata_t *pending_cfm = NULL;
@@ -180,6 +181,8 @@ static void function_compiled()
 
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
+  //scarray_unit_test();
+  
   init_compile_context();
   init_cfg_handler();
   init_metadata_handler();

@@ -2,6 +2,7 @@
 #define _CFG_H_ 1
 
 #include "php.h"
+#include "lib/script_cfi_array.h"
 #include "lib/script_cfi_utils.h"
 
 typedef struct _cfg_node_t {

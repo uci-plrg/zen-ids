@@ -1,6 +1,8 @@
 #ifndef _SCRIPT_CFI_UTILS_H_
 #define _SCRIPT_CFI_UTILS_H_ 1
 
+#include "php.h"
+
 #define PRINT(...) fprintf(stderr, "\t> "__VA_ARGS__)
 #define PX "0x%llx"
 
