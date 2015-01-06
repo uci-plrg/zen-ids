@@ -86,13 +86,6 @@ void push_compilation_unit(const char *path)
 
 control_flow_metadata_t pop_compilation_unit()
 {
-  /*
-  if (unit_frame == unit_stack) {
-    PRINT("Skipping pop of compilation unit because the unit stack is at base.\n");
-    return;
-  }
-  */
-  
   control_flow_metadata_t cfm = current_routine->cfm;
   
   PRINT("> Pop compilation unit\n");
@@ -122,7 +115,7 @@ void push_compilation_function(const char *classname, const char *function_name)
   uint routine_key;
 
   if (current_unit->hash == EVAL_HASH) {
-    sprintf(routine_name, "lambda_%d", EG(lambda_count)+1);
+    sprintf(routine_name, "<default>:lambda_%d", EG(lambda_count)+1);
     
     PRINT("Push lambda function %s\n", routine_name);
     
@@ -172,14 +165,6 @@ void push_compilation_function(const char *classname, const char *function_name)
 void pop_compilation_function()
 {
   uint i;
-  
-  /*
-  if (current_routine == routine_stack) {
-    push_eval(get_next_eval_id());
-    PRINT("Warning: pop of compilation routine while the stack is at base. Pushing eval instead.\n");
-    return;
-  }
-  */
   
   PRINT("> Pop compilation function\n");
   
@@ -274,18 +259,6 @@ void add_compiled_op(const zend_op *op, uint index)
   
   if (CG(active_op_array) != NULL)
     PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
-  
-  /*
-  if (current_routine->cfm.cfg == NULL) {
-    if (last_pop != NULL && index < last_pop->cfm.cfg->opcode_count)
-      routine_cfg_assign_opcode(last_pop->cfm.cfg, op->opcode, op->extended_value, index);
-    else {
-      PRINT("Error! Attempt to assign opcode %s to op %d with no current cfg\n", 
-            zend_get_opcode_name(op->opcode), index);
-    }
-    return;
-  }
-  */
   
   routine_cfg_assign_opcode(current_routine->cfm.cfg, op->opcode, op->extended_value, index);
   

@@ -11,67 +11,57 @@ static control_flow_metadata_t *call_to_eval = (control_flow_metadata_t *)int2p(
 
 static void init_call(const zend_op *op)
 {
-  // todo: handle operands separately so all permutations are supported
+  uint i, j, original_function_length;
+  char function_name[256];
+  
+  if (op->opcode == ZEND_INIT_METHOD_CALL && (op->op1_type == IS_CV || op->op1_type == IS_VAR)) {
+    zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
+    const char *type = EX_VAR(op->op1.var)->value.obj->ce->name->val;
+    
+    strcpy(function_name, type);
+    strcat(function_name, ":");
+  } else {
+    strcpy(function_name, "<default>:");
+  }
+  j = strlen(function_name);
+    
   if (op->op2_type == IS_CONST) {
-    char function_name[256];
     const char *original_function_name = op->op2.zv->value.str->val;
-    uint i, j = 0, original_function_length = strlen(original_function_name);
-    
-    if (op->opcode == ZEND_INIT_METHOD_CALL && (op->op1_type == IS_CV || op->op1_type == IS_VAR)) {
-      zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
-      const char *type = EX_VAR(op->op1.var)->value.obj->ce->name->val;
-      
-      strcpy(function_name, type);
-      strcat(function_name, ":");
-      j = strlen(function_name);
-      /*
-      uint type_length = strlen(type);
-      
-      for (i = 0; i < type_length; i++) {
-        function_name[i] = tolower(type[i]);
-      }
-      function_name[i++] = ':';
-      j = i;
-      */
-    }      
-    
+    original_function_length = strlen(original_function_name);
     for (i = 0; i < original_function_length; i++) {
       function_name[i+j] = tolower(original_function_name[i]);
     }      
     function_name[i+j] = '\0';
-    
-    pending_cfm = get_cfm(function_name);
-    
-    if (pending_cfm == NULL) {
-      if (strcmp("create_function", function_name) == 0) {
-        PRINT("  === init call to create_function\n");
-        pending_cfm = call_to_eval;
-      } else {
-        PRINT("  === init call to builtin function %s\n", function_name);
-      }
-    } else {
-      const char *source_path = get_function_declaration_path(function_name);
-      PRINT("  === init call to function %s|%s\n", source_path, function_name);
-    }
   } else if (op->op2_type == IS_CV || op->op2_type == IS_VAR) {
     zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
     const char *variable = EX_VAR(op->op2.var)->value.str->val;
     
     if (*variable == '\0' && strncmp(variable+1, "lambda_", 7) == 0) {
-      PRINT("  === init call to %s (executing as an eval)\n", variable+1);
-      pending_cfm = get_cfm(variable+1);
+      strcat(function_name, variable+1);
     } else {
-      pending_cfm = get_cfm(variable);
-      if (pending_cfm == NULL) {
-        PRINT("  === init call to builtin function %s\n", variable);
-      } else {
-        const char *source_path = get_function_declaration_path(variable);
-        PRINT("  === init call to function %s|%s\n", source_path, variable);
-      }
+      original_function_length = strlen(variable);
+      for (i = 0; i < original_function_length; i++) {
+        function_name[i+j] = tolower(variable[i]);
+      }      
+      function_name[i+j] = '\0';
     }
   } else {
     pending_cfm = NULL;
     PRINT("  === init call to function identified by unknown reference\n");
+    return;
+  }
+  
+  pending_cfm = get_cfm(function_name);
+  if (pending_cfm == NULL) {
+    if (strcmp("<default>:create_function", function_name) == 0) {
+      PRINT("  === init call to create_function\n");
+      pending_cfm = call_to_eval;
+    } else {
+      PRINT("  === init call to builtin function %s\n", function_name);
+    }
+  } else {
+    const char *source_path = get_function_declaration_path(function_name);
+    PRINT("  === init call to function %s|%s\n", source_path, function_name);
   }
 }
 

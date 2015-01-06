@@ -73,6 +73,16 @@ static dataset_eval_list_t *eval_list;
 
 #define RESOLVE_PTR(ptr, type) ((type *)(dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
 
+static bool is_fall_through(zend_uchar opcode, uint from_index, uint to_index) {
+  switch (opcode) {
+    case ZEND_NEW:
+    case ZEND_ASSIGN_DIM:
+      return to_index == (from_index + 2);
+    default:
+      return false;
+  }  
+}
+
 void install_dataset(void *dataset)
 {
   dataset_mapping = (uint_ptr_t) dataset;
@@ -87,11 +97,7 @@ uint dataset_get_eval_count()
 
 dataset_routine_t *dataset_routine_lookup(uint unit_hash, uint routine_hash)
 {
-  if (dataset_mapping == 0) {
-    return NULL;
-  } else if (unit_hash == EVAL_HASH) {
-    return RESOLVE_PTR(eval_list->list[routine_hash], dataset_routine_t);
-  } else {
+  if (dataset_mapping != 0 && unit_hash != EVAL_HASH) { // cannot lookup eval by id
     uint index = (unit_hash ^ routine_hash) & hashtable->mask;
     dataset_routine_t *routine;
     dataset_chain_t *chain = RESOLVE_PTR(hashtable->table[index], dataset_chain_t);
@@ -101,41 +107,46 @@ dataset_routine_t *dataset_routine_lookup(uint unit_hash, uint routine_hash)
         return routine;
       chain++;
     }
-    return NULL;
   }
+  return NULL;
+}
+
+static bool match_eval_routines(dataset_routine_t *dataset, routine_cfg_t *routine)
+{
+  uint i;
+
+  if (dataset->node_count != routine->opcode_count)
+    return false;
+  for (i = 0; i < dataset->node_count; i++) {
+    if (dataset->nodes[i].opcode != routine->opcodes[i].opcode)
+      return false;
+  }
+  return true;
 }
 
 void dataset_match_eval(control_flow_metadata_t *cfm)
 {
-  uint i, j;
+  uint i;
   dataset_routine_t *routine;
   bool match;
   
-  if (eval_list == NULL)
+  if (dataset_mapping == 0)
     return;
   
   for (i = 0; i < eval_list->count; i++) {
     routine = RESOLVE_PTR(eval_list->list[i], dataset_routine_t);
-    if (routine->node_count != cfm->cfg->opcode_count)
-      continue;
-    match = true;
-    for (j = 0; j < routine->node_count; j++) {
-      if (routine->nodes[j].opcode != cfm->cfg->opcodes[j].opcode) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
+    if (match_eval_routines(routine, cfm->cfg)) {
       PRINT("<MON> Matched eval %d to dataset eval %d\n", cfm->cfg->routine_hash, i);
       
       cfm->dataset = routine;
       cfm->cfg->routine_hash = i;
-      break;
+      return;
     }
   }
   
-  if (cfm->dataset == NULL)
-    PRINT("<MON> Failed to match eval %d\n", cfm->cfg->routine_hash);
+  
+  
+  PRINT("<MON> Failed to match eval %d\n", cfm->cfg->routine_hash);
 }
 
 void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset, 
@@ -143,7 +154,7 @@ void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset,
 {
   dataset_node_t *node = &dataset->nodes[from_index];
   if (to_index == (from_index + 1) || node->target_index == to_index || 
-      (node->opcode == ZEND_ASSIGN_DIM && to_index == (from_index + 2))) {
+      is_fall_through(node->opcode, from_index, to_index)) {
     PRINT("<MON> Verified compiled edge from %d to %d\n", from_index, to_index);
   } else {
     PRINT("<MON> Opcode edge mismatch at index %d: expected target %d but found target %d\n", 
