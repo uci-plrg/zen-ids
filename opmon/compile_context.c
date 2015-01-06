@@ -172,18 +172,20 @@ void pop_compilation_function()
     dataset_match_eval(&current_routine->cfm);
   
   if (current_routine->cfm.dataset == NULL) {
-    for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
+    cfg_opcode_t *cfg_opcode;
+    for (i = 0; i < current_routine->cfm.cfg->opcodes.size; i++) {
+      cfg_opcode = routine_cfg_get_opcode(current_routine->cfm.cfg, i);
       PRINT("[emit %s at %d for {%s|%s, 0x%x|0x%x}]\n", 
-            zend_get_opcode_name(current_routine->cfm.cfg->opcodes[i].opcode), i,
+            zend_get_opcode_name(cfg_opcode->opcode), i,
             get_compilation_unit_path(), get_compilation_routine_name(),
             get_compilation_unit_hash(), get_compilation_routine_hash());
       write_node(current_unit->hash, current_routine->hash, 
-                 &current_routine->cfm.cfg->opcodes[i], i);
+                 cfg_opcode, i);
     }
   } else if (current_routine->cfm.cfg->unit_hash != EVAL_HASH) {
-    for (i = 0; i < current_routine->cfm.cfg->opcode_count; i++) {
+    for (i = 0; i < current_routine->cfm.cfg->opcodes.size; i++) {
       dataset_routine_verify_opcode(current_routine->cfm.dataset, i, 
-                                    current_routine->cfm.cfg->opcodes[i].opcode);
+                                    routine_cfg_get_opcode(current_routine->cfm.cfg, i)->opcode);
     }
   }
   
@@ -291,4 +293,3 @@ void add_compiled_edge(uint from_index, uint to_index)
   else
     dataset_routine_verify_compiled_edge(current_routine->cfm.dataset, from_index, to_index);
 }
-

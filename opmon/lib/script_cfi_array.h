@@ -3,7 +3,20 @@
 
 #include "script_cfi_utils.h"
 
-typedef struct _scarray_t scarray_t;
+#define SCARRAY_GET(array, type, index) ((type *) scarray_get((array), index))
+
+#define BLOCK_SIZE 0x40
+
+typedef struct _scarray_data_t {
+  uint item_count;
+  void **blocks;
+} scarray_data_t;
+
+typedef struct _scarray_t {
+  uint capacity;
+  uint size;
+  scarray_data_t data[BLOCK_SIZE];
+} scarray_t;
 
 void scarray_init(scarray_t *a);
 void scarray_destroy(scarray_t *a);

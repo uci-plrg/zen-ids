@@ -23,10 +23,8 @@ typedef struct _cfg_opcode_t {
 typedef struct _routine_cfg_t {
   uint unit_hash;
   uint routine_hash;
-  uint opcode_count;
-  uint edge_count;
-  cfg_opcode_t opcodes[256];
-  cfg_opcode_edge_t edges[256];
+  scarray_t opcodes; // cfg_opcode_t *
+  scarray_t edges;   // cfg_opcode_edge_t *
 } routine_cfg_t;
 
 typedef struct _cfg_routine_edge_t {
@@ -36,11 +34,24 @@ typedef struct _cfg_routine_edge_t {
 } cfg_routine_edge_t;
 
 typedef struct _cfg_t {
-  uint routine_count;
-  uint edge_count;
-  routine_cfg_t *routines[256];
-  cfg_routine_edge_t edges[256];
+  scarray_t routines; // routine_cfg_t *
+  scarray_t edges;    // routine_edge_t *
 } cfg_t;
+
+static inline routine_cfg_t *cfg_get_routine(cfg_t *cfg, uint index)
+{
+  return (routine_cfg_t *) scarray_get(&cfg->routines, index);
+}
+
+static inline cfg_opcode_t *routine_cfg_get_opcode(routine_cfg_t *routine, uint index)
+{
+  return (cfg_opcode_t *) scarray_get(&routine->opcodes, index);
+}
+
+static inline cfg_opcode_edge_t *routine_cfg_get_edge(routine_cfg_t *routine, uint index)
+{
+  return (cfg_opcode_edge_t *) scarray_get(&routine->edges, index);
+}
 
 routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash);
 void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, 

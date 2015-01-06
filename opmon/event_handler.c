@@ -35,16 +35,22 @@ static void init_call(const zend_op *op)
     function_name[i+j] = '\0';
   } else if (op->op2_type == IS_CV || op->op2_type == IS_VAR) {
     zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
-    const char *variable = EX_VAR(op->op2.var)->value.str->val;
-    
-    if (*variable == '\0' && strncmp(variable+1, "lambda_", 7) == 0) {
-      strcat(function_name, variable+1);
+    zend_string *variable_name = EX_VAR(op->op2.var)->value.str;
+    if (variable_name == NULL) {
+      PRINT("Error! Operand type 0x%x refers to null string!\n", op->op2_type);
+      pending_cfm = NULL;
     } else {
-      original_function_length = strlen(variable);
-      for (i = 0; i < original_function_length; i++) {
-        function_name[i+j] = tolower(variable[i]);
-      }      
-      function_name[i+j] = '\0';
+      const char *variable = variable_name->val;
+      
+      if (*variable == '\0' && strncmp(variable+1, "lambda_", 7) == 0) {
+        strcat(function_name, variable+1);
+      } else {
+        original_function_length = strlen(variable);
+        for (i = 0; i < original_function_length; i++) {
+          function_name[i+j] = tolower(variable[i]);
+        }      
+        function_name[i+j] = '\0';
+      }
     }
   } else {
     pending_cfm = NULL;

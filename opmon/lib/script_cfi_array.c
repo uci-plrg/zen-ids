@@ -9,23 +9,11 @@
 #define MAX_CAPACITY 0x100000000
 */
 
-#define BLOCK_SIZE 0x40
 #define LEVEL1_SHIFT 0x12
 #define LEVEL2_SHIFT 0xc
 #define LEVEL3_SHIFT 6
 #define LEVEL_MASK 0x3f
 #define MAX_CAPACITY 0x1000000
-
-typedef struct _scarray_data_t {
-  uint item_count;
-  void **blocks;
-} scarray_data_t;
-
-struct _scarray_t {
-  uint capacity;
-  uint size;
-  scarray_data_t data[BLOCK_SIZE];
-};
 
 static void expand_level(scarray_data_t *level)
 {

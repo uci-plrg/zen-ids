@@ -115,10 +115,10 @@ static bool match_eval_routines(dataset_routine_t *dataset, routine_cfg_t *routi
 {
   uint i;
 
-  if (dataset->node_count != routine->opcode_count)
+  if (dataset->node_count != routine->opcodes.size)
     return false;
   for (i = 0; i < dataset->node_count; i++) {
-    if (dataset->nodes[i].opcode != routine->opcodes[i].opcode)
+    if (dataset->nodes[i].opcode != routine_cfg_get_opcode(routine, i)->opcode)
       return false;
   }
   return true;

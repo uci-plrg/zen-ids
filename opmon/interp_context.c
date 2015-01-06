@@ -91,7 +91,7 @@ void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t
     PRINT("# Push interp context (null)\n");
   
   if (cfm.cfg != NULL && current_context.cfm.cfg != NULL) {
-    cfg_node_t from_node = { current_context.cfm.cfg->opcodes[branch_index].opcode, branch_index };
+    cfg_node_t from_node = { routine_cfg_get_opcode(current_context.cfm.cfg, branch_index)->opcode, branch_index };
     
     app_cfg_add_edge(&current_context.cfm, cfm.cfg, from_node);
   }
@@ -114,7 +114,7 @@ void set_interp_cfm(control_flow_metadata_t cfm)
   PRINT("# Set interp context 0x%x|0x%x\n", cfm.cfg->unit_hash, cfm.cfg->routine_hash);
   
   if (last_context.cfm.cfg != NULL) {
-    cfg_node_t from_node = { last_context.cfm.cfg->opcodes[branch_index].opcode, branch_index };
+    cfg_node_t from_node = { routine_cfg_get_opcode(last_context.cfm.cfg, branch_index)->opcode, branch_index };
     
     PRINT("# Adding edge from last context\n");
     
@@ -157,10 +157,10 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
   cfg_node_t from_node = last_node;
   
   if (current_context.cfm.cfg == NULL && last_node.opcode == CONTEXT_ENTRY) {
-    cfg_opcode_t last_call_node = last_context.cfm.cfg->opcodes[node.index-1];
-    if (last_call_node.opcode == ZEND_INCLUDE_OR_EVAL && 
-        (last_call_node.extended_value == ZEND_INCLUDE_ONCE ||
-         last_call_node.extended_value == ZEND_REQUIRE_ONCE)) {
+    cfg_opcode_t *last_call_node = routine_cfg_get_opcode(last_context.cfm.cfg, node.index-1);
+    if (last_call_node->opcode == ZEND_INCLUDE_OR_EVAL && 
+        (last_call_node->extended_value == ZEND_INCLUDE_ONCE ||
+         last_call_node->extended_value == ZEND_REQUIRE_ONCE)) {
       pop_interp_context(); // target file has already been included once
     }
   }         
@@ -172,8 +172,8 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
         from_node.opcode != ZEND_BRK && from_node.opcode != ZEND_CONT) { // todo: security of BRK/CONT?
       bool found = false;
       uint i;
-      for (i = 0; i < current_context.cfm.cfg->edge_count; i++) {
-        cfg_opcode_edge_t *edge = &current_context.cfm.cfg->edges[i];
+      for (i = 0; i < current_context.cfm.cfg->edges.size; i++) {
+        cfg_opcode_edge_t *edge = routine_cfg_get_edge(current_context.cfm.cfg, i);
         if (edge->from_index == from_node.index) {
           if (edge->to_index == node.index) {
             found = true;
@@ -188,10 +188,10 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
         PRINT("Error! Opcode edge from %d to %d not found\n", from_node.index, node.index);
     }
     
-    if (node.opcode != current_context.cfm.cfg->opcodes[node.index].opcode) {
+    if (node.opcode != routine_cfg_get_opcode(current_context.cfm.cfg, node.index)->opcode) {
       PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
-            zend_get_opcode_name(current_context.cfm.cfg->opcodes[node.index].opcode), node.index,
-            zend_get_opcode_name(node.opcode));
+            zend_get_opcode_name(routine_cfg_get_opcode(current_context.cfm.cfg, node.index)->opcode), 
+            node.index, zend_get_opcode_name(node.opcode));
     }
     return;
   }
