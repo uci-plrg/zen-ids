@@ -3,7 +3,12 @@
 
 #include "php.h"
 
-#define PRINT(...) fprintf(stderr, "\t> "__VA_ARGS__)
+#define PRINT(...) \
+do { \
+  if (OPMON_G(verbose)) \
+    fprintf(stderr, "\t> "__VA_ARGS__); \
+} while (0)
+
 #define PX "0x%llx"
 
 #define EVAL_PATH "<eval>"
@@ -24,9 +29,15 @@ typedef struct _execution_context_t {
   uint foo;
 } execution_context_t;
 
+typedef unsigned long long uint64;
+typedef unsigned char bool;
+typedef char byte;
+typedef uint64 uint_ptr_t;
+
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;
+  bool verbose;
 ZEND_END_MODULE_GLOBALS(opcode_monitor)
 
 ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
@@ -37,12 +48,8 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 # define OPMON_G(v) (opcode_monitor_globals.v)
 #endif
 
-typedef unsigned long long uint64;
-typedef unsigned char bool;
-typedef char byte;
-typedef uint64 uint_ptr_t;
-
 uint hash_string(const char *string);
-void setup_base_path(char *path, const char *category, const char *script_path);
+void opmon_activate_printer();
+void opmon_setup_base_path(char *path, const char *category, const char *script_path);
 
 #endif
