@@ -48,6 +48,8 @@ void setup_base_path(char *path, const char *category, const char *script_path)
     script_filename = script_path;
   else
     script_filename++;
+  if ((strlen(path) + strlen(script_filename)) > 250)
+    PRINT("Error: path %s%s will exceed buffer length of 256!\n", path, script_filename);
   strcat(path, script_filename);
 
   // .../script.2.1.php -> .../script.2.1

@@ -9,7 +9,22 @@
 
 #define EVAL_ID "|eval|"
 #define ROUTINE_NAME_LENGTH 256
+#define MAX_STACK_FRAME 256
 
+#define INCREMENT_STACK(base, ptr) \
+do { \
+  (ptr)++; \
+  if (((ptr) - (base)) >= MAX_STACK_FRAME) \
+    PRINT("Error: "#ptr" exceeds max stack frame!\n"); \
+} while (0)
+  
+#define DECREMENT_STACK(base, ptr) \
+do { \
+  (ptr)--; \
+  if ((ptr) <= (base)) \
+    PRINT("Error: "#ptr" hit stack bottom!\n"); \
+} while (0)
+  
 typedef struct _compilation_unit_t {
   const char *path;
   uint hash;
@@ -27,12 +42,12 @@ typedef struct _function_fqn_t {
   compilation_routine_t function;
 } function_fqn_t;
 
-static compilation_unit_t unit_stack[256];
+static compilation_unit_t unit_stack[MAX_STACK_FRAME];
 static compilation_unit_t *unit_frame;
 static compilation_unit_t *current_unit;
 static compilation_unit_t *live_unit;
 
-static compilation_routine_t routine_stack[256];
+static compilation_routine_t routine_stack[MAX_STACK_FRAME];
 static compilation_routine_t *routine_frame;
 static compilation_routine_t *current_routine;
 static compilation_routine_t *last_pop;
@@ -71,7 +86,7 @@ void push_compilation_unit(const char *path)
   unit_frame->path = path;
   unit_frame->hash = hash_string(path);
   current_unit = unit_frame;
-  unit_frame++;
+  INCREMENT_STACK(unit_stack, unit_frame);
   
   routine_frame->name = "<script-body>";
   routine_frame->hash = 0;
@@ -79,7 +94,7 @@ void push_compilation_unit(const char *path)
   routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
   routine_frame->index = 0;
   current_routine = routine_frame;
-  routine_frame++;
+  INCREMENT_STACK(routine_stack, routine_frame);
   
   last_pop = NULL;
 }
@@ -92,7 +107,7 @@ control_flow_metadata_t pop_compilation_unit()
   
   pop_compilation_function();
   
-  unit_frame--;
+  DECREMENT_STACK(unit_stack, unit_frame);
   current_unit = unit_frame - 1;
   
   return cfm;
@@ -122,14 +137,14 @@ void push_compilation_function(const char *classname, const char *function_name)
     unit_frame->path = EVAL_PATH;
     unit_frame->hash = EVAL_HASH;
     current_unit = unit_frame;
-    unit_frame++;
+    INCREMENT_STACK(unit_stack, unit_frame);
     
     routine_frame->name = routine_name;
     routine_frame->hash = get_next_eval_id();
     routine_frame->cfm.dataset = NULL;
     routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
     current_routine = routine_frame;
-    routine_frame++;
+    INCREMENT_STACK(routine_stack, routine_frame);
     
     routine_key = hash_string(routine_name);
   } else {
@@ -142,13 +157,20 @@ void push_compilation_function(const char *classname, const char *function_name)
     routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
     routine_frame->index = 0;
     current_routine = routine_frame;
-    routine_frame++;
+    INCREMENT_STACK(routine_stack, routine_frame);
 
     routine_key = current_routine->hash;
   }
   
   if (CG(active_op_array) != NULL)
     PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
+  
+  if (strcmp(routine_name, "<default>:{closure}") == 0) {
+    extern control_flow_metadata_t loader_cfm;
+    if (loader_cfm.cfg != NULL)
+      PRINT("Error! Found a duplicate loader routine! Overwriting it for now.\n");
+    loader_cfm = current_routine->cfm;
+  }
     
   fqn = malloc(sizeof(function_fqn_t));
   fqn->unit = *current_unit;
@@ -193,7 +215,7 @@ void pop_compilation_function()
     free((char *)current_routine->name);
   
   last_pop = current_routine;
-  routine_frame--;
+  DECREMENT_STACK(routine_stack, routine_frame);
   current_routine = routine_frame - 1;
 }
 
@@ -217,14 +239,14 @@ void push_eval(uint eval_id)
   unit_frame->path = EVAL_PATH;
   unit_frame->hash = EVAL_HASH;
   current_unit = unit_frame;
-  unit_frame++;
+  INCREMENT_STACK(unit_stack, unit_frame);
   
   routine_frame->name = EVAL_FUNCTION_NAME;
   routine_frame->hash = eval_id;
   routine_frame->cfm.dataset = NULL;
   routine_frame->cfm.cfg = routine_cfg_new(current_unit->hash, routine_frame->hash);
   current_routine = routine_frame;
-  routine_frame++;
+  INCREMENT_STACK(routine_stack, routine_frame);
 }
 
 const char *get_function_declaration_path(const char *function_name)

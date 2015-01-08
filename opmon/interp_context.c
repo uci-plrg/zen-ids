@@ -5,6 +5,22 @@
 #include "cfg_handler.h"
 #include "interp_context.h"
 
+#define MAX_STACK_FRAME 256
+
+#define INCREMENT_STACK(base, ptr) \
+do { \
+  (ptr)++; \
+  if (((ptr) - (base)) >= MAX_STACK_FRAME) \
+    PRINT("Error: "#ptr" exceeds max stack frame!\n"); \
+} while (0)
+
+#define DECREMENT_STACK(base, ptr) \
+do { \
+  (ptr)--; \
+  if ((ptr) <= (base)) \
+    PRINT("Error: "#ptr" hit stack bottom!\n"); \
+} while (0)
+  
 typedef struct _interp_context_t {
   const char *name;
   uint id;
@@ -19,7 +35,7 @@ typedef struct _shadow_frame_t {
 
 static cfg_t *app_cfg;
 
-static shadow_frame_t shadow_stack[256];
+static shadow_frame_t shadow_stack[MAX_STACK_FRAME];
 static shadow_frame_t *shadow_frame;
 static shadow_frame_t *last_pop;
 
@@ -68,6 +84,7 @@ void initialize_interp_context()
 {
   app_cfg = cfg_new();
   shadow_frame = shadow_stack;
+  shadow_frame++;
   shadow_frame->op = NULL;
   last_pop = NULL;
   last_node = context_entry_node;
@@ -92,7 +109,6 @@ void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t
   
   if (cfm.cfg != NULL && current_context.cfm.cfg != NULL) {
     cfg_node_t from_node = { routine_cfg_get_opcode(current_context.cfm.cfg, branch_index)->opcode, branch_index };
-    
     app_cfg_add_edge(&current_context.cfm, cfm.cfg, from_node);
   }
   
@@ -100,7 +116,7 @@ void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t
   shadow_frame->continuation_index = branch_index + 1;
   shadow_frame->context = current_context;
   
-  shadow_frame++;
+  INCREMENT_STACK(shadow_stack, shadow_frame);
   last_context = current_context;
   current_context.cfm = cfm;
   
@@ -137,7 +153,8 @@ void set_interp_cfm(control_flow_metadata_t cfm)
 // in general, do popped objects need to be freed?
 void pop_interp_context()
 {
-  last_pop = --shadow_frame;
+  DECREMENT_STACK(shadow_stack, shadow_frame);
+  last_pop = shadow_frame;
   last_context = current_context;
   current_context = shadow_frame->context;
   

@@ -55,6 +55,9 @@ PHP_MINIT_FUNCTION(opcode_monitor)
   
   PRINT("INI example: dataset dir is %s\n", INI_STR("opmon_dataset_dir"));
   PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
+  
+  if (strlen(OPMON_G(dataset_dir)) > 200)
+    PRINT("Error: dataset dirname is too long. Please rebuild with a larger buffer.\n");
 
   init_event_handler(&monitor_functions);
   register_opcode_monitor(&monitor_functions);
