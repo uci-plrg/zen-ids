@@ -16,6 +16,11 @@ do { \
     PRINT("Error: function_name exceeds max length 256!\n"); \
 } while (0)
 
+typedef struct _pending_load_t {
+  bool pending_execution;
+  char function_name[MAX_FUNCTION_NAME];
+} pending_load_t;
+
 static cfg_node_t last_executed_node = { ZEND_NOP, 0 };
 
 static uint pending_cfm_frame;
@@ -26,7 +31,7 @@ static control_flow_metadata_t *pending_cfm_stack[MAX_STACK_FRAME];
 
 static routine_cfg_t *live_loader_cfg;
 static char last_unknown_function_name[MAX_FUNCTION_NAME];
-static char pending_load_function_name[MAX_FUNCTION_NAME];
+static pending_load_t pending_load;
 
 static inline void pend_cfm(control_flow_metadata_t *cfm)
 {
@@ -201,17 +206,20 @@ static void opcode_executing(const zend_op *op)
       
       if (is_loader_frame) {
         live_loader_cfg = NULL;
-        if (peek_cfm() == NULL) {
-          PRINT("Pending the function for which load was invoked: %s\n", pending_load_function_name);
-          push_interp_context(current_opcodes, 0xffffffffU, *get_cfm(pending_load_function_name));
-          //set_interp_cfm(*get_cfm(pending_load_function_name));
+        if (pending_load.pending_execution) {
+          control_flow_metadata_t *pending_cfm = get_cfm(pending_load.function_name);
+          PRINT("Pending the function for which load was invoked: %s\n", pending_load.function_name);
+          pop_cfm();
+          pend_cfm(pending_cfm);
+          //push_interp_context(current_opcodes, 0xffffffffU, *get_cfm(pending_load.function_name));
+          //set_interp_cfm(*get_cfm(pending_load.function_name));
         }
       }
       /*
       if (is_loader_frame) {
         PRINT("Return is from the loader frame: now pending the loaded function: %s\n",
-              pending_load_function_name);
-        pend_cfm(get_cfm(pending_load_function_name));
+              pending_load.function_name);
+        pend_cfm(get_cfm(pending_load.function_name));
       }
       */
     } break;
@@ -288,7 +296,7 @@ static void routine_starting()
   if (pending_cfm == NULL) {
     PRINT("Error: unknown routine starting with ops at "PX".\n", 
           p2int(current_opcodes));
-    //strcpy(pending_load_function_name, last_unknown_function_name);
+    //strcpy(pending_load.function_name, last_unknown_function_name);
     //pending_cfm = get_cfm("<default>:{closure}");
   //} else if (pending_cfm == loader_cfm) {
   //  push_interp_context(current_opcodes, last_executed_node.index, loader_cfm);
@@ -306,7 +314,15 @@ static void loader_starting()
   control_flow_metadata_t *loader_cfm = get_cfm("<default>:{closure}");
   
   PRINT("Loading new class\n");
-  strcpy(pending_load_function_name, last_unknown_function_name);
+  switch (last_executed_node.opcode) {
+    case ZEND_INIT_METHOD_CALL:
+    case ZEND_INIT_STATIC_METHOD_CALL:
+      strcpy(pending_load.function_name, last_unknown_function_name);
+      pending_load.pending_execution = true;
+      break;
+    default:
+      pending_load.pending_execution = false;
+  }
   pend_cfm(loader_cfm);
   live_loader_cfg = loader_cfm->cfg;
 }
@@ -320,6 +336,8 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   pending_cfm_frame = 1;
   pend_cfm(initial_context);
   live_loader_cfg = NULL;
+  
+  pending_load.pending_execution = false;
   
   init_compile_context();
   init_cfg_handler();

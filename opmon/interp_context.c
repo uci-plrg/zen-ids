@@ -79,6 +79,18 @@ static void app_cfg_add_edge(control_flow_metadata_t *from_cfm, routine_cfg_t *t
   }
 }
 
+static bool is_alias(zend_uchar first_opcode, zend_uchar second_opcode) 
+{
+  switch (first_opcode) {
+    case ZEND_FETCH_IS:
+    case ZEND_FETCH_FUNC_ARG:
+      return second_opcode == ZEND_FETCH_R;
+    case ZEND_FETCH_DIM_FUNC_ARG:
+      return ZEND_FETCH_DIM_R;
+  }
+  return false;
+}
+
 void initialize_interp_context()
 {
   app_cfg = cfg_new();
@@ -188,6 +200,7 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
   last_node = node;
   
   if (last_pop == NULL) {
+    cfg_opcode_t *expected_opcode;
     if (from_node.opcode != CONTEXT_ENTRY && node.index != (from_node.index + 1) &&
         from_node.opcode != ZEND_BRK && from_node.opcode != ZEND_CONT) { // todo: security of BRK/CONT?
       bool found = false;
@@ -208,7 +221,8 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
         PRINT("Error! Opcode edge from %d to %d not found\n", from_node.index, node.index);
     }
     
-    if (node.opcode != routine_cfg_get_opcode(current_context.cfm.cfg, node.index)->opcode) {
+    expected_opcode = routine_cfg_get_opcode(current_context.cfm.cfg, node.index);
+    if (node.opcode != expected_opcode->opcode && !is_alias(node.opcode, expected_opcode->opcode)) {
       PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
             zend_get_opcode_name(routine_cfg_get_opcode(current_context.cfm.cfg, node.index)->opcode), 
             node.index, zend_get_opcode_name(node.opcode));
