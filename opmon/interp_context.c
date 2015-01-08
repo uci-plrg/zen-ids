@@ -22,8 +22,7 @@ do { \
 } while (0)
   
 typedef struct _interp_context_t {
-  const char *name;
-  uint id;
+  // const char *name;
   control_flow_metadata_t cfm;
 } interp_context_t;
 
@@ -39,8 +38,8 @@ static shadow_frame_t shadow_stack[MAX_STACK_FRAME];
 static shadow_frame_t *shadow_frame;
 static shadow_frame_t *last_pop;
 
-static interp_context_t current_context = { "<root>", 0, NULL };
-static interp_context_t last_context = { NULL, 0, NULL };
+static interp_context_t current_context = { /*"<root>",*/ NULL };
+static interp_context_t last_context = { /*NULL,*/ NULL };
 
 #define CONTEXT_ENTRY 0xff
 static const cfg_node_t context_entry_node = { CONTEXT_ENTRY, 0xffffffff };
@@ -92,7 +91,7 @@ void initialize_interp_context()
 
 const char *get_current_interp_context_name()
 {
-  return current_context.name;
+  return "<unavailable>"; // todo: put on cfm
 }
 
 routine_cfg_t *get_current_interp_routine_cfg()
@@ -102,12 +101,16 @@ routine_cfg_t *get_current_interp_routine_cfg()
 
 void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t cfm)
 {
-  if (cfm.cfg != NULL)
-    PRINT("# Push interp context 0x%x|0x%x\n", cfm.cfg->unit_hash, cfm.cfg->routine_hash);
-  else
-    PRINT("# Push interp context (null)\n");
+  if (branch_index == 0xffffffffU)
+    branch_index = shadow_frame->continuation_index;
   
-  if (cfm.cfg != NULL && current_context.cfm.cfg != NULL) {
+  if (cfm.cfg != NULL)
+    PRINT("# Push interp context 0x%x|0x%x (from index %d)\n", 
+          cfm.cfg->unit_hash, cfm.cfg->routine_hash, branch_index);
+  else
+    PRINT("# Push interp context (null) (from index %d)\n", branch_index);
+  
+  if (cfm.cfg != NULL && current_context.cfm.cfg != NULL) { // current_context is not always the right one? 
     cfg_node_t from_node = { routine_cfg_get_opcode(current_context.cfm.cfg, branch_index)->opcode, branch_index };
     app_cfg_add_edge(&current_context.cfm, cfm.cfg, from_node);
   }
@@ -227,6 +230,5 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
     return;
   }
   
-  PRINT("Verified return from %s to %s.%d\n", last_context.name, 
-        current_context.name, node.index);
+  PRINT("Verified return to index %d\n", node.index);
 }

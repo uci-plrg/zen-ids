@@ -24,10 +24,9 @@ static control_flow_metadata_t *initial_context = (control_flow_metadata_t *)int
 
 static control_flow_metadata_t *pending_cfm_stack[MAX_STACK_FRAME];
 
+static routine_cfg_t *live_loader_cfg;
 static char last_unknown_function_name[MAX_FUNCTION_NAME];
 static char pending_load_function_name[MAX_FUNCTION_NAME];
-
-control_flow_metadata_t loader_cfm = { NULL, NULL };
 
 static inline void pend_cfm(control_flow_metadata_t *cfm)
 {
@@ -42,6 +41,11 @@ static inline control_flow_metadata_t *pop_cfm()
   if (pending_cfm_frame == 0)
     PRINT("Error: pending_cfm_frame hit stack bottom!\n");
   return pending_cfm_stack[pending_cfm_frame];
+}
+
+static inline control_flow_metadata_t *peek_cfm()
+{
+  return pending_cfm_stack[pending_cfm_frame-1];
 }
 
 static void init_call(const zend_op *op)
@@ -142,10 +146,12 @@ static void opcode_executing(const zend_op *op)
   if (EG(current_execute_data) != NULL && EG(current_execute_data)->func != NULL)
     current_opcodes = EG(current_execute_data)->func->op_array.opcodes;
 
-  if (current_opcodes == NULL)
+  if (current_opcodes == NULL) {
+    PRINT("Error: opcode array not found for execution of opcode 0x%x\n", op->opcode);
     node.index = 0xffffffff;
-  else
+  } else {
     node.index = (uint)(op - current_opcodes);
+  }
   
   if (current_cfg == NULL) {
     PRINT("  === executing %s at index %d of %s on line %d with ops "PX"\n", 
@@ -189,14 +195,25 @@ static void opcode_executing(const zend_op *op)
       }
       break;
     case ZEND_RETURN: {
-      bool is_loader_frame = (get_current_interp_routine_cfg() == loader_cfm.cfg);
+      bool is_loader_frame = (get_current_interp_routine_cfg() == live_loader_cfg);
       PRINT("  === return\n");
       pop_interp_context();
+      
+      if (is_loader_frame) {
+        live_loader_cfg = NULL;
+        if (peek_cfm() == NULL) {
+          PRINT("Pending the function for which load was invoked: %s\n", pending_load_function_name);
+          push_interp_context(current_opcodes, 0xffffffffU, *get_cfm(pending_load_function_name));
+          //set_interp_cfm(*get_cfm(pending_load_function_name));
+        }
+      }
+      /*
       if (is_loader_frame) {
         PRINT("Return is from the loader frame: now pending the loaded function: %s\n",
               pending_load_function_name);
         pend_cfm(get_cfm(pending_load_function_name));
       }
+      */
     } break;
     case ZEND_DECLARE_FUNCTION:
       PRINT("  === declare function\n");
@@ -269,11 +286,12 @@ static void routine_starting()
     return;
   
   if (pending_cfm == NULL) {
-    PRINT("Warning: unknown routine starting with ops at "PX"; assuming it's the loader.\n", 
+    PRINT("Error: unknown routine starting with ops at "PX".\n", 
           p2int(current_opcodes));
-    strcpy(pending_load_function_name, last_unknown_function_name);
+    //strcpy(pending_load_function_name, last_unknown_function_name);
     //pending_cfm = get_cfm("<default>:{closure}");
-    push_interp_context(current_opcodes, last_executed_node.index, loader_cfm);
+  //} else if (pending_cfm == loader_cfm) {
+  //  push_interp_context(current_opcodes, last_executed_node.index, loader_cfm);
   } else if (pending_cfm == call_to_eval) {
     PRINT("Starting eval routine\n");
     push_interp_context(current_opcodes, last_executed_node.index, null_cfm);
@@ -281,6 +299,16 @@ static void routine_starting()
     PRINT("Starting pending routine\n");
     push_interp_context(current_opcodes, last_executed_node.index, *pending_cfm);
   }
+}
+
+static void loader_starting()
+{
+  control_flow_metadata_t *loader_cfm = get_cfm("<default>:{closure}");
+  
+  PRINT("Loading new class\n");
+  strcpy(pending_load_function_name, last_unknown_function_name);
+  pend_cfm(loader_cfm);
+  live_loader_cfg = loader_cfm->cfg;
 }
 
 void init_event_handler(zend_opcode_monitor_t *monitor)
@@ -291,6 +319,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   pending_cfm_stack[1] = NULL;
   pending_cfm_frame = 1;
   pend_cfm(initial_context);
+  live_loader_cfg = NULL;
   
   init_compile_context();
   init_cfg_handler();
@@ -305,6 +334,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_function_compile_start = function_compiling;
   monitor->notify_function_compile_complete = function_compiled;
   monitor->notify_routine_execute_start = routine_starting;
+  monitor->notify_class_load = loader_starting;
 }
 
 void destroy_event_handler()

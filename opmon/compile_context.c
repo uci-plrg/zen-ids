@@ -165,12 +165,14 @@ void push_compilation_function(const char *classname, const char *function_name)
   if (CG(active_op_array) != NULL)
     PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
   
+  /*
   if (strcmp(routine_name, "<default>:{closure}") == 0) {
     extern control_flow_metadata_t loader_cfm;
     if (loader_cfm.cfg != NULL)
       PRINT("Error! Found a duplicate loader routine! Overwriting it for now.\n");
     loader_cfm = current_routine->cfm;
   }
+  */
     
   fqn = malloc(sizeof(function_fqn_t));
   fqn->unit = *current_unit;
