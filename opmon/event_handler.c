@@ -22,6 +22,8 @@ typedef struct _pending_load_t {
 } pending_load_t;
 
 static cfg_node_t last_executed_node = { ZEND_NOP, 0 };
+static zend_op *current_op_array = NULL;
+static zend_op *last_op_array = NULL;
 
 static uint pending_cfm_frame;
 static control_flow_metadata_t *call_to_eval = (control_flow_metadata_t *)int2p(1);
@@ -142,43 +144,41 @@ static void init_call(const zend_op *op)
 
 static void opcode_executing(const zend_op *op)
 {
-  zend_op *current_opcodes;
   uint hash;
   cfg_node_t node = { op->opcode, 0 };
   routine_cfg_t *current_cfg = get_current_interp_routine_cfg();
   control_flow_metadata_t *pending_cfm;
   
-  if (EG(current_execute_data) != NULL && EG(current_execute_data)->func != NULL)
-    current_opcodes = EG(current_execute_data)->func->op_array.opcodes;
-
-  if (current_opcodes == NULL) {
+  last_op_array = current_op_array;
+  current_op_array = EG(current_execute_data)->func->op_array.opcodes;
+  if (current_op_array == NULL) {
     PRINT("Error: opcode array not found for execution of opcode 0x%x\n", op->opcode);
     node.index = 0xffffffff;
   } else {
-    node.index = (uint)(op - current_opcodes);
+    node.index = (uint)(op - current_op_array);
   }
   
   if (current_cfg == NULL) {
     PRINT("  === executing %s at index %d of %s on line %d with ops "PX"\n", 
           zend_get_opcode_name(node.opcode), 
           node.index, get_current_interp_context_name(), op->lineno,
-          p2int(current_opcodes));
+          p2int(current_op_array));
   } else {
     PRINT("  === executing %s at index %d of %s(0x%x|0x%x) on line %d with ops "PX"\n", 
           zend_get_opcode_name(node.opcode), node.index, 
           get_current_interp_context_name(), current_cfg->unit_hash, 
-          current_cfg->routine_hash, op->lineno, p2int(current_opcodes));
+          current_cfg->routine_hash, op->lineno, p2int(current_op_array));
   }
   //PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
   //  node.index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
   
-  verify_interp_context(current_opcodes, node);
+  verify_interp_context(current_op_array, node);
   
   last_executed_node = node;
 
   switch (op->opcode) {
     case ZEND_INCLUDE_OR_EVAL:
-      push_interp_context(current_opcodes, node.index, null_cfm);
+      push_interp_context(current_op_array, node.index, null_cfm);
       //pend_cfm(call_to_eval);
       break;
     case ZEND_INIT_FCALL:
@@ -193,9 +193,9 @@ static void opcode_executing(const zend_op *op)
       pending_cfm = pop_cfm();
       if (pending_cfm != NULL) {
         if (pending_cfm == call_to_eval) {
-          push_interp_context(current_opcodes, node.index, null_cfm);
+          push_interp_context(current_op_array, node.index, null_cfm);
         } else {
-          push_interp_context(current_opcodes, node.index, *pending_cfm);
+          push_interp_context(current_op_array, node.index, *pending_cfm);
         }
       }
       break;
@@ -211,7 +211,7 @@ static void opcode_executing(const zend_op *op)
           PRINT("Pending the function for which load was invoked: %s\n", pending_load.function_name);
           pop_cfm();
           pend_cfm(pending_cfm);
-          //push_interp_context(current_opcodes, 0xffffffffU, *get_cfm(pending_load.function_name));
+          //push_interp_context(current_op_array, 0xffffffffU, *get_cfm(pending_load.function_name));
           //set_interp_cfm(*get_cfm(pending_load.function_name));
         }
       }
@@ -287,31 +287,56 @@ static void function_compiled()
 
 static void routine_starting()
 {
-  zend_op *current_opcodes = EG(current_execute_data)->func->op_array.opcodes;
   control_flow_metadata_t *pending_cfm = pop_cfm();
+  zend_function *function = EG(current_execute_data)->func;
+  zend_op *active_op_array = last_op_array;
+  zend_op *op_array = function->op_array.opcodes;
+  const char *filename = function->op_array.filename->val;
+  const char *function_name;
+  
+  if (function->common.function_name == NULL)
+    function_name = "<script-body>";
+  else
+    function_name = function->common.function_name->val;
+                                                  
+  PRINT("Routine %s|%s starting at "PX"\n", filename, function_name, p2int(op_array));
   
   if (pending_cfm == initial_context)
     return;
   
   if (pending_cfm == NULL) {
     PRINT("Error: unknown routine starting with ops at "PX".\n", 
-          p2int(current_opcodes));
+          p2int(current_op_array));
     //strcpy(pending_load.function_name, last_unknown_function_name);
     //pending_cfm = get_cfm("<default>:{closure}");
   //} else if (pending_cfm == loader_cfm) {
-  //  push_interp_context(current_opcodes, last_executed_node.index, loader_cfm);
+  //  push_interp_context(current_op_array, last_executed_node.index, loader_cfm);
   } else if (pending_cfm == call_to_eval) {
     PRINT("Starting eval routine\n");
-    push_interp_context(current_opcodes, last_executed_node.index, null_cfm);
+    push_interp_context(active_op_array, last_executed_node.index, null_cfm);
   } else {
-    PRINT("Starting pending routine\n");
-    push_interp_context(current_opcodes, last_executed_node.index, *pending_cfm);
+    /*
+    if (pending_cfm->cfg == live_loader_cfg) {
+      last_op_array = current_op_array;
+      current_op_array = EG(current_execute_data)->func->op_array.opcodes;
+      active_op_array = current_op_array;
+    }
+    */
+    
+    PRINT("Starting pending routine 0x%x|0x%x\n", 
+          pending_cfm->cfg->unit_hash, pending_cfm->cfg->routine_hash);
+    push_interp_context(active_op_array, last_executed_node.index, *pending_cfm);
   }
 }
 
 static void loader_starting()
 {
   control_flow_metadata_t *loader_cfm = get_cfm("<default>:{closure}");
+  if (loader_cfm == NULL) {
+    PRINT("Unknown loader starting--pushing null cfm\n");
+    pend_cfm(NULL);
+    return;
+  }
   
   PRINT("Loading new class\n");
   switch (last_executed_node.opcode) {

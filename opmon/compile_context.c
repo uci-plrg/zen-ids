@@ -81,7 +81,7 @@ void push_compilation_unit(const char *path)
   PRINT("Push compilation unit %s\n", path);
   
   if (CG(active_op_array) != NULL)
-    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)->opcodes));
   
   unit_frame->path = path;
   unit_frame->hash = hash_string(path);
@@ -163,7 +163,7 @@ void push_compilation_function(const char *classname, const char *function_name)
   }
   
   if (CG(active_op_array) != NULL)
-    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)->opcodes));
   
   /*
   if (strcmp(routine_name, "<default>:{closure}") == 0) {
@@ -236,7 +236,7 @@ void push_eval(uint eval_id)
   PRINT("Push eval 0x%x\n", eval_id);
   
   if (CG(active_op_array) != NULL)
-    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)->opcodes));
   
   unit_frame->path = EVAL_PATH;
   unit_frame->hash = EVAL_HASH;
@@ -284,7 +284,7 @@ void add_compiled_op(const zend_op *op, uint index)
         index, current_unit->path, current_routine->name, current_unit->hash, current_routine->hash);
   
   if (CG(active_op_array) != NULL)
-    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)));
+    PRINT("   (Current opcodes at "PX")\n", p2int(CG(active_op_array)->opcodes));
   
   routine_cfg_assign_opcode(current_routine->cfm.cfg, op->opcode, op->extended_value, index);
   

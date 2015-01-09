@@ -27,7 +27,7 @@ typedef struct _interp_context_t {
 } interp_context_t;
 
 typedef struct _shadow_frame_t {
-  zend_op *op;
+  zend_op *op_array;
   uint continuation_index;
   interp_context_t context;
 } shadow_frame_t;
@@ -96,7 +96,7 @@ void initialize_interp_context()
   app_cfg = cfg_new();
   shadow_frame = shadow_stack;
   shadow_frame++;
-  shadow_frame->op = NULL;
+  shadow_frame->op_array = NULL;
   last_pop = NULL;
   last_node = context_entry_node;
 }
@@ -111,7 +111,7 @@ routine_cfg_t *get_current_interp_routine_cfg()
   return current_context.cfm.cfg;
 }
 
-void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t cfm)
+void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm)
 {
   if (branch_index == 0xffffffffU)
     branch_index = shadow_frame->continuation_index;
@@ -123,17 +123,27 @@ void push_interp_context(zend_op* op, uint branch_index, control_flow_metadata_t
     PRINT("# Push interp context (null) (from index %d)\n", branch_index);
   
   if (cfm.cfg != NULL && current_context.cfm.cfg != NULL) { // current_context is not always the right one? 
-    cfg_node_t from_node = { routine_cfg_get_opcode(current_context.cfm.cfg, branch_index)->opcode, branch_index };
-    app_cfg_add_edge(&current_context.cfm, cfm.cfg, from_node);
+    if (branch_index < current_context.cfm.cfg->opcodes.size) {
+      cfg_node_t from_node = { 
+        routine_cfg_get_opcode(current_context.cfm.cfg, branch_index)->opcode, 
+        branch_index 
+      };
+      app_cfg_add_edge(&current_context.cfm, cfm.cfg, from_node);
+    } else {
+      PRINT("Error: branch_index %d exceeds last context cfg size %d\n", 
+            branch_index, current_context.cfm.cfg->opcodes.size);
+    }
   }
   
-  shadow_frame->op = op;
+  if (shadow_frame->op_array == NULL)
+    shadow_frame->op_array = op_array;
   shadow_frame->continuation_index = branch_index + 1;
   shadow_frame->context = current_context;
   
   INCREMENT_STACK(shadow_stack, shadow_frame);
   last_context = current_context;
   current_context.cfm = cfm;
+  shadow_frame->op_array = NULL;
   
   last_node = context_entry_node;
 }
@@ -145,11 +155,17 @@ void set_interp_cfm(control_flow_metadata_t cfm)
   PRINT("# Set interp context 0x%x|0x%x\n", cfm.cfg->unit_hash, cfm.cfg->routine_hash);
   
   if (last_context.cfm.cfg != NULL) {
-    cfg_node_t from_node = { routine_cfg_get_opcode(last_context.cfm.cfg, branch_index)->opcode, branch_index };
-    
-    PRINT("# Adding edge from last context\n");
-    
-    app_cfg_add_edge(&last_context.cfm, cfm.cfg, from_node);
+    if (branch_index < last_context.cfm.cfg->opcodes.size) {
+      cfg_node_t from_node = { 
+        routine_cfg_get_opcode(last_context.cfm.cfg, branch_index)->opcode, 
+        branch_index 
+      };
+      PRINT("# Adding edge from last context\n");
+      app_cfg_add_edge(&last_context.cfm, cfm.cfg, from_node);
+    } else {
+      PRINT("Error: branch_index %d exceeds last context cfg size %d\n", 
+            branch_index, last_context.cfm.cfg->opcodes.size);
+    }
   /*
   if (current_context.cfm.cfg != NULL) {
     cfg_node_t from_node = { current_context.cfm.cfg->opcodes[branch_index].opcode, branch_index };
@@ -221,11 +237,16 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
         PRINT("Error! Opcode edge from %d to %d not found\n", from_node.index, node.index);
     }
     
-    expected_opcode = routine_cfg_get_opcode(current_context.cfm.cfg, node.index);
-    if (node.opcode != expected_opcode->opcode && !is_alias(node.opcode, expected_opcode->opcode)) {
-      PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
-            zend_get_opcode_name(routine_cfg_get_opcode(current_context.cfm.cfg, node.index)->opcode), 
-            node.index, zend_get_opcode_name(node.opcode));
+    if (node.index < current_context.cfm.cfg->opcodes.size) {
+      expected_opcode = routine_cfg_get_opcode(current_context.cfm.cfg, node.index);
+      if (node.opcode != expected_opcode->opcode && !is_alias(node.opcode, expected_opcode->opcode)) {
+        PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
+              zend_get_opcode_name(routine_cfg_get_opcode(current_context.cfm.cfg, node.index)->opcode), 
+              node.index, zend_get_opcode_name(node.opcode));
+      }
+    } else {
+      PRINT("Error! The executing node has index %d, but the current context has only %d opcodes\n",
+            node.index, current_context.cfm.cfg->opcodes.size);
     }
     return;
   }
@@ -233,9 +254,9 @@ void verify_interp_context(zend_op* head, cfg_node_t node)
   verify_frame = last_pop;
   last_pop = NULL;
   
-  if (verify_frame->op != head) {
-    PRINT("Error! Returned to op "PX" but expected op "PX"!\n", 
-          (uint64) head, (uint64) verify_frame->op);
+  if (verify_frame->op_array != head) {
+    PRINT("Error! Returned to op_array "PX" but expected op_array "PX"!\n", 
+          (uint64) head, (uint64) verify_frame->op_array);
     return;
   }
   if (verify_frame->continuation_index != node.index) {
