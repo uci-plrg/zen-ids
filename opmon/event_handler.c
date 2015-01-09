@@ -142,42 +142,30 @@ static void init_call(const zend_op *op)
   pend_cfm(pending_cfm);
 }
 
-static void opcode_executing(const zend_op *op)
+static void deprecated_opcode_executing(const zend_op *op)
 {
   if (true) return;
   
-  uint hash;
+  //uint hash;
   cfg_node_t node = { op->opcode, 0 };
-  routine_cfg_t *current_cfg = get_current_interp_routine_cfg();
-  control_flow_metadata_t *pending_cfm;
+  //control_flow_metadata_t *pending_cfm;
   
   last_op_array = current_op_array;
   current_op_array = EG(current_execute_data)->func->op_array.opcodes;
   if (current_op_array == NULL) {
     PRINT("Error: opcode array not found for execution of opcode 0x%x\n", op->opcode);
-    node.index = 0xffffffff;
-  } else {
-    node.index = (uint)(op - current_op_array);
-  }
+    return;
+  } 
   
-  if (current_cfg == NULL) {
-    PRINT("  === executing %s at index %d of %s on line %d with ops "PX"\n", 
-          zend_get_opcode_name(node.opcode), 
-          node.index, get_current_interp_context_name(), op->lineno,
-          p2int(current_op_array));
-  } else {
-    PRINT("  === executing %s at index %d of %s(0x%x|0x%x) on line %d with ops "PX"\n", 
-          zend_get_opcode_name(node.opcode), node.index, 
-          get_current_interp_context_name(), current_cfg->unit_hash, 
-          current_cfg->routine_hash, op->lineno, p2int(current_op_array));
-  }
+  node.index = (uint)(op - current_op_array);
+  
   //PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
   //  node.index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
   
   verify_interp_context(current_op_array, node);
   
-  last_executed_node = node;
-
+  //last_executed_node = node;
+/*
   switch (op->opcode) {
     case ZEND_INCLUDE_OR_EVAL:
       push_interp_context(current_op_array, node.index, null_cfm);
@@ -217,13 +205,6 @@ static void opcode_executing(const zend_op *op)
           //set_interp_cfm(*get_cfm(pending_load.function_name));
         }
       }
-      /*
-      if (is_loader_frame) {
-        PRINT("Return is from the loader frame: now pending the loaded function: %s\n",
-              pending_load.function_name);
-        pend_cfm(get_cfm(pending_load.function_name));
-      }
-      */
     } break;
     case ZEND_DECLARE_FUNCTION:
       PRINT("  === declare function\n");
@@ -241,9 +222,10 @@ static void opcode_executing(const zend_op *op)
       PRINT("  === ZEND_EXT_FCALL_END\n");
       break;
   }
+*/
 }
 
-static void routine_call()
+static void deprecated_routine_call()
 {
   if (true) return;
   

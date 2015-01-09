@@ -36,7 +36,7 @@ void init_compile_context()
 void function_compiled()
 {
   uint i, eval_id;
-  bool is_eval = false;
+  bool is_script_body = false, is_eval = false;
   function_fqn_t *fqn;
   control_flow_metadata_t cfm;
   uint routine_key;
@@ -52,6 +52,7 @@ void function_compiled()
     
     if (CG(active_op_array)->function_name == NULL) {
       function_name = "<script-body>";
+      is_script_body = true;
     } else {
       function_name = CG(active_op_array)->function_name->val;
       if (strcmp(function_name, "__lambda_func") == 0) {
@@ -69,10 +70,14 @@ void function_compiled()
     filename = "<any-file>";
   } else {
     const char *classname;
-    if (CG(active_op_array)->scope == NULL)
-      classname = "<default>";
-    else
-      classname = CG(active_op_array)->scope->name->val;
+    if (is_script_body) {
+      classname = strrchr(CG(active_op_array)->filename->val, '/') + 1;
+    } else {
+      if (CG(active_op_array)->scope == NULL)
+        classname = "<default>";
+      else
+        classname = CG(active_op_array)->scope->name->val;
+    }
     sprintf(routine_name, "%s:%s", classname, function_name);
   }
   
