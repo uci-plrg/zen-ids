@@ -144,6 +144,8 @@ static void init_call(const zend_op *op)
 
 static void opcode_executing(const zend_op *op)
 {
+  if (true) return;
+  
   uint hash;
   cfg_node_t node = { op->opcode, 0 };
   routine_cfg_t *current_cfg = get_current_interp_routine_cfg();
@@ -241,65 +243,33 @@ static void opcode_executing(const zend_op *op)
   }
 }
 
-static void opcode_compiling(const zend_op *op, uint index)
+static void routine_call()
 {
-  add_compiled_op(op, index);
-}
-
-static void edge_compiling(uint from_index, uint to_index)
-{
-  add_compiled_edge(from_index, to_index);
-}
-
-static void file_compiling(const char *path)
-{
-  if (path == NULL) {
-    uint eval_id = get_next_eval_id();
-    
-    PRINT("  === entering `eval` context #%u\n", eval_id); 
-    push_eval(eval_id);
-  } else {
-    push_compilation_unit(path);
-  }
-}
-
-static void file_compiled()
-{
-  control_flow_metadata_t compiled_cfm = pop_compilation_unit();
+  if (true) return;
   
-  if (compiled_cfm.cfg == NULL) {
-    PRINT("Not activating compiled unit because it was skipped by the opmon compiler.\n");
-    return;
-  }
-  
-  set_interp_cfm(compiled_cfm);
-}
-
-static void function_compiling(const char *classname, const char *function_name)
-{
-  push_compilation_function(classname, function_name);
-}
-
-static void function_compiled()
-{
-  pop_compilation_function();
-}
-
-static void routine_starting()
-{
   control_flow_metadata_t *pending_cfm = pop_cfm();
-  zend_function *function = EG(current_execute_data)->func;
   zend_op *active_op_array = last_op_array;
-  zend_op *op_array = function->op_array.opcodes;
-  const char *filename = function->op_array.filename->val;
-  const char *function_name;
   
-  if (function->common.function_name == NULL)
-    function_name = "<script-body>";
-  else
-    function_name = function->common.function_name->val;
-                                                  
-  PRINT("Routine %s|%s starting at "PX"\n", filename, function_name, p2int(op_array));
+  // for static functions, class is here: call->func.op_array.scope->name.val
+  // for instance methods, class is here: call->This
+  // for evals, filename is null (call->func.op_array.filename)
+  // for script body, filename is not null, but function_name is null (call->func.op_array.function_name)
+  
+  PRINT("Routine starting\n");
+  
+  if (0) {
+    zend_function *function = EG(current_execute_data)->func;
+    zend_op *op_array = function->op_array.opcodes;
+    const char *filename = function->op_array.filename->val;
+    const char *function_name;
+    
+    if (function->common.function_name == NULL)
+      function_name = "<script-body>";
+    else
+      function_name = function->common.function_name->val;
+                                                    
+    PRINT("Routine %s|%s starting at "PX"\n", filename, function_name, p2int(op_array));
+  }
   
   if (pending_cfm == initial_context)
     return;
@@ -329,8 +299,10 @@ static void routine_starting()
   }
 }
 
-static void loader_starting()
+static void loader_call()
 {
+  if (true) return;
+  
   control_flow_metadata_t *loader_cfm = get_cfm("<default>:{closure}");
   if (loader_cfm == NULL) {
     PRINT("Unknown loader starting--pushing null cfm\n");
@@ -370,14 +342,8 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   
   monitor->set_top_level_script = starting_script;
   monitor->notify_opcode_interp = opcode_executing;
-  monitor->notify_opcode_compile = opcode_compiling;
-  monitor->notify_edge_compile = edge_compiling;
-  monitor->notify_file_compile_start = file_compiling;
-  monitor->notify_file_compile_complete = file_compiled;
-  monitor->notify_function_compile_start = function_compiling;
   monitor->notify_function_compile_complete = function_compiled;
-  monitor->notify_routine_execute_start = routine_starting;
-  monitor->notify_class_load = loader_starting;
+  monitor->notify_routine_call = routine_call;
 }
 
 void destroy_event_handler()

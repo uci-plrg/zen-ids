@@ -88,7 +88,7 @@ void starting_script(const char *script_path)
 
 void write_node(uint unit_hash, uint routine_hash, cfg_opcode_t *opcode, uint index)
 {
-  PRINT("Write node 0x%x 0x%x | 0x%01x to cfg\n", unit_hash, routine_hash, opcode->opcode);
+  PRINT("Write node 0x%x|0x%x #%d 0x%01x to cfg\n", unit_hash, routine_hash, index, opcode->opcode);
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.node);
   fwrite(&routine_hash, sizeof(uint), 1, cfg_files.node);
   fopcode(opcode, cfg_files.node);
@@ -97,7 +97,7 @@ void write_node(uint unit_hash, uint routine_hash, cfg_opcode_t *opcode, uint in
 
 void write_op_edge(uint unit_hash, uint routine_hash, uint from_index, uint to_index)
 {
-  PRINT("Write op-edge 0x%x 0x%x | 0x%x -> 0x%x to cfg\n", unit_hash, routine_hash, from_index, to_index);
+  PRINT("Write op-edge 0x%x|0x%x #%d -> #%d to cfg\n", unit_hash, routine_hash, from_index, to_index);
   
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.op_edge);
   fwrite(&routine_hash, sizeof(uint), 1, cfg_files.op_edge);
@@ -108,7 +108,7 @@ void write_op_edge(uint unit_hash, uint routine_hash, uint from_index, uint to_i
 void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_index, 
                         uint to_unit_hash, uint to_routine_hash, uint to_index)
 {
-  PRINT("Write routine-edge {0x%x 0x%x 0x%x} -> {0x%x 0x%x 0x%x} to cfg\n", 
+  PRINT("Write routine-edge {0x%x|0x%x #%d} -> {0x%x|0x%x #%d to cfg\n", 
         from_unit_hash, from_routine_hash, from_index, 
         to_unit_hash, to_routine_hash, to_index);
   
