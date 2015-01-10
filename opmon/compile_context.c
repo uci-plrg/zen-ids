@@ -15,7 +15,6 @@ typedef struct _compilation_unit_t {
 } compilation_unit_t;
 
 typedef struct _compilation_routine_t {
-  const char *name;
   uint hash;
   control_flow_metadata_t cfm;
 } compilation_routine_t;
@@ -26,6 +25,8 @@ typedef struct _function_fqn_t {
 } function_fqn_t;
 
 static sctable_t routine_table;
+
+static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
 void init_compile_context()
 {
@@ -96,16 +97,15 @@ void function_compiled()
   
   buffer = malloc(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
-  fqn->function.name = buffer;
+  cfm.routine_name = buffer;
   if (is_eval)
     fqn->function.hash = eval_id;
   else
-    fqn->function.hash = hash_string(fqn->function.name);
+    fqn->function.hash = hash_string(cfm.routine_name);
   
   cfm.dataset = dataset_routine_lookup(fqn->unit.hash, 0);  
   cfm.cfg = routine_cfg_new(fqn->unit.hash, fqn->function.hash);
-  fqn->function.cfm.dataset = cfm.dataset;
-  fqn->function.cfm.cfg = cfm.cfg;
+  fqn->function.cfm = cfm;
   
   sctable_add(&routine_table, routine_key, fqn);
   
@@ -134,12 +134,14 @@ void function_compiled()
     
     routine_cfg_add_edge(cfm.cfg, i, target);
     PRINT("\t[create edge %d->%d for {%s|%s, 0x%x|0x%x}]\n", i, target,
-          fqn->unit.path, fqn->function.name,
+          fqn->unit.path, fqn->function.cfm.routine_name,
           fqn->unit.hash, fqn->function.hash);
   }
   
-  if (cfm.cfg->unit_hash == EVAL_HASH) // ??
+  if (is_eval) {
     dataset_match_eval(&cfm);
+    last_eval_cfm = cfm;
+  }
   
   if (cfm.dataset == NULL) {
     cfg_opcode_t *cfg_opcode;
@@ -148,7 +150,7 @@ void function_compiled()
       cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
       PRINT("\t[emit %s at %d for {%s|%s, 0x%x|0x%x}]\n", 
             zend_get_opcode_name(cfg_opcode->opcode), i,
-          fqn->unit.path, fqn->function.name,
+          fqn->unit.path, fqn->function.cfm.routine_name,
           fqn->unit.hash, fqn->function.hash);
       write_node(fqn->unit.hash, fqn->function.hash, cfg_opcode, i);
     }
@@ -189,4 +191,9 @@ control_flow_metadata_t *get_cfm(const char *routine_name)
     return NULL;
   else
     return &fqn->function.cfm;
+}
+
+control_flow_metadata_t get_last_eval_cfm()
+{
+  return last_eval_cfm;
 }

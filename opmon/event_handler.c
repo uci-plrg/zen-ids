@@ -326,6 +326,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
   monitor->notify_routine_call = routine_call;
+  monitor->notify_routine_return = routine_return;
 }
 
 void destroy_event_handler()

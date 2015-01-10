@@ -10,5 +10,6 @@ void function_compiled();
 
 const char *get_function_declaration_path(const char *function_name);
 control_flow_metadata_t *get_cfm(const char *function_name);
+control_flow_metadata_t get_last_eval_cfm();
 
 #endif

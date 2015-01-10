@@ -6,7 +6,7 @@
 #include "compile_context.h"
 #include "interp_context.h"
 
-#define MAX_STACK_FRAME 256
+#define MAX_STACK_FRAME 0x100000
 #define ROUTINE_NAME_LENGTH 256
 
 #define INCREMENT_STACK(base, ptr) \
@@ -34,6 +34,8 @@ static cfg_t *app_cfg;
 static shadow_frame_t shadow_stack[MAX_STACK_FRAME];
 static shadow_frame_t *shadow_frame;
 
+static bool is_initial_entry = true;
+
 #define CONTEXT_ENTRY 0xffffffffU
 //static const cfg_node_t context_entry_node = { CONTEXT_ENTRY, 0xffffffff };
 
@@ -50,7 +52,7 @@ static void app_cfg_add_edge(control_flow_metadata_t *from_cfm,
     if (dataset_verify_routine_edge(from_cfm->dataset, from_node.index, 
                                     to_cfg->unit_hash, to_cfg->routine_hash)) {
       write_edge = false;
-      PRINT("<MON> Verified routine edge [0x%x|0x%x|%d -> 0x%x|0x%x]\n", 
+      PRINT("<MON> Verified routine edge [0x%x|0x%x|%u -> 0x%x|0x%x]\n", 
             from_cfm->cfg->unit_hash,
             from_cfm->cfg->routine_hash, from_node.index, 
             to_cfg->unit_hash, to_cfg->routine_hash);
@@ -58,7 +60,7 @@ static void app_cfg_add_edge(control_flow_metadata_t *from_cfm,
   }
   
   if (write_edge) {
-    PRINT("<MON> New routine edge [0x%x|0x%x|%d -> 0x%x|0x%x]\n", 
+    PRINT("<MON> New routine edge [0x%x|0x%x|%u -> 0x%x|0x%x]\n", 
           from_cfm->cfg->unit_hash, 
           from_cfm->cfg->routine_hash, from_node.index, 
           to_cfg->unit_hash, to_cfg->routine_hash);
@@ -96,71 +98,194 @@ routine_cfg_t *get_current_interp_routine_cfg()
   return shadow_frame->cfm.cfg;
 }
 
-static bool is_eval(zend_op_array *op_array)
+static bool is_lambda(zend_op_array *op_array)
 {
-  if (op_array->type == ZEND_EVAL_CODE)
-    return true;
-  
-  if (op_array->scope == NULL && op_array->function_name != NULL) {
-    if (strcmp(op_array->function_name->val, "create_function") == 0)
-      return true;
-    if (strcmp(op_array->function_name->val, "__lambda_func") == 0)
-      return true;
+  if (op_array->type == ZEND_USER_FUNCTION && op_array->scope == NULL && 
+      op_array->function_name != NULL) {
+    return (strcmp(op_array->function_name->val, "__lambda_func") == 0);
   }
-  
   return false;
 }
 
 void routine_call(zend_execute_data *call)
 {
+  bool is_call = false;
   control_flow_metadata_t cfm;
   zend_op_array *op_array = &call->func->op_array;
+  shadow_frame_t *call_frame = shadow_frame + 1;
   
   // create/evaluate a call edge
   
-  if (is_eval(op_array)) {
-    // eval or lambda
-    cfm.cfg = NULL;
-    cfm.dataset = NULL;
-    
-    PRINT("--- Routine call to eval with opcodes at "PX" and cfg "PX"\n",
-          p2int(op_array->opcodes), p2int(cfm.cfg));
+  if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
+    cfm = get_last_eval_cfm();
   } else {
     char routine_name[ROUTINE_NAME_LENGTH];
     const char *classname, *function_name;
     control_flow_metadata_t *monitored_cfm;
     
-    if (op_array->function_name == NULL) {     // eval
+    if (op_array->function_name == NULL) {     // script-body
       classname = (strrchr(op_array->filename->val, '/') + 1);
       function_name = "<script-body>";
     } else if (op_array->scope == NULL) {      // function call
+      is_call = true;
       classname = "<default>";
-      function_name = op_array->function_name->val;
+      if (strcmp(op_array->function_name->val, "__lambda_func") == 0) {
+        zend_execute_data *execute_data = EG(current_execute_data);
+        const zend_op *call_op = EX(opline);
+        function_name = (EX_VAR(call_op->op2.var)->value.str->val + 1);
+      } else {
+        function_name = op_array->function_name->val;
+      }
     } else if (call->This.value.obj == NULL) { // static method call
+      is_call = true;
       classname = op_array->scope->name->val;
       function_name = op_array->function_name->val;
     } else {                                   // instance method call
+      is_call = true;
       classname = call->This.value.obj->ce->name->val;
       function_name = op_array->function_name->val;
     }
     sprintf(routine_name, "%s:%s", classname, function_name);
-    monitored_cfm = get_cfm(routine_name);
     
+    monitored_cfm = get_cfm(routine_name);
     if (monitored_cfm == NULL) {
+      //INCREMENT_STACK(shadow_stack, shadow_frame);
       PRINT("--- Routine call to builtin function %s\n", routine_name);
       return;
     } else {
       cfm = *monitored_cfm;
-      PRINT("--- Routine call to %s with opcodes at "PX" and cfg "PX"\n",
-            routine_name, p2int(op_array->opcodes), p2int(cfm.cfg));
     }
   }
   
-  shadow_frame++;
-  shadow_frame->opcodes = op_array->opcodes;
-  shadow_frame->last_index = CONTEXT_ENTRY;
-  shadow_frame->cfm = cfm;
+  /*
+  if (is_initial_entry) {
+    is_call = true;
+    is_initial_entry = false;
+  }
+  */
+  if (!is_call) 
+    INCREMENT_STACK(shadow_stack, shadow_frame);
+  
+  PRINT("--- Routine call to %s with opcodes at "PX" and cfg "PX"\n",
+        cfm.routine_name, p2int(op_array->opcodes), p2int(cfm.cfg));
+  
+  call_frame->opcodes = op_array->opcodes;
+  call_frame->last_index = CONTEXT_ENTRY;
+  call_frame->cfm = cfm;
 }
+
+void routine_return()
+{
+  PRINT("--- Routine return\n");
+  
+  DECREMENT_STACK(shadow_stack, shadow_frame);
+}
+
+static uint get_next_executable_index(uint from_index)
+{
+  zend_uchar opcode;
+  uint i = from_index;
+  while (true) {
+    opcode = shadow_frame->opcodes[i].opcode;
+    if (zend_get_opcode_name(opcode) != NULL && opcode != ZEND_RECV)
+      break;
+    i++;
+  }
+  return i;
+}
+
+static bool is_fallthrough(cfg_node_t *to_node)
+{
+  bool is_context_entry = shadow_frame->last_index == CONTEXT_ENTRY;
+  uint next_index;
+  
+  if (!is_context_entry) {
+    switch (shadow_frame->opcodes[shadow_frame->last_index].opcode) {
+      case ZEND_RETURN:
+      case ZEND_JMP:
+      case ZEND_BRK:
+      case ZEND_CONT:
+        return false;
+    }
+  }
+  
+  next_index = (is_context_entry ? 0 : shadow_frame->last_index + 1);
+  return to_node->index == get_next_executable_index(next_index);
+}
+
+void opcode_executing(const zend_op *op)
+{
+  
+  if (shadow_frame->opcodes != EG(current_execute_data)->func->op_array.opcodes) {
+    PRINT("Error: expected opcode array at "PX", but the current opcodes are at "PX"\n",
+          p2int(shadow_frame->opcodes), 
+          p2int(EG(current_execute_data)->func->op_array.opcodes));
+  } else {
+    cfg_node_t executing_node = { op->opcode, op - shadow_frame->opcodes };
+    cfg_opcode_t *expected_opcode;
+    
+    PRINT("@ Executing %s at index %u of 0x%x|0x%x\n",
+          zend_get_opcode_name(executing_node.opcode), executing_node.index,
+          shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
+    
+    expected_opcode = routine_cfg_get_opcode(shadow_frame->cfm.cfg, executing_node.index);
+    if (executing_node.opcode != expected_opcode->opcode && 
+        !is_alias(executing_node.opcode, expected_opcode->opcode)) {
+      PRINT("Error! Expected opcode %s at index %u, but found opcode %s\n", 
+            zend_get_opcode_name(expected_opcode->opcode), 
+            executing_node.index, zend_get_opcode_name(executing_node.opcode));
+    }
+        
+    if (is_fallthrough(&executing_node)) {
+      PRINT("@ Verified fall-through %u -> %u in 0x%x|0x%x\n", 
+            shadow_frame->last_index, executing_node.index,
+            shadow_frame->cfm.cfg->unit_hash, 
+            shadow_frame->cfm.cfg->routine_hash);
+    } else {
+      if (shadow_frame->last_index == CONTEXT_ENTRY) {
+        PRINT("Error! Context entry reaches index %u, "
+              "but the first executable node has index %u!\n",
+              executing_node.index, get_next_executable_index(0));
+      } else {
+        cfg_node_t from_node = { 
+          shadow_frame->opcodes[shadow_frame->last_index].opcode,
+          shadow_frame->last_index
+        };
+        
+        if (from_node.opcode != ZEND_BRK && from_node.opcode != ZEND_CONT) {
+          bool found = false;
+          uint i;
+          for (i = 0; i < shadow_frame->cfm.cfg->edges.size; i++) {
+            cfg_opcode_edge_t *edge = routine_cfg_get_edge(shadow_frame->cfm.cfg, i);
+            if (edge->from_index == shadow_frame->last_index) {
+              if (edge->to_index == executing_node.index) {
+                found = true;
+                PRINT("@ Verified opcode edge %u -> %u\n", 
+                      shadow_frame->last_index, executing_node.index);
+                break;
+              } else if (edge->to_index != (edge->from_index + 1)) {
+                PRINT("Error! Opcode edge from %u was compiled with target %u, "
+                      "but executed with target %u\n",
+                      shadow_frame->last_index, edge->to_index, executing_node.index);
+              }
+            }
+          }
+          if (!found) {
+            PRINT("Error! Opcode edge from %u to %u not found\n", 
+                  shadow_frame->last_index, executing_node.index);
+          }
+        }
+      }
+    }
+    
+    shadow_frame->last_index = executing_node.index;
+  }
+  
+  if (op->opcode == ZEND_DO_FCALL) 
+    INCREMENT_STACK(shadow_stack, shadow_frame);
+}
+
+/***** deprecated *****/
 
 void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm)
 {
@@ -168,10 +293,10 @@ void push_interp_context(zend_op* op_array, uint branch_index, control_flow_meta
     branch_index = shadow_frame->last_index + 1; // todo: usually...
   
   if (cfm.cfg != NULL)
-    PRINT("# Push interp context 0x%x|0x%x (from index %d)\n", 
+    PRINT("# Push interp context 0x%x|0x%x (from index %u)\n", 
           cfm.cfg->unit_hash, cfm.cfg->routine_hash, branch_index);
   else
-    PRINT("# Push interp context (null) (from index %d)\n", branch_index);
+    PRINT("# Push interp context (null) (from index %u)\n", branch_index);
   
   if (cfm.cfg != NULL && shadow_frame->cfm.cfg != NULL) { // current_context is not always the right one? 
     if (branch_index < shadow_frame->cfm.cfg->opcodes.size) {
@@ -181,7 +306,7 @@ void push_interp_context(zend_op* op_array, uint branch_index, control_flow_meta
       };
       app_cfg_add_edge(&shadow_frame->cfm, cfm.cfg, from_node);
     } else {
-      PRINT("Error: branch_index %d exceeds last context cfg size %d\n", 
+      PRINT("Error: branch_index %u exceeds last context cfg size %u\n", 
             branch_index, shadow_frame->cfm.cfg->opcodes.size);
     }
   }
@@ -208,35 +333,27 @@ void pop_interp_context()
   }
 }
 
-void opcode_executing(const zend_op *op)
+void deprecated_opcode_executing(const zend_op *op)
 {
-  if (true) return;
-  
+ 
   shadow_frame_t *verify_frame;
   cfg_node_t from_node; // ???
   cfg_node_t node = { op->opcode, 0 };
   
-  if (shadow_frame->opcodes != EG(current_execute_data)->func->op_array.opcodes) {
-    PRINT("Error: expected opcode array at "PX", but the current opcodes are at "PX"\n",
-          p2int(shadow_frame->opcodes), 
-          p2int(EG(current_execute_data)->func->op_array.opcodes));
-    return;
-  }
-  
   node.index = (uint)(op - shadow_frame->opcodes);
   
-  //PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
+  //PRINT("[%s(0x%x):%u, line %u]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
   //  node.index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
   
   verify_interp_context(shadow_frame->opcodes, node);
   
   if (shadow_frame->cfm.cfg == NULL) {
-    PRINT("  === executing %s at index %d of %s on line %d with ops "PX"\n", 
+    PRINT("  === executing %s at index %u of %s on line %u with ops "PX"\n", 
           zend_get_opcode_name(node.opcode), 
           node.index, get_current_interp_context_name(), op->lineno,
           p2int(shadow_frame->opcodes));
   } else {
-    PRINT("  === executing %s at index %d of %s(0x%x|0x%x) on line %d with ops "PX"\n", 
+    PRINT("  === executing %s at index %u of %s(0x%x|0x%x) on line %u with ops "PX"\n", 
           zend_get_opcode_name(node.opcode), node.index, 
           get_current_interp_context_name(), shadow_frame->cfm.cfg->unit_hash, 
           shadow_frame->cfm.cfg->routine_hash, op->lineno, p2int(shadow_frame->opcodes));
@@ -264,24 +381,24 @@ void opcode_executing(const zend_op *op)
             found = true;
             break;
           } else if (edge->to_index != (edge->from_index + 1)) {
-            PRINT("Error! Opcode edge from %d was compiled with target %d, but executed with target %d\n",
+            PRINT("Error! Opcode edge from %u was compiled with target %u, but executed with target %u\n",
                   from_node.index, edge->to_index, node.index);
           }
         }
       }
       if (!found) 
-        PRINT("Error! Opcode edge from %d to %d not found\n", from_node.index, node.index);
+        PRINT("Error! Opcode edge from %u to %u not found\n", from_node.index, node.index);
     }
     
     if (node.index < shadow_frame->cfm.cfg->opcodes.size) {
       expected_opcode = routine_cfg_get_opcode(shadow_frame->cfm.cfg, node.index);
       if (node.opcode != expected_opcode->opcode && !is_alias(node.opcode, expected_opcode->opcode)) {
-        PRINT("Error! Expected opcode %s at index %d, but found opcode %s\n", 
+        PRINT("Error! Expected opcode %s at index %u, but found opcode %s\n", 
               zend_get_opcode_name(routine_cfg_get_opcode(shadow_frame->cfm.cfg, node.index)->opcode), 
               node.index, zend_get_opcode_name(node.opcode));
       }
     } else {
-      PRINT("Error! The executing node has index %d, but the current context has only %d opcodes\n",
+      PRINT("Error! The executing node has index %u, but the current context has only %u opcodes\n",
             node.index, shadow_frame->cfm.cfg->opcodes.size);
     }
     return;
@@ -293,10 +410,10 @@ void opcode_executing(const zend_op *op)
     return;
   }
   if (verify_frame->last_index != node.index) {
-    PRINT("Error! Returned to index %d but expected index %d!\n",
+    PRINT("Error! Returned to index %u but expected index %u!\n",
           node.index, verify_frame->last_index);
     return;
   }
   
-  PRINT("Verified return to index %d\n", node.index);
+  PRINT("Verified return to index %u\n", node.index);
 }

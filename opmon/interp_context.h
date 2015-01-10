@@ -6,6 +6,7 @@
 
 void initialize_interp_context();
 void routine_call(zend_execute_data *call);
+void routine_return();
 void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm);
 void pop_interp_context();
 void opcode_executing(const zend_op *op);
