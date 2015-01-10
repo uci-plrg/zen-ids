@@ -13,7 +13,7 @@
 PHP_INI_BEGIN()
   STD_PHP_INI_ENTRY("opmon_dataset_dir", ".", PHP_INI_PERDIR, OnUpdateString, 
                     dataset_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
-  STD_PHP_INI_ENTRY("opmon_verbose", ".", PHP_INI_PERDIR, OnUpdateBool,
+  STD_PHP_INI_ENTRY("opmon_verbose", ".", PHP_INI_PERDIR, OnUpdateLong,
                     verbose, zend_opcode_monitor_globals, opcode_monitor_globals)
 PHP_INI_END()
 
@@ -57,7 +57,7 @@ PHP_MINIT_FUNCTION(opcode_monitor)
   PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
   
   if (strlen(OPMON_G(dataset_dir)) > 200)
-    PRINT("Error: dataset dirname is too long. Please rebuild with a larger buffer.\n");
+    ERROR("dataset dirname is too long. Please rebuild with a larger buffer.\n");
 
   init_event_handler(&monitor_functions);
   register_opcode_monitor(&monitor_functions);

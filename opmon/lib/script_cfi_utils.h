@@ -3,9 +3,18 @@
 
 #include "php.h"
 
+#define ERROR_LEVEL 1
+#define MESSAGE_LEVEL 2
+
+#define ERROR(...) \
+do { \
+  if (OPMON_G(verbose) >= ERROR_LEVEL) \
+    fprintf(stderr, "\t> #error# "__VA_ARGS__); \
+} while (0)
+
 #define PRINT(...) \
 do { \
-  if (OPMON_G(verbose)) \
+  if (OPMON_G(verbose) >= MESSAGE_LEVEL) \
     fprintf(stderr, "\t> "__VA_ARGS__); \
 } while (0)
 
@@ -37,7 +46,7 @@ typedef uint64 uint_ptr_t;
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;
-  bool verbose;
+  int verbose;
 ZEND_END_MODULE_GLOBALS(opcode_monitor)
 
 ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)

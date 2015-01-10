@@ -13,7 +13,7 @@
 #define CHECK_FUNCTION_NAME_LENGTH(len) \
 do { \
   if ((len) >= MAX_FUNCTION_NAME) \
-    PRINT("Error: function_name exceeds max length 256!\n"); \
+    ERROR("function_name exceeds max length 256!\n"); \
 } while (0)
 
 typedef struct _pending_load_t {
@@ -39,14 +39,14 @@ static inline void pend_cfm(control_flow_metadata_t *cfm)
 {
   pending_cfm_stack[pending_cfm_frame++] = cfm;
   if (pending_cfm_frame >= MAX_STACK_FRAME)
-    PRINT("Error: pending_cfm_frame exceeds max stack frame!\n");
+    ERROR("pending_cfm_frame exceeds max stack frame!\n");
 }
 
 static inline control_flow_metadata_t *pop_cfm()
 {
   pending_cfm_frame--;
   if (pending_cfm_frame == 0)
-    PRINT("Error: pending_cfm_frame hit stack bottom!\n");
+    ERROR("pending_cfm_frame hit stack bottom!\n");
   return pending_cfm_stack[pending_cfm_frame];
 }
 
@@ -102,7 +102,7 @@ static void init_call(const zend_op *op)
     zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
     zend_string *variable_name = EX_VAR(op->op2.var)->value.str;
     if (variable_name == NULL) {
-      PRINT("Error! Operand type 0x%x refers to null string!\n", op->op2_type);
+      ERROR("Operand type 0x%x refers to null string!\n", op->op2_type);
       pend_cfm(NULL);
       return;
     } else {
@@ -153,7 +153,7 @@ static void deprecated_opcode_executing(const zend_op *op)
   last_op_array = current_op_array;
   current_op_array = EG(current_execute_data)->func->op_array.opcodes;
   if (current_op_array == NULL) {
-    PRINT("Error: opcode array not found for execution of opcode 0x%x\n", op->opcode);
+    ERROR("opcode array not found for execution of opcode 0x%x\n", op->opcode);
     return;
   } 
   
@@ -257,7 +257,7 @@ static void deprecated_routine_call()
     return;
   
   if (pending_cfm == NULL) {
-    PRINT("Error: unknown routine starting with ops at "PX".\n", 
+    ERROR("unknown routine starting with ops at "PX".\n", 
           p2int(current_op_array));
     //strcpy(pending_load.function_name, last_unknown_function_name);
     //pending_cfm = get_cfm("<default>:{closure}");
