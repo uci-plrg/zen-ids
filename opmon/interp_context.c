@@ -121,10 +121,12 @@ static bool is_lambda(zend_op_array *op_array)
 
 void routine_call(zend_execute_data *call)
 {
-  bool is_call = false;
   control_flow_metadata_t cfm;
   zend_op_array *op_array = &call->func->op_array;
   shadow_frame_t *call_frame = shadow_frame + 1;
+  
+  if (op_array == NULL || op_array->opcodes == NULL)
+    return; // foobar
   
   // create/evaluate a call edge
   
@@ -133,54 +135,50 @@ void routine_call(zend_execute_data *call)
   } else {
     char routine_name[ROUTINE_NAME_LENGTH];
     const char *classname, *function_name;
-    control_flow_metadata_t *monitored_cfm;
+    control_flow_metadata_t *monitored_cfm = NULL;
     
     if (op_array->function_name == NULL) {     // script-body
       classname = (strrchr(op_array->filename->val, '/') + 1);
       function_name = "<script-body>";
-    } else if (op_array->scope == NULL) {      // function call
-      is_call = true;
-      classname = "<default>";
+      monitored_cfm = get_cfm_by_name(routine_name);
+    } else if (op_array->scope == NULL || (op_array->fn_flags & ZEND_ACC_CLOSURE)) {
+      classname = "<default>";                 // function call
       if (strcmp(op_array->function_name->val, "__lambda_func") == 0) {
         function_name = lambda_frame->name;
         DECREMENT_STACK(lambda_stack, lambda_frame);
-        //zend_execute_data *execute_data = EG(current_execute_data);
-        //const zend_op *call_op = EX(opline);
-        //function_name = (EX_VAR(call_op->op2.var)->value.str->val + 1);
       } else {
         function_name = op_array->function_name->val;
       }
     } else if (call->This.value.obj == NULL) { // static method call
-      is_call = true;
       classname = op_array->scope->name->val;
       function_name = op_array->function_name->val;
     } else {                                   // instance method call
-      is_call = true;
-      classname = call->This.value.obj->ce->name->val;
+      classname = op_array->scope->name->val; //call->This.value.obj->ce->name->val;
       function_name = op_array->function_name->val;
     }
     sprintf(routine_name, "%s:%s", classname, function_name);
     
-    monitored_cfm = get_cfm(routine_name);
+    if (monitored_cfm == NULL)
+      monitored_cfm = get_cfm_by_opcodes_address(op_array->opcodes);
+    if (monitored_cfm == NULL)
+      monitored_cfm = get_cfm_by_name(routine_name);
     if (monitored_cfm == NULL) {
-      INCREMENT_STACK(shadow_stack, shadow_frame);
-      PRINT("--- Routine call to builtin function %s\n", routine_name);
-      return;
+      char *routine_name_buffer = malloc(strlen(routine_name)+10);
+      sprintf(routine_name_buffer, "<missing>%s", routine_name);
+      cfm.routine_name = (const char *)routine_name_buffer;
+      cfm.cfg = NULL;
+      cfm.dataset = NULL;
+      //INCREMENT_STACK(shadow_stack, shadow_frame);
+      //WARN("--- Routine call to builtin function %s\n", routine_name);
+      //return;
     } else {
       cfm = *monitored_cfm;
     }
   }
   
-  /*
-  if (is_initial_entry) {
-    is_call = true;
-    is_initial_entry = false;
-  }
-  */
-  //if (!is_call) 
-    INCREMENT_STACK(shadow_stack, shadow_frame);
+  INCREMENT_STACK(shadow_stack, shadow_frame);
   
-  PRINT("--- Routine call to %s with opcodes at "PX" and cfg "PX"\n",
+  WARN("--- Routine call to %s with opcodes at "PX" and cfg "PX"\n",
         cfm.routine_name, p2int(op_array->opcodes), p2int(cfm.cfg));
   
   call_frame->opcodes = op_array->opcodes;
@@ -195,7 +193,7 @@ void routine_return()
   DECREMENT_STACK(shadow_stack, shadow_frame);
   
   cfm = shadow_frame->cfm;
-  PRINT("--- Routine return to %s with opcodes at "PX" and cfg "PX"\n",
+  WARN("--- Routine return to %s with opcodes at "PX" and cfg "PX"\n",
         cfm.routine_name, p2int(shadow_frame->opcodes), p2int(cfm.cfg));
 }
 
@@ -231,20 +229,32 @@ static bool is_fallthrough(cfg_node_t *to_node)
   return to_node->index == get_next_executable_index(next_index);
 }
 
+static bool is_lambda_call_init(const zend_op *op)
+{
+  zend_op_array *op_array = &EG(current_execute_data)->func->op_array;
+  
+  if (op->opcode != ZEND_INIT_FCALL_BY_NAME || op_array->function_name == NULL)
+    return false;
+  
+  return strcmp(op_array->function_name->val, "__lambda_func") == 0;
+}
+
 void opcode_executing(const zend_op *op)
 {
-  if (true) return;
-  
   if (shadow_frame->opcodes != EG(current_execute_data)->func->op_array.opcodes) {
-    ERROR("expected opcode array at "PX", but the current opcodes are at "PX"\n",
+    zend_op_array *op_array = &EG(current_execute_data)->func->op_array;
+    ERROR("expected opcode array at "PX", but the current opcodes are at "PX" (function %s)\n",
           p2int(shadow_frame->opcodes), 
-          p2int(EG(current_execute_data)->func->op_array.opcodes));
+          p2int(EG(current_execute_data)->func->op_array.opcodes),
+          op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
     PRINT("\tOpcode is %s\n", zend_get_opcode_name(op->opcode));
+  } else if (shadow_frame->cfm.cfg == NULL) {
+    ERROR("No cfg for opcodes at "PX"\n", p2int(EG(current_execute_data)->func->op_array.opcodes));
   } else {
     cfg_node_t executing_node = { op->opcode, op - shadow_frame->opcodes };
     cfg_opcode_t *expected_opcode;
     
-    if (executing_node.index > 0x1000) {
+    if (executing_node.index > 0x1000 || executing_node.index >= shadow_frame->cfm.cfg->opcodes.size) {
       ERROR("attempt to execute foobar op at index %u in 0x%x|0x%x\n", executing_node.index,
             shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
     } else {
@@ -267,9 +277,9 @@ void opcode_executing(const zend_op *op)
               shadow_frame->cfm.cfg->routine_hash);
       } else {
         if (shadow_frame->last_index == CONTEXT_ENTRY) {
-          ERROR("Context entry reaches index %u, "
-                "but the first executable node has index %u!\n",
-                executing_node.index, get_next_executable_index(0));
+          WARN("Context entry reaches index %u, "
+               "but the first executable node has index %u!\n",
+               executing_node.index, get_next_executable_index(0));
         } else {
           cfg_node_t from_node = { 
             shadow_frame->opcodes[shadow_frame->last_index].opcode,
@@ -295,8 +305,8 @@ void opcode_executing(const zend_op *op)
               }
             }
             if (!found) {
-              ERROR("Opcode edge from %u to %u not found\n", 
-                    shadow_frame->last_index, executing_node.index);
+              WARN("Opcode edge from %u to %u not found\n", 
+                   shadow_frame->last_index, executing_node.index);
             }
           }
         }
@@ -306,7 +316,7 @@ void opcode_executing(const zend_op *op)
     }
   }
   
-  if (op->opcode == ZEND_INIT_FCALL_BY_NAME) {
+  if (is_lambda_call_init(op)) {
     zend_execute_data *execute_data = EG(current_execute_data);
     if ((op->op2_type == IS_CV || op->op2_type == IS_VAR) && 
         *EX_VAR(op->op2.var)->value.str->val == '\0') {

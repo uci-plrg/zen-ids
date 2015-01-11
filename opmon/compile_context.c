@@ -24,14 +24,18 @@ typedef struct _function_fqn_t {
   compilation_routine_t function;
 } function_fqn_t;
 
-static sctable_t routine_table;
+static sctable_t routines_by_name;
+static sctable_t routines_by_opcode_address;
 
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
 void init_compile_context()
 {
-  routine_table.hash_bits = 7;
-  sctable_init(&routine_table);
+  routines_by_name.hash_bits = 8;
+  sctable_init(&routines_by_name);
+  
+  routines_by_opcode_address.hash_bits = 8;
+  sctable_init(&routines_by_opcode_address);
 }
 
 void function_compiled()
@@ -67,6 +71,9 @@ void function_compiled()
     return;
   }
   
+  if (strstr(function_name, "closure") != NULL && strstr(function_name, "Asset") != NULL)
+    i = 7;
+  
   if (is_eval) {
     filename = "<any-file>";
   } else {
@@ -84,7 +91,8 @@ void function_compiled()
   
   routine_key = hash_string(routine_name);
   
-  PRINT("--- Function compiled: %s|%s\n", filename, routine_name);
+  WARN("--- Function compiled from opcodes at "PX": %s|%s\n", 
+       p2int(CG(active_op_array)->opcodes), filename, routine_name);
   
   fqn = malloc(sizeof(function_fqn_t));
   buffer = malloc(strlen(filename) + 1);
@@ -107,7 +115,8 @@ void function_compiled()
   cfm.cfg = routine_cfg_new(fqn->unit.hash, fqn->function.hash);
   fqn->function.cfm = cfm;
   
-  sctable_add(&routine_table, routine_key, fqn);
+  sctable_add(&routines_by_name, routine_key, fqn);
+  sctable_add(&routines_by_opcode_address, hash_addr(CG(active_op_array)->opcodes), fqn);
   
   for (i = 0; i < CG(active_op_array)->last; i++) {
     uint target;
@@ -119,17 +128,28 @@ void function_compiled()
 
     switch (op->opcode) {
       case ZEND_JMP:
-        target = op->op1.opline_num;
-        break;
+        if (op->op1_type == IS_CONST) {
+          target = op->op1.opline_num;
+          break;
+        }
+        continue;
       case ZEND_JMPZ:
       case ZEND_JMPNZ:
       case ZEND_JMPZNZ:
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
-        target = op->op2.opline_num;
-        break;
+        if (op->op2_type == IS_CONST) {
+          target = op->op2.opline_num;
+          break;
+        }
+        continue;
       default:
         continue;
+    }
+    
+    if (target > 0x1000) {
+      ERROR("Skipping foobar edge with target %d!\n", target);
+      continue;
     }
     
     routine_cfg_add_edge(cfm.cfg, i, target);
@@ -175,18 +195,29 @@ const char *get_function_declaration_path(const char *routine_name)
 {
   function_fqn_t *fqn;
 
-  fqn = (function_fqn_t *) sctable_lookup(&routine_table, hash_string(routine_name));
+  fqn = (function_fqn_t *) sctable_lookup(&routines_by_name, hash_string(routine_name));
   if (fqn == NULL)
     return "unknown";
   else
     return fqn->unit.path;
 }
 
-control_flow_metadata_t *get_cfm(const char *routine_name)
+control_flow_metadata_t *get_cfm_by_name(const char *routine_name)
 {
   function_fqn_t *fqn;
 
-  fqn = (function_fqn_t *) sctable_lookup(&routine_table, hash_string(routine_name));
+  fqn = (function_fqn_t *) sctable_lookup(&routines_by_name, hash_string(routine_name));
+  if (fqn == NULL)
+    return NULL;
+  else
+    return &fqn->function.cfm;
+}
+
+control_flow_metadata_t *get_cfm_by_opcodes_address(zend_op *opcodes)
+{
+  function_fqn_t *fqn;
+
+  fqn = (function_fqn_t *) sctable_lookup(&routines_by_opcode_address, hash_addr(opcodes));
   if (fqn == NULL)
     return NULL;
   else

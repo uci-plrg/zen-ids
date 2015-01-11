@@ -4,12 +4,19 @@
 #include "php.h"
 
 #define ERROR_LEVEL 1
-#define MESSAGE_LEVEL 2
+#define WARN_LEVEL 2
+#define MESSAGE_LEVEL 3
 
 #define ERROR(...) \
 do { \
   if (OPMON_G(verbose) >= ERROR_LEVEL) \
     fprintf(stderr, "\t> #error# "__VA_ARGS__); \
+} while (0)
+
+#define WARN(...) \
+do { \
+  if (OPMON_G(verbose) >= WARN_LEVEL) \
+    fprintf(stderr, "\t> #warn# "__VA_ARGS__); \
 } while (0)
 
 #define PRINT(...) \
@@ -58,6 +65,7 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 #endif
 
 uint hash_string(const char *string);
+uint hash_addr(void *addr);
 void opmon_activate_printer();
 void opmon_setup_base_path(char *path, const char *category, const char *script_path);
 

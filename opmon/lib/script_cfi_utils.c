@@ -25,6 +25,13 @@ uint hash_string(const char *string)
   return hash;
 }
 
+uint hash_addr(void *addr)
+{
+  uint64 addr_bits = p2int(addr);
+  uint hash = ((uint)(addr_bits >> 0x20)) ^ ((uint)(addr_bits & 0xffffffffU));
+  return hash;
+}
+
 void setup_base_path(char *path, const char *category, const char *script_path)
 {
   char *path_truncate;
