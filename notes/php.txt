@@ -2,17 +2,7 @@ The PHP instance to run is php/bin/php.
 
 --------------
 
-The current operation is referenced as OPLINE, which is a macro for
-EX(opline), where opline is a zend_op, which is defined in
-zend_compile.h. This can be imported. 
-
-Print opcode names using zend_get_opcode_name(), which can be imported.
-
-The best event hook seems to be zend_vm_execute.h:execute_ex().
-
--------------
-
-*First thing: the initial build requires to remove the php extension "opcode_monitor" from Zend/Zend.m4 (at the end). After building, check out the file again to restore the opcode monitor integration. 
+This build of PHP requires the environment variable PHP_HOME.
 
 To build php, go to the top-level php directory and:
 
@@ -54,13 +44,13 @@ Created extension "opcode-monitor". Build with "./current-config", which
 does this:
 
   > cd ext/opmon
-  > ../../php/scripts/phpize
+  > ../../php/scripts/phpize  # may need to set it executable
   > ./current-config # it does this:
        configure 
          --enable-opcode-monitor 
          --prefix=$PHP_HOME
          --with-php-config=$PHP_HOME/bin/php-config
-  > make -j3
+  > make -j3 install
 
 -----------------
 

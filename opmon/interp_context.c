@@ -34,6 +34,16 @@ typedef struct _lambda_frame_t {
   const char *name;
 } lambda_frame_t;
 
+typedef enum _exception_state_t {
+  EXCEPTION_STATE_NONE,
+  EXCEPTION_STATE_UNWINDING
+} exception_state_t;
+
+typedef struct _exception_context_t {
+  exception_state_t state;
+  shadow_frame_t *throw_frame;
+} exception_context_t;
+
 static cfg_t *app_cfg;
 
 static shadow_frame_t shadow_stack[MAX_STACK_FRAME_shadow_stack];
@@ -41,6 +51,8 @@ static shadow_frame_t *shadow_frame;
 
 static lambda_frame_t lambda_stack[MAX_STACK_FRAME_lambda_stack];
 static lambda_frame_t *lambda_frame;
+
+static exception_context_t exception_context;
 
 static bool is_initial_entry = true;
 
@@ -98,6 +110,9 @@ void initialize_interp_context()
   
   memset(lambda_stack, 0, 2 * sizeof(lambda_frame_t));
   lambda_frame = lambda_stack + 1;
+  
+  exception_context.state = EXCEPTION_STATE_NONE;
+  exception_context.throw_frame = NULL;
 }
 
 const char *get_current_interp_context_name()
@@ -127,6 +142,9 @@ void routine_call(zend_execute_data *call)
   
   if (op_array == NULL || op_array->opcodes == NULL)
     return; // foobar
+  
+  if (exception_context.state == EXCEPTION_STATE_UNWINDING)
+    return;
   
   // create/evaluate a call edge
   
@@ -241,6 +259,35 @@ static bool is_lambda_call_init(const zend_op *op)
 
 void opcode_executing(const zend_op *op)
 {
+  if (op->opcode == ZEND_HANDLE_EXCEPTION) {
+    if (exception_context.state == EXCEPTION_STATE_NONE) {
+      exception_context.state = EXCEPTION_STATE_UNWINDING;
+      exception_context.throw_frame = shadow_frame;
+      WARN("Exception thrown at op %d of 0x%x|0x%x\n", shadow_frame->last_index,
+           shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
+    } else {
+      DECREMENT_STACK(shadow_stack, shadow_frame);
+    }
+    return;
+  }
+  
+  if (op->opcode == ZEND_CATCH) {
+    if (exception_context.state == EXCEPTION_STATE_UNWINDING) {
+      WARN("Exception at op %d of 0x%x|0x%x caught at op %d of 0x%x|0x%x\n",
+           exception_context.throw_frame->last_index, 
+           exception_context.throw_frame->cfm.cfg->unit_hash, 
+           exception_context.throw_frame->cfm.cfg->routine_hash,
+           shadow_frame->last_index, shadow_frame->cfm.cfg->unit_hash, 
+           shadow_frame->cfm.cfg->routine_hash);           
+      exception_context.state = EXCEPTION_STATE_NONE;
+      exception_context.throw_frame = NULL;
+    } else {
+      ERROR("Catch executed at op %d of 0x%x|0x%x for unknown exception!\n",
+            shadow_frame->last_index, shadow_frame->cfm.cfg->unit_hash, 
+            shadow_frame->cfm.cfg->routine_hash);
+    }
+  } // what about finally?
+  
   if (shadow_frame->opcodes != EG(current_execute_data)->func->op_array.opcodes) {
     zend_op_array *op_array = &EG(current_execute_data)->func->op_array;
     ERROR("expected opcode array at "PX", but the current opcodes are at "PX" (function %s)\n",
