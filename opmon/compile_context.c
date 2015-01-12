@@ -115,8 +115,8 @@ void function_compiled()
   cfm.cfg = routine_cfg_new(fqn->unit.hash, fqn->function.hash);
   fqn->function.cfm = cfm;
   
-  sctable_add(&routines_by_name, routine_key, fqn);
-  sctable_add(&routines_by_opcode_address, hash_addr(CG(active_op_array)->opcodes), fqn);
+  sctable_add_or_replace(&routines_by_name, routine_key, fqn);
+  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(CG(active_op_array)->opcodes), fqn);
   
   for (i = 0; i < CG(active_op_array)->last; i++) {
     uint target;

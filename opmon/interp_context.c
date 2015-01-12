@@ -25,6 +25,7 @@ do { \
 } while (0)
 
 typedef struct _shadow_frame_t {
+  zend_execute_data *execute_data;
   zend_op *opcodes;
   uint last_index;
   control_flow_metadata_t cfm;
@@ -34,15 +35,16 @@ typedef struct _lambda_frame_t {
   const char *name;
 } lambda_frame_t;
 
-typedef enum _exception_state_t {
-  EXCEPTION_STATE_NONE,
-  EXCEPTION_STATE_UNWINDING
-} exception_state_t;
+typedef enum _stack_state_t {
+  STACK_STATE_NONE,
+  STACK_STATE_UNWINDING,
+  STACK_STATE_RETURNING
+} stack_state_t;
 
-typedef struct _exception_context_t {
-  exception_state_t state;
+typedef struct _stack_event_t {
+  stack_state_t state;
   shadow_frame_t *throw_frame;
-} exception_context_t;
+} stack_event_t;
 
 static cfg_t *app_cfg;
 
@@ -52,9 +54,11 @@ static shadow_frame_t *shadow_frame;
 static lambda_frame_t lambda_stack[MAX_STACK_FRAME_lambda_stack];
 static lambda_frame_t *lambda_frame;
 
-static exception_context_t exception_context;
+static stack_event_t stack_event;
 
 static bool is_initial_entry = true;
+
+static uint first_thread_id;
 
 #define CONTEXT_ENTRY 0xffffffffU
 //static const cfg_node_t context_entry_node = { CONTEXT_ENTRY, 0xffffffff };
@@ -105,14 +109,16 @@ void initialize_interp_context()
 {
   app_cfg = cfg_new();
   
-  memset(shadow_stack, 0, 2 * sizeof(shadow_frame_t));
-  shadow_frame = shadow_stack + 1;
+  memset(shadow_stack, 0, sizeof(shadow_frame_t));
+  shadow_frame = shadow_stack;
   
   memset(lambda_stack, 0, 2 * sizeof(lambda_frame_t));
   lambda_frame = lambda_stack + 1;
   
-  exception_context.state = EXCEPTION_STATE_NONE;
-  exception_context.throw_frame = NULL;
+  stack_event.state = STACK_STATE_NONE;
+  stack_event.throw_frame = NULL;
+  
+  first_thread_id = pthread_self();
 }
 
 const char *get_current_interp_context_name()
@@ -134,17 +140,55 @@ static bool is_lambda(zend_op_array *op_array)
   return false;
 }
 
-void routine_call(zend_execute_data *call)
+static bool shadow_stack_contains_frame(zend_execute_data *execute_data, zend_op *opcodes) {
+  shadow_frame_t *walk = shadow_frame;
+  do {
+    if (walk->execute_data == execute_data && walk->opcodes == opcodes)
+      return true;
+  } while (--walk > shadow_stack);
+  return false;
+}
+
+static void update_shadow_stack()
 {
   control_flow_metadata_t cfm;
-  zend_op_array *op_array = &call->func->op_array;
-  shadow_frame_t *call_frame = shadow_frame + 1;
+  zend_execute_data *execute_data = EG(current_execute_data);
+  zend_op_array *op_array = &execute_data->func->op_array;
   
   if (op_array == NULL || op_array->opcodes == NULL)
-    return; // foobar
+    return; // nothing to do
   
-  if (exception_context.state == EXCEPTION_STATE_UNWINDING)
+  if (stack_event.state == STACK_STATE_UNWINDING)
     return;
+  
+  if (execute_data == shadow_frame->execute_data && op_array->opcodes == shadow_frame->opcodes) {
+    stack_event.state = STACK_STATE_NONE;
+    return; // nothing to do
+  }
+  
+  if (stack_event.state == STACK_STATE_RETURNING) {
+    stack_event.state = STACK_STATE_NONE;
+    if (shadow_stack_contains_frame(execute_data, op_array->opcodes)) {
+      shadow_frame_t *shadow_prev = shadow_frame;
+      do {
+        DECREMENT_STACK(shadow_stack, shadow_frame);
+      } while (shadow_frame > shadow_stack && 
+               (shadow_frame->execute_data != execute_data || 
+                op_array->opcodes != shadow_frame->opcodes));
+      
+      if (shadow_frame == shadow_stack) {
+        ERROR("Shadow stack unwound %d frames and hit bottom looking for execute_data "PX"\n",
+              (int)(shadow_prev - shadow_frame), p2int(execute_data));
+      }
+      
+      cfm = shadow_frame->cfm;
+      WARN("--- Routine return to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+            cfm.routine_name, p2int(execute_data), p2int(shadow_frame->opcodes), p2int(cfm.cfg));
+      return;
+    } else {
+      WARN("Invalid return: shadow stack does not contain execute_data "PX". Calling instead\n", p2int(execute_data));
+    }
+  }
   
   // create/evaluate a call edge
   
@@ -158,7 +202,6 @@ void routine_call(zend_execute_data *call)
     if (op_array->function_name == NULL) {     // script-body
       classname = (strrchr(op_array->filename->val, '/') + 1);
       function_name = "<script-body>";
-      monitored_cfm = get_cfm_by_name(routine_name);
     } else if (op_array->scope == NULL || (op_array->fn_flags & ZEND_ACC_CLOSURE)) {
       classname = "<default>";                 // function call
       if (strcmp(op_array->function_name->val, "__lambda_func") == 0) {
@@ -167,7 +210,7 @@ void routine_call(zend_execute_data *call)
       } else {
         function_name = op_array->function_name->val;
       }
-    } else if (call->This.value.obj == NULL) { // static method call
+    } else if (execute_data->This.value.obj == NULL) { // static method call
       classname = op_array->scope->name->val;
       function_name = op_array->function_name->val;
     } else {                                   // instance method call
@@ -186,9 +229,6 @@ void routine_call(zend_execute_data *call)
       cfm.routine_name = (const char *)routine_name_buffer;
       cfm.cfg = NULL;
       cfm.dataset = NULL;
-      //INCREMENT_STACK(shadow_stack, shadow_frame);
-      //WARN("--- Routine call to builtin function %s\n", routine_name);
-      //return;
     } else {
       cfm = *monitored_cfm;
     }
@@ -196,23 +236,16 @@ void routine_call(zend_execute_data *call)
   
   INCREMENT_STACK(shadow_stack, shadow_frame);
   
-  WARN("--- Routine call to %s with opcodes at "PX" and cfg "PX"\n",
-        cfm.routine_name, p2int(op_array->opcodes), p2int(cfm.cfg));
+  WARN("--- Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+        cfm.routine_name, p2int(execute_data), p2int(op_array->opcodes), p2int(cfm.cfg));
   
-  call_frame->opcodes = op_array->opcodes;
-  call_frame->last_index = CONTEXT_ENTRY;
-  call_frame->cfm = cfm;
-}
-
-void routine_return()
-{
-  control_flow_metadata_t cfm;
-  
-  DECREMENT_STACK(shadow_stack, shadow_frame);
-  
-  cfm = shadow_frame->cfm;
-  WARN("--- Routine return to %s with opcodes at "PX" and cfg "PX"\n",
-        cfm.routine_name, p2int(shadow_frame->opcodes), p2int(cfm.cfg));
+  {
+    //shadow_frame_t *call_frame = shadow_frame + 1;
+    shadow_frame->execute_data = execute_data;
+    shadow_frame->opcodes = op_array->opcodes;
+    shadow_frame->last_index = CONTEXT_ENTRY;
+    shadow_frame->cfm = cfm;
+  }
 }
 
 static uint get_next_executable_index(uint from_index)
@@ -259,11 +292,24 @@ static bool is_lambda_call_init(const zend_op *op)
 
 void opcode_executing(const zend_op *op)
 {
+  zend_execute_data *execute_data = EG(current_execute_data);
+  zend_op_array *op_array = &execute_data->func->op_array;
+  
+  if (pthread_self() != first_thread_id)
+    ERROR("Multiple threads are not supported!\n");
+  
+  update_shadow_stack();
+  
+  // todo: check remaining state/opcode mismatches
+  if (op->opcode == ZEND_RETURN)
+    stack_event.state = STACK_STATE_RETURNING;
+  
   if (op->opcode == ZEND_HANDLE_EXCEPTION) {
-    if (exception_context.state == EXCEPTION_STATE_NONE) {
-      exception_context.state = EXCEPTION_STATE_UNWINDING;
-      exception_context.throw_frame = shadow_frame;
-      WARN("Exception thrown at op %d of 0x%x|0x%x\n", shadow_frame->last_index,
+    if (stack_event.state == STACK_STATE_NONE) {
+      stack_event.state = STACK_STATE_UNWINDING;
+      stack_event.throw_frame = shadow_frame;
+      WARN("Exception thrown at op %d in opcodes "PX"|"PX" of routine 0x%x|0x%x\n", 
+           shadow_frame->last_index, p2int(execute_data), p2int(execute_data->func->op_array.opcodes),
            shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
     } else {
       DECREMENT_STACK(shadow_stack, shadow_frame);
@@ -272,37 +318,45 @@ void opcode_executing(const zend_op *op)
   }
   
   if (op->opcode == ZEND_CATCH) {
-    if (exception_context.state == EXCEPTION_STATE_UNWINDING) {
-      WARN("Exception at op %d of 0x%x|0x%x caught at op %d of 0x%x|0x%x\n",
-           exception_context.throw_frame->last_index, 
-           exception_context.throw_frame->cfm.cfg->unit_hash, 
-           exception_context.throw_frame->cfm.cfg->routine_hash,
-           shadow_frame->last_index, shadow_frame->cfm.cfg->unit_hash, 
-           shadow_frame->cfm.cfg->routine_hash);           
-      exception_context.state = EXCEPTION_STATE_NONE;
-      exception_context.throw_frame = NULL;
+    if (stack_event.state == STACK_STATE_UNWINDING) {
+      if (shadow_frame->execute_data != execute_data && 
+          shadow_stack_contains_frame(execute_data, op_array->opcodes)) {
+        do {
+          DECREMENT_STACK(shadow_stack, shadow_frame);
+        } while (shadow_frame->execute_data != execute_data);
+      }
+      WARN("Exception at op %d of 0x%x|0x%x caught at op %d in opcodes "PX"|"PX" of 0x%x|0x%x\n",
+           stack_event.throw_frame->last_index, 
+           stack_event.throw_frame->cfm.cfg->unit_hash, 
+           stack_event.throw_frame->cfm.cfg->routine_hash,
+           (int)(op - op_array->opcodes), 
+           p2int(execute_data), p2int(execute_data->func->op_array.opcodes),
+           shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);           
+      stack_event.state = STACK_STATE_NONE;
     } else {
       ERROR("Catch executed at op %d of 0x%x|0x%x for unknown exception!\n",
             shadow_frame->last_index, shadow_frame->cfm.cfg->unit_hash, 
             shadow_frame->cfm.cfg->routine_hash);
     }
   } // what about finally?
-  
-  if (shadow_frame->opcodes != EG(current_execute_data)->func->op_array.opcodes) {
-    zend_op_array *op_array = &EG(current_execute_data)->func->op_array;
-    ERROR("expected opcode array at "PX", but the current opcodes are at "PX" (function %s)\n",
-          p2int(shadow_frame->opcodes), 
-          p2int(EG(current_execute_data)->func->op_array.opcodes),
-          op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
-    PRINT("\tOpcode is %s\n", zend_get_opcode_name(op->opcode));
+      
+  if (shadow_frame->execute_data != execute_data || shadow_frame->opcodes != op_array->opcodes) {
+    ERROR("expected opcode array at "PX"|"PX", but the current opcodes are at "PX"|"PX" (function %s, %s)\n",
+          p2int(shadow_frame->execute_data), p2int(shadow_frame->opcodes), 
+          p2int(execute_data), p2int(op_array->opcodes),
+          op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val,
+          shadow_stack_contains_frame(execute_data, op_array->opcodes) ? "on stack" : "not on stack");
+    PRINT("\tOpcode at %d is %s\n", (int)(op - op_array->opcodes), zend_get_opcode_name(op->opcode));
+    stack_event.state = STACK_STATE_NONE;
   } else if (shadow_frame->cfm.cfg == NULL) {
-    ERROR("No cfg for opcodes at "PX"\n", p2int(EG(current_execute_data)->func->op_array.opcodes));
+    ERROR("No cfg for opcodes at "PX"|"PX"\n", p2int(execute_data), p2int(execute_data->func->op_array.opcodes));
   } else {
     cfg_node_t executing_node = { op->opcode, op - shadow_frame->opcodes };
     cfg_opcode_t *expected_opcode;
     
     if (executing_node.index > 0x1000 || executing_node.index >= shadow_frame->cfm.cfg->opcodes.size) {
-      ERROR("attempt to execute foobar op at index %u in 0x%x|0x%x\n", executing_node.index,
+      ERROR("attempt to execute foobar op %u in opcodes "PX"|"PX" of routine 0x%x|0x%x\n", 
+            executing_node.index, p2int(execute_data), p2int(op_array->opcodes),
             shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
     } else {
       PRINT("@ Executing %s at index %u of 0x%x|0x%x\n",
@@ -364,7 +418,6 @@ void opcode_executing(const zend_op *op)
   }
   
   if (is_lambda_call_init(op)) {
-    zend_execute_data *execute_data = EG(current_execute_data);
     if ((op->op2_type == IS_CV || op->op2_type == IS_VAR) && 
         *EX_VAR(op->op2.var)->value.str->val == '\0') {
       INCREMENT_STACK(lambda_stack, lambda_frame);

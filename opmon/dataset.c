@@ -27,7 +27,8 @@ typedef struct _dataset_eval_targets_t {
 
 typedef enum _dataset_node_type_t {
   DATASET_NODE_TYPE_NORMAL,
-  DATASET_NODE_TYPE_BRANCH,
+  DATASET_NODE_TYPE_DIRECT_BRANCH,
+  DATASET_NODE_TYPE_INDIRECT_BRANCH,
   DATASET_NODE_TYPE_CALL,
   DATASET_NODE_TYPE_EVAL
 } dataset_node_type_t;

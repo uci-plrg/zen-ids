@@ -13,8 +13,7 @@
 static void
 sctable_insert(sctable_t *t, sctable_entry_t *e)
 {
-    uint hindex;
-    hindex = HASH_FUNC(e->key, t);
+    uint hindex = HASH_FUNC(e->key, t);
     e->next = t->data[hindex];
     t->data[hindex] = e;
     t->entries++;
@@ -39,6 +38,18 @@ sctable_resize(sctable_t *t)
     }
 
     TABLE_FREE(old_data); // todo! fix segfault
+}
+
+static sctable_entry_t *
+sctable_lookup_entry(sctable_t *t, uint key)
+{
+    sctable_entry_t *e;
+    uint hindex = HASH_FUNC(key, t);
+    for (e = t->data[hindex]; e; e = e->next) {
+        if (e->key == key)
+            return e;
+    }
+    return NULL;
 }
 
 void
@@ -70,7 +81,7 @@ sctable_lookup(sctable_t *t, uint key)
 void
 sctable_add(sctable_t *t, uint key, void *value)
 {
-  sctable_entry_t *e = (sctable_entry_t *) TABLE_ALLOC(sizeof(sctable_entry_t));
+  sctable_entry_t *e = TABLE_ALLOC(sizeof(sctable_entry_t));
   e->key = key;
   e->payload = value;
   if (t->entries >= t->resize_threshold)
@@ -81,17 +92,11 @@ sctable_add(sctable_t *t, uint key, void *value)
 void
 sctable_add_or_replace(sctable_t *t, uint key, void *value)
 {
-    sctable_entry_t *e = sctable_lookup(t, key);
-    if (e) {
-      e->payload = value;
-    } else {
-      e = (sctable_entry_t *) TABLE_ALLOC(sizeof(sctable_entry_t));
-      e->key = key;
-      e->payload = value;
-      if (t->entries >= t->resize_threshold)
-          sctable_resize(t);
-      sctable_insert(t, e);
-    }
+  sctable_entry_t *e = sctable_lookup_entry(t, key);
+  if (e != NULL)
+    e->payload = value;
+  else
+    sctable_add(t, key, value);
 }
 
 void

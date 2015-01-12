@@ -126,7 +126,7 @@ static void init_call(const zend_op *op)
     return;
   }
   
-  pending_cfm = get_cfm(function_name);
+  pending_cfm = get_cfm_by_name(function_name);
   if (pending_cfm == NULL) {
     if (strcmp("<default>:create_function", function_name) == 0) {
       PRINT("  === init call to create_function\n");
@@ -285,7 +285,7 @@ static void loader_call()
 {
   if (true) return;
   
-  control_flow_metadata_t *loader_cfm = get_cfm("<default>:{closure}");
+  control_flow_metadata_t *loader_cfm = get_cfm_by_name("<default>:{closure}");
   if (loader_cfm == NULL) {
     PRINT("Unknown loader starting--pushing null cfm\n");
     pend_cfm(NULL);
@@ -325,8 +325,6 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->set_top_level_script = starting_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
-  monitor->notify_routine_call = routine_call;
-  monitor->notify_routine_return = routine_return;
 }
 
 void destroy_event_handler()
