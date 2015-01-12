@@ -325,6 +325,8 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->set_top_level_script = starting_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
+  
+  fprintf(stderr, " === Script CFI Opcode Monitor ===\n");
 }
 
 void destroy_event_handler()

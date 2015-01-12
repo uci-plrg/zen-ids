@@ -333,12 +333,14 @@ void opcode_executing(const zend_op *op)
            p2int(execute_data), p2int(execute_data->func->op_array.opcodes),
            shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);           
       stack_event.state = STACK_STATE_NONE;
+    /* // else it's a "finally", so process as normal
     } else {
       ERROR("Catch executed at op %d of 0x%x|0x%x for unknown exception!\n",
             shadow_frame->last_index, shadow_frame->cfm.cfg->unit_hash, 
             shadow_frame->cfm.cfg->routine_hash);
+    */
     }
-  } // what about finally?
+  }
       
   if (shadow_frame->execute_data != execute_data || shadow_frame->opcodes != op_array->opcodes) {
     ERROR("expected opcode array at "PX"|"PX", but the current opcodes are at "PX"|"PX" (function %s, %s)\n",

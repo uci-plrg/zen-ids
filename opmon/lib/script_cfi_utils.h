@@ -50,6 +50,11 @@ typedef unsigned char bool;
 typedef char byte;
 typedef uint64 uint_ptr_t;
 
+enum {
+  false,
+  true
+};
+
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;
