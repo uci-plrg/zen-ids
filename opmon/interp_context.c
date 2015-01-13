@@ -7,6 +7,7 @@
 #include "interp_context.h"
 
 #define MAX_STACK_FRAME_shadow_stack 0x100000
+#define MAX_STACK_FRAME_exception_stack 0x100
 #define MAX_STACK_FRAME_lambda_stack 0x100
 #define ROUTINE_NAME_LENGTH 256
 
@@ -27,9 +28,14 @@ do { \
 typedef struct _shadow_frame_t {
   zend_execute_data *execute_data;
   zend_op *opcodes;
-  uint last_index;
+  union {
+    uint last_index;
+    uint throw_index;
+  };
   control_flow_metadata_t cfm;
 } shadow_frame_t;
+
+typedef shadow_frame_t exception_frame_t;
 
 typedef struct _lambda_frame_t {
   const char *name;
@@ -43,11 +49,13 @@ typedef enum _stack_state_t {
 
 typedef struct _stack_event_t {
   stack_state_t state;
-  shadow_frame_t *throw_frame;
 } stack_event_t;
 
 static shadow_frame_t shadow_stack[MAX_STACK_FRAME_shadow_stack];
 static shadow_frame_t *shadow_frame;
+
+static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
+static exception_frame_t *exception_frame;
 
 static lambda_frame_t lambda_stack[MAX_STACK_FRAME_lambda_stack];
 static lambda_frame_t *lambda_frame;
@@ -68,13 +76,21 @@ void initialize_interp_context()
   memset(shadow_stack, 0, sizeof(shadow_frame_t));
   shadow_frame = shadow_stack;
   
+  memset(exception_stack, 0, 2 * sizeof(exception_frame_t));
+  exception_frame = exception_stack + 1;
+  
   memset(lambda_stack, 0, 2 * sizeof(lambda_frame_t));
   lambda_frame = lambda_stack + 1;
   
   stack_event.state = STACK_STATE_NONE;
-  stack_event.throw_frame = NULL;
   
   first_thread_id = pthread_self();
+}
+
+static void push_exception_frame()
+{
+  INCREMENT_STACK(exception_stack, exception_frame);
+  *exception_frame = *shadow_frame;
 }
 
 static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_index,
@@ -155,12 +171,13 @@ static bool update_shadow_stack() // true if the stack changed
   if (op_array == NULL || op_array->opcodes == NULL)
     return false; // nothing to do
   
-  if (stack_event.state == STACK_STATE_UNWINDING)
-    return false;
+  //if (stack_event.state == STACK_STATE_UNWINDING)
+  //  return false;
   
   if (execute_data == shadow_frame->execute_data && 
       op_array->opcodes == shadow_frame->opcodes) {
-    stack_event.state = STACK_STATE_NONE;
+    if (stack_event.state == STACK_STATE_RETURNING)
+      stack_event.state = STACK_STATE_NONE; // don't clear `unwinding` state
     return false; // nothing to do
   }
   
@@ -241,11 +258,11 @@ static bool update_shadow_stack() // true if the stack changed
     compiled_edge_target_t compiled_target = get_compiled_edge_target(op, shadow_frame->last_index);
                              
     if (compiled_target.type != COMPILED_EDGE_CALL && op->opcode != ZEND_NEW)
-      ERROR("Generating call edge for compiled target type %d (opcode 0x%x)\n", 
-            compiled_target.type, op->opcode);
+      WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n", 
+           compiled_target.type, op->opcode);
                              
     generate_routine_edge(&shadow_frame->cfm, shadow_frame->last_index, 
-                          to_cfm.cfg, 0); // 0 even if that opcode is not executable
+                          to_cfm.cfg, 0); // 0 means entry, even if that opcode is not executable
   }
   
   INCREMENT_STACK(shadow_stack, shadow_frame);
@@ -315,23 +332,34 @@ void opcode_executing(const zend_op *op)
   if (pthread_self() != first_thread_id)
     ERROR("Multiple threads are not supported!\n");
   
-  stack_changed = update_shadow_stack();
-  
-  // todo: check remaining state/opcode mismatches
-  if (op->opcode == ZEND_RETURN)
-    stack_event.state = STACK_STATE_RETURNING;
-  
   if (op->opcode == ZEND_HANDLE_EXCEPTION) {
+    PRINT("@ Processing ZEND_HANDLE_EXCEPTION in stack state %u of "PX"|"PX"\n",
+          stack_event.state, p2int(execute_data), p2int(op_array->opcodes));
     if (stack_event.state == STACK_STATE_NONE) {
+      zend_op *throw_op = &shadow_frame->opcodes[shadow_frame->last_index];
       stack_event.state = STACK_STATE_UNWINDING;
-      stack_event.throw_frame = shadow_frame;
+      push_exception_frame();
       WARN("Exception thrown at op %d in opcodes "PX"|"PX" of routine 0x%x|0x%x\n", 
-           shadow_frame->last_index, p2int(execute_data), p2int(execute_data->func->op_array.opcodes),
+           shadow_frame->last_index, p2int(execute_data), p2int(op_array->opcodes),
            shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
     } else {
       DECREMENT_STACK(shadow_stack, shadow_frame);
     }
     return;
+  }
+  
+  stack_changed = update_shadow_stack();
+  
+  // todo: check remaining state/opcode mismatches
+  if (op->opcode == ZEND_RETURN)
+    stack_event.state = STACK_STATE_RETURNING;
+  else if (stack_event.state == STACK_STATE_UNWINDING && op->opcode != ZEND_FAST_RET && 
+           op->opcode != ZEND_CATCH) {
+    //exception_frame->suspended = true;
+    stack_event.state = STACK_STATE_NONE;
+  } else if (op->opcode == ZEND_FAST_RET) {
+    //exception_frame->suspended = false;
+    stack_event.state = STACK_STATE_UNWINDING;
   }
   
   if (op->opcode == ZEND_CATCH) {
@@ -344,23 +372,26 @@ void opcode_executing(const zend_op *op)
         } while (shadow_frame->execute_data != execute_data);
       }
       WARN("Exception at op %d of 0x%x|0x%x caught at op %d in opcodes "PX"|"PX" of 0x%x|0x%x\n",
-           stack_event.throw_frame->last_index, 
-           stack_event.throw_frame->cfm.cfg->unit_hash, 
-           stack_event.throw_frame->cfm.cfg->routine_hash,
+           exception_frame->throw_index, 
+           exception_frame->cfm.cfg->unit_hash, 
+           exception_frame->cfm.cfg->routine_hash,
            executing_node.index, 
-           p2int(execute_data), p2int(execute_data->func->op_array.opcodes),
+           p2int(shadow_frame->execute_data), p2int(shadow_frame->opcodes),
            shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);           
       stack_event.state = STACK_STATE_NONE;
       
-      if (stack_event.throw_frame == shadow_frame) {
-        generate_opcode_edge(&shadow_frame->cfm, stack_event.throw_frame->last_index, 
+      if (exception_frame->execute_data == shadow_frame->execute_data) {
+        generate_opcode_edge(&shadow_frame->cfm, exception_frame->throw_index, 
                              executing_node.index);
       } else {
-        generate_routine_edge(&stack_event.throw_frame->cfm, stack_event.throw_frame->last_index,
+        generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,
                               shadow_frame->cfm.cfg, executing_node.index);
       }
+      DECREMENT_STACK(exception_stack, exception_frame);
       caught_exception = true;
     } // else... not sure why these get executed
+  } else if (stack_event.state == STACK_STATE_UNWINDING) {
+    WARN("Executing op %s while unwinding an exception!\n", zend_get_opcode_name(op->opcode));
   }
       
   if (shadow_frame->execute_data != execute_data || 
@@ -433,8 +464,8 @@ void opcode_executing(const zend_op *op)
           } else {
             compiled_edge_target_t compiled_target = get_compiled_edge_target(from_op, shadow_frame->last_index);
             if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
-              ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
-                    compiled_target.type, op->opcode);
+              WARN("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
+                   compiled_target.type, op->opcode);
             }
             generate_opcode_edge(&shadow_frame->cfm, from_node.index, executing_node.index);
           }
