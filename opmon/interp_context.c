@@ -203,12 +203,14 @@ static bool update_shadow_stack() // true if the stack changed
       function_name = "<script-body>";
     } else if (op_array->scope == NULL || (op_array->fn_flags & ZEND_ACC_CLOSURE)) {
       classname = "<default>";                 // function call
+      /*
       if (strcmp(op_array->function_name->val, "__lambda_func") == 0) {
         function_name = lambda_frame->name;
         DECREMENT_STACK(lambda_stack, lambda_frame);
       } else {
+      */
         function_name = op_array->function_name->val;
-      }
+      //}
     } else if (execute_data->This.value.obj == NULL) { // static method call
       classname = op_array->scope->name->val;
       function_name = op_array->function_name->val;
@@ -228,6 +230,7 @@ static bool update_shadow_stack() // true if the stack changed
       to_cfm.routine_name = (const char *)routine_name_buffer;
       to_cfm.cfg = NULL;
       to_cfm.dataset = NULL;
+      ERROR("Failed to find opcodes for function %s\n", routine_name);
     } else {
       to_cfm = *monitored_cfm;
     }
@@ -235,10 +238,11 @@ static bool update_shadow_stack() // true if the stack changed
   
   if (shadow_frame > shadow_stack && to_cfm.cfg != NULL) {
     zend_op *op = &shadow_frame->opcodes[shadow_frame->last_index];
-    compiled_edge_target_t compiled_target = get_compiled_edge_target(op);
+    compiled_edge_target_t compiled_target = get_compiled_edge_target(op, shadow_frame->last_index);
                              
-    if (compiled_target.type != COMPILED_EDGE_CALL)
-      ERROR("Generating call edge for compiled target type %d\n", compiled_target.type);
+    if (compiled_target.type != COMPILED_EDGE_CALL && op->opcode != ZEND_NEW)
+      ERROR("Generating call edge for compiled target type %d (opcode 0x%x)\n", 
+            compiled_target.type, op->opcode);
                              
     generate_routine_edge(&shadow_frame->cfm, shadow_frame->last_index, 
                           to_cfm.cfg, 0); // 0 even if that opcode is not executable
@@ -397,6 +401,7 @@ void opcode_executing(const zend_op *op)
               executing_node.index, zend_get_opcode_name(executing_node.opcode));
       }
           
+      // todo: verify call continuations here too (seemm to be missing)
       if (is_fallthrough(&executing_node)) {
         PRINT("@ Verified fall-through %u -> %u in 0x%x|0x%x\n", 
               shadow_frame->last_index, executing_node.index,
@@ -426,10 +431,10 @@ void opcode_executing(const zend_op *op)
             PRINT("@ Verified opcode edge %u -> %u\n", 
                   shadow_frame->last_index, executing_node.index);
           } else {
-            compiled_edge_target_t compiled_target = get_compiled_edge_target(from_op);
+            compiled_edge_target_t compiled_target = get_compiled_edge_target(from_op, shadow_frame->last_index);
             if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
-              ERROR("Generating indirect edge from compiled target type %d\n",
-                    compiled_target.type);
+              ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
+                    compiled_target.type, op->opcode);
             }
             generate_opcode_edge(&shadow_frame->cfm, from_node.index, executing_node.index);
           }
@@ -440,6 +445,7 @@ void opcode_executing(const zend_op *op)
     }
   }
   
+  /*
   if (is_lambda_call_init(op)) {
     if ((op->op2_type == IS_CV || op->op2_type == IS_VAR) && 
         *EX_VAR(op->op2.var)->value.str->val == '\0') {
@@ -448,4 +454,5 @@ void opcode_executing(const zend_op *op)
       PRINT("@ Push call to %s\n", lambda_frame->name);
     }
   }
+  */
 }

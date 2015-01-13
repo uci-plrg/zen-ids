@@ -40,7 +40,7 @@ void init_compile_context()
   sctable_init(&routines_by_opcode_address);
 }
 
-void function_compiled()
+void function_compiled(zend_op_array *op_array)
 {
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
@@ -50,18 +50,18 @@ void function_compiled()
   const char *function_name;
   char *buffer, *filename, routine_name[ROUTINE_NAME_LENGTH];
 
-  if (CG(active_op_array)->type == ZEND_EVAL_CODE) { // lambda or plain eval?
+  if (op_array->type == ZEND_EVAL_CODE) { // lambda or plain eval?
     is_eval = true;
     eval_id = get_next_eval_id();
     sprintf(routine_name, "<eval-%d>", eval_id);
-  } else if (CG(active_op_array)->type == ZEND_USER_FUNCTION) {
-    filename = CG(active_op_array)->filename->val;
+  } else if (op_array->type == ZEND_USER_FUNCTION) {
+    filename = op_array->filename->val;
     
-    if (CG(active_op_array)->function_name == NULL) {
+    if (op_array->function_name == NULL) {
       function_name = "<script-body>";
       is_script_body = true;
     } else {
-      function_name = CG(active_op_array)->function_name->val;
+      function_name = op_array->function_name->val;
       if (strcmp(function_name, "__lambda_func") == 0) {
         is_eval = true;
         eval_id = get_next_eval_id();
@@ -69,7 +69,7 @@ void function_compiled()
       }
     }
   } else {
-    PRINT("Warning: skipping unrecognized op_array of type %d\n", CG(active_op_array)->type);
+    PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
     return;
   }
   
@@ -81,12 +81,12 @@ void function_compiled()
   } else {
     const char *classname;
     if (is_script_body) {
-      classname = strrchr(CG(active_op_array)->filename->val, '/') + 1;
+      classname = strrchr(op_array->filename->val, '/') + 1;
     } else {
-      if (CG(active_op_array)->scope == NULL)
+      if (op_array->scope == NULL)
         classname = "<default>";
       else
-        classname = CG(active_op_array)->scope->name->val;
+        classname = op_array->scope->name->val;
     }
     sprintf(routine_name, "%s:%s", classname, function_name);
   }
@@ -94,7 +94,7 @@ void function_compiled()
   routine_key = hash_string(routine_name);
   
   WARN("--- Function compiled from opcodes at "PX": %s|%s\n", 
-       p2int(CG(active_op_array)->opcodes), filename, routine_name);
+       p2int(op_array->opcodes), filename, routine_name);
   
   fqn = malloc(sizeof(function_fqn_t));
   buffer = malloc(strlen(filename) + 1);
@@ -120,25 +120,29 @@ void function_compiled()
   
   sctable_add_or_replace(&routines_by_name, routine_key, fqn);
   sctable_add_or_replace(&routines_by_opcode_address, 
-                         hash_addr(CG(active_op_array)->opcodes), fqn);
+                         hash_addr(op_array->opcodes), fqn);
   
-  for (i = 0; i < CG(active_op_array)->last; i++) {
+  for (i = 0; i < op_array->last; i++) {
     compiled_edge_target_t target;
-    zend_op *op = &CG(active_op_array)->opcodes[i];
+    zend_op *op = &op_array->opcodes[i];
     cfg_node_t from_node = { op->opcode, i };
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
     
     routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, i);
-    target = get_compiled_edge_target(op);
+    target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
       if (target.index > 0x1000) {
-        ERROR("Skipping foobar edge with target %d!\n", target.index);
+        ERROR("Skipping foobar edge %u|0x%x(%u,%u) -> %u in {%s|%s, 0x%x|0x%x}\n", 
+              i, op->opcode, op->op1_type, op->op2_type, target.index,
+              fqn->unit.path, fqn->function.cfm.routine_name,
+              fqn->unit.hash, fqn->function.hash);
         continue;
       }
       
       cfg_add_opcode_edge(cfm.cfg, i, target.index);
-      PRINT("\t[create edge %d->%d for {%s|%s, 0x%x|0x%x}]\n", i, target.index,
+      PRINT("\t[create edge %u|0x%x(%u,%u) -> %u for {%s|%s, 0x%x|0x%x}]\n", 
+            i, op->opcode, op->op1_type, op->op2_type, target.index,
             fqn->unit.path, fqn->function.cfm.routine_name,
             fqn->unit.hash, fqn->function.hash);
     }
@@ -215,14 +219,14 @@ control_flow_metadata_t get_last_eval_cfm()
   return last_eval_cfm;
 }
 
-compiled_edge_target_t get_compiled_edge_target(zend_op *op)
+compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
 {
   compiled_edge_target_t target = { COMPILED_EDGE_NONE, COMPILED_EDGE_UNKNOWN_TARGET };
   
   switch (op->opcode) {
     case ZEND_JMP:
       target.type = COMPILED_EDGE_DIRECT;
-      target.index = op->op1.opline_num;
+      target.index = op_index + ((zend_op *)op->op1.jmp_addr - op);
       break;
     case ZEND_JMPZ:
     case ZEND_JMPNZ:
@@ -230,11 +234,20 @@ compiled_edge_target_t get_compiled_edge_target(zend_op *op)
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
       target.type = COMPILED_EDGE_DIRECT;
-      target.index = op->op2.opline_num;
+      target.index = op_index + ((zend_op *)op->op2.jmp_addr - op);
       break;
     case ZEND_DO_FCALL:
     case ZEND_INCLUDE_OR_EVAL:
       target.type = COMPILED_EDGE_CALL;
+      break;
+    case ZEND_THROW:
+    case ZEND_BRK:
+    case ZEND_CONT:
+      target.type = COMPILED_EDGE_INDIRECT;
+      break;
+    case ZEND_NEW:
+      target.type = COMPILED_EDGE_DIRECT;
+      target.index = op_index + 2;
       break;
   }
   
