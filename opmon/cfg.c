@@ -44,7 +44,7 @@ void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode,
   cfg_opcode->extended_value = extended_value;
 }
 
-void routine_cfg_add_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
+void cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
 {
   cfg_opcode_edge_t *cfg_edge = malloc(sizeof(cfg_opcode_edge_t));
   memset(cfg_edge, 0, sizeof(cfg_opcode_edge_t));
@@ -67,14 +67,15 @@ void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine)
   scarray_append(&cfg->routines, routine);
 }
 
-void cfg_add_routine_edge(cfg_t *cfg, cfg_node_t from_node, 
+void cfg_add_routine_edge(cfg_t *cfg, uint from_index, uint to_index,
                           routine_cfg_t *from_routine, routine_cfg_t *to_routine)
 {
   cfg_routine_edge_t *cfg_edge = malloc(sizeof(cfg_routine_edge_t));
   memset(cfg_edge, 0, sizeof(cfg_routine_edge_t));
   scarray_append(&cfg->edges, cfg_edge);
   
-  cfg_edge->from_node = from_node;
+  cfg_edge->from_index = from_index;
+  cfg_edge->to_index = to_index;
   cfg_edge->from_routine = from_routine;
   cfg_edge->to_routine = to_routine;
 }

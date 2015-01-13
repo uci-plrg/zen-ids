@@ -6,13 +6,17 @@
 
 #pragma pack(push, 4)
 
+// todo: edges may also need a type { call, exception }
+
 typedef struct _dataset_call_target_t {
   uint unit_hash;
   uint routine_hash;
+  uint index; // todo: add in dataset generator!
 } dataset_call_target_t;
 
 typedef struct _dataset_eval_target_t {
   uint eval_id;
+  uint index; // todo: add in dataset generator!
 } dataset_eval_target_t;
 
 typedef struct _dataset_call_targets_t {
@@ -173,8 +177,13 @@ void dataset_routine_verify_opcode(dataset_routine_t *dataset, uint index,
   }
 }
 
+bool dataset_verify_opcode_edge(dataset_routine_t *dataset, uint from_index, 
+                                uint to_index)
+{
+}
+
 bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index, 
-                                 uint to_unit_hash, uint to_routine_hash)
+                                 uint to_index, uint to_unit_hash, uint to_routine_hash)
 {
   uint i;
   dataset_node_t *node = &dataset->nodes[from_index];
@@ -184,13 +193,14 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
     
     for (i = 0; i < targets->target_count; i++) {
       if (targets->targets[i].unit_hash == to_unit_hash && 
-          targets->targets[i].routine_hash == to_routine_hash)
+          targets->targets[i].routine_hash == to_routine_hash &&
+          targets->targets[i].index == to_index)
         return true;
     }
   } else if (node->type == DATASET_NODE_TYPE_EVAL) {
     dataset_eval_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_eval_targets_t);
     for (i = 0; i < targets->target_count; i++) {
-      if (targets->targets[i].eval_id == to_unit_hash)
+      if (targets->targets[i].eval_id == to_unit_hash && targets->targets[i].index == to_index)
         return true;
     }
   }

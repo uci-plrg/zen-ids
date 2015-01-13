@@ -10,7 +10,9 @@ The zend_op.result is also a znode_op with separate result_type.
   #define IS_CONST  (1<<0)
   #define IS_TMP_VAR  (1<<1)
   #define IS_VAR    (1<<2)
-  #define IS_UNUSED (1<<3)  /* Unused variable */
+  #define IS_UNUSED (1<<3)  /* Unused variable (i.e., does not represent a value in 
+                             * user code, though may contain an internal value. 
+                             */
   #define IS_CV   (1<<4)  /* Compiled variable */
 
 

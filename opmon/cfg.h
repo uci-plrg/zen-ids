@@ -27,8 +27,10 @@ typedef struct _routine_cfg_t {
   scarray_t edges;   // cfg_opcode_edge_t *
 } routine_cfg_t;
 
+// todo: add type { call, exception } ?
 typedef struct _cfg_routine_edge_t {
-  cfg_node_t from_node;
+  uint from_index;
+  uint to_index;
   routine_cfg_t *from_routine;
   routine_cfg_t *to_routine;
 } cfg_routine_edge_t;
@@ -56,11 +58,11 @@ static inline cfg_opcode_edge_t *routine_cfg_get_edge(routine_cfg_t *routine, ui
 routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash);
 void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, 
                                zend_uchar extended_value, uint index);
-void routine_cfg_add_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
+void cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
 
 cfg_t *cfg_new();
 void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine);
-void cfg_add_routine_edge(cfg_t *cfg, cfg_node_t from_node, 
+void cfg_add_routine_edge(cfg_t *cfg, uint from_index, uint to_index,
                           routine_cfg_t *from_routine, routine_cfg_t *to_routine);
 
 #endif

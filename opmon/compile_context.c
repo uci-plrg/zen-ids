@@ -29,6 +29,8 @@ static sctable_t routines_by_opcode_address;
 
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
+extern cfg_t *app_cfg;
+
 void init_compile_context()
 {
   routines_by_name.hash_bits = 8;
@@ -113,49 +115,33 @@ void function_compiled()
   
   cfm.dataset = dataset_routine_lookup(fqn->unit.hash, 0);  
   cfm.cfg = routine_cfg_new(fqn->unit.hash, fqn->function.hash);
+  cfg_add_routine(app_cfg, cfm.cfg);
   fqn->function.cfm = cfm;
   
   sctable_add_or_replace(&routines_by_name, routine_key, fqn);
-  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(CG(active_op_array)->opcodes), fqn);
+  sctable_add_or_replace(&routines_by_opcode_address, 
+                         hash_addr(CG(active_op_array)->opcodes), fqn);
   
   for (i = 0; i < CG(active_op_array)->last; i++) {
-    uint target;
+    compiled_edge_target_t target;
     zend_op *op = &CG(active_op_array)->opcodes[i];
+    cfg_node_t from_node = { op->opcode, i };
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
     
     routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, i);
-
-    switch (op->opcode) {
-      case ZEND_JMP:
-        if (op->op1_type == IS_CONST) {
-          target = op->op1.opline_num;
-          break;
-        }
+    target = get_compiled_edge_target(op);
+    if (target.type == COMPILED_EDGE_DIRECT) {
+      if (target.index > 0x1000) {
+        ERROR("Skipping foobar edge with target %d!\n", target.index);
         continue;
-      case ZEND_JMPZ:
-      case ZEND_JMPNZ:
-      case ZEND_JMPZNZ:
-      case ZEND_JMPZ_EX:
-      case ZEND_JMPNZ_EX:
-        if (op->op2_type == IS_CONST) {
-          target = op->op2.opline_num;
-          break;
-        }
-        continue;
-      default:
-        continue;
+      }
+      
+      cfg_add_opcode_edge(cfm.cfg, i, target.index);
+      PRINT("\t[create edge %d->%d for {%s|%s, 0x%x|0x%x}]\n", i, target.index,
+            fqn->unit.path, fqn->function.cfm.routine_name,
+            fqn->unit.hash, fqn->function.hash);
     }
-    
-    if (target > 0x1000) {
-      ERROR("Skipping foobar edge with target %d!\n", target);
-      continue;
-    }
-    
-    routine_cfg_add_edge(cfm.cfg, i, target);
-    PRINT("\t[create edge %d->%d for {%s|%s, 0x%x|0x%x}]\n", i, target,
-          fqn->unit.path, fqn->function.cfm.routine_name,
-          fqn->unit.hash, fqn->function.hash);
   }
   
   if (is_eval) {
@@ -227,4 +213,30 @@ control_flow_metadata_t *get_cfm_by_opcodes_address(zend_op *opcodes)
 control_flow_metadata_t get_last_eval_cfm()
 {
   return last_eval_cfm;
+}
+
+compiled_edge_target_t get_compiled_edge_target(zend_op *op)
+{
+  compiled_edge_target_t target = { COMPILED_EDGE_NONE, COMPILED_EDGE_UNKNOWN_TARGET };
+  
+  switch (op->opcode) {
+    case ZEND_JMP:
+      target.type = COMPILED_EDGE_DIRECT;
+      target.index = op->op1.opline_num;
+      break;
+    case ZEND_JMPZ:
+    case ZEND_JMPNZ:
+    case ZEND_JMPZNZ:
+    case ZEND_JMPZ_EX:
+    case ZEND_JMPNZ_EX:
+      target.type = COMPILED_EDGE_DIRECT;
+      target.index = op->op2.opline_num;
+      break;
+    case ZEND_DO_FCALL:
+    case ZEND_INCLUDE_OR_EVAL:
+      target.type = COMPILED_EDGE_CALL;
+      break;
+  }
+  
+  return target;
 }

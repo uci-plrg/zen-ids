@@ -35,6 +35,8 @@ static routine_cfg_t *live_loader_cfg;
 static char last_unknown_function_name[MAX_FUNCTION_NAME];
 static pending_load_t pending_load;
 
+cfg_t *app_cfg;
+
 static inline void pend_cfm(control_flow_metadata_t *cfm)
 {
   pending_cfm_stack[pending_cfm_frame++] = cfm;
@@ -142,173 +144,11 @@ static void init_call(const zend_op *op)
   pend_cfm(pending_cfm);
 }
 
-static void deprecated_opcode_executing(const zend_op *op)
-{
-  if (true) return;
-  
-  //uint hash;
-  cfg_node_t node = { op->opcode, 0 };
-  //control_flow_metadata_t *pending_cfm;
-  
-  last_op_array = current_op_array;
-  current_op_array = EG(current_execute_data)->func->op_array.opcodes;
-  if (current_op_array == NULL) {
-    ERROR("opcode array not found for execution of opcode 0x%x\n", op->opcode);
-    return;
-  } 
-  
-  node.index = (uint)(op - current_op_array);
-  
-  //PRINT("[%s(0x%x):%d, line %d]: 0x%x:%s\n", get_current_interp_context_name(), get_current_interp_context_id(), 
-  //  node.index, op->lineno, op->opcode, zend_get_opcode_name(op->opcode));
-  
-  verify_interp_context(current_op_array, node);
-  
-  //last_executed_node = node;
-/*
-  switch (op->opcode) {
-    case ZEND_INCLUDE_OR_EVAL:
-      push_interp_context(current_op_array, node.index, null_cfm);
-      //pend_cfm(call_to_eval);
-      break;
-    case ZEND_INIT_FCALL:
-    case ZEND_INIT_METHOD_CALL:
-    case ZEND_INIT_STATIC_METHOD_CALL:
-    case ZEND_INIT_FCALL_BY_NAME:
-      PRINT("  === ZEND_INIT_FCALL | ZEND_INIT_METHOD_CALL | ZEND_INIT_STATIC_METHOD_CALL | ZEND_INIT_FCALL_BY_NAME\n");
-      init_call(op);
-      //if (op->opcode != ZEND_INIT_STATIC_METHOD_CALL)
-        break;
-    case ZEND_DO_FCALL: 
-      pending_cfm = pop_cfm();
-      if (pending_cfm != NULL) {
-        if (pending_cfm == call_to_eval) {
-          push_interp_context(current_op_array, node.index, null_cfm);
-        } else {
-          push_interp_context(current_op_array, node.index, *pending_cfm);
-        }
-      }
-      break;
-    case ZEND_RETURN: {
-      bool is_loader_frame = (get_current_interp_routine_cfg() == live_loader_cfg);
-      PRINT("  === return\n");
-      pop_interp_context();
-      
-      if (is_loader_frame) {
-        live_loader_cfg = NULL;
-        if (pending_load.pending_execution) {
-          control_flow_metadata_t *pending_cfm = get_cfm(pending_load.function_name);
-          PRINT("Pending the function for which load was invoked: %s\n", pending_load.function_name);
-          pop_cfm();
-          pend_cfm(pending_cfm);
-          //push_interp_context(current_op_array, 0xffffffffU, *get_cfm(pending_load.function_name));
-          //set_interp_cfm(*get_cfm(pending_load.function_name));
-        }
-      }
-    } break;
-    case ZEND_DECLARE_FUNCTION:
-      PRINT("  === declare function\n");
-      break;
-    case ZEND_DECLARE_LAMBDA_FUNCTION:
-      PRINT("  === ZEND_DECLARE_LAMBDA_FUNCTION\n");
-      break;
-    case ZEND_INIT_NS_FCALL_BY_NAME:
-      PRINT("  === ZEND_INIT_NS_FCALL_BY_NAME\n");
-      break;
-    case ZEND_EXT_FCALL_BEGIN:
-      PRINT("  === ZEND_EXT_FCALL_BEGIN\n");
-      break;
-    case ZEND_EXT_FCALL_END:
-      PRINT("  === ZEND_EXT_FCALL_END\n");
-      break;
-  }
-*/
-}
-
-static void deprecated_routine_call()
-{
-  if (true) return;
-  
-  control_flow_metadata_t *pending_cfm = pop_cfm();
-  zend_op *active_op_array = last_op_array;
-  
-  // for static functions, class is here: call->func.op_array.scope->name.val
-  // for instance methods, class is here: call->This
-  // for evals, filename is null (call->func.op_array.filename)
-  // for script body, filename is not null, but function_name is null (call->func.op_array.function_name)
-  
-  PRINT("Routine starting\n");
-  
-  if (0) {
-    zend_function *function = EG(current_execute_data)->func;
-    zend_op *op_array = function->op_array.opcodes;
-    const char *filename = function->op_array.filename->val;
-    const char *function_name;
-    
-    if (function->common.function_name == NULL)
-      function_name = "<script-body>";
-    else
-      function_name = function->common.function_name->val;
-                                                    
-    PRINT("Routine %s|%s starting at "PX"\n", filename, function_name, p2int(op_array));
-  }
-  
-  if (pending_cfm == initial_context)
-    return;
-  
-  if (pending_cfm == NULL) {
-    ERROR("unknown routine starting with ops at "PX".\n", 
-          p2int(current_op_array));
-    //strcpy(pending_load.function_name, last_unknown_function_name);
-    //pending_cfm = get_cfm("<default>:{closure}");
-  //} else if (pending_cfm == loader_cfm) {
-  //  push_interp_context(current_op_array, last_executed_node.index, loader_cfm);
-  } else if (pending_cfm == call_to_eval) {
-    PRINT("Starting eval routine\n");
-    push_interp_context(active_op_array, last_executed_node.index, null_cfm);
-  } else {
-    /*
-    if (pending_cfm->cfg == live_loader_cfg) {
-      last_op_array = current_op_array;
-      current_op_array = EG(current_execute_data)->func->op_array.opcodes;
-      active_op_array = current_op_array;
-    }
-    */
-    
-    PRINT("Starting pending routine 0x%x|0x%x\n", 
-          pending_cfm->cfg->unit_hash, pending_cfm->cfg->routine_hash);
-    push_interp_context(active_op_array, last_executed_node.index, *pending_cfm);
-  }
-}
-
-static void loader_call()
-{
-  if (true) return;
-  
-  control_flow_metadata_t *loader_cfm = get_cfm_by_name("<default>:{closure}");
-  if (loader_cfm == NULL) {
-    PRINT("Unknown loader starting--pushing null cfm\n");
-    pend_cfm(NULL);
-    return;
-  }
-  
-  PRINT("Loading new class\n");
-  switch (last_executed_node.opcode) {
-    case ZEND_INIT_METHOD_CALL:
-    case ZEND_INIT_STATIC_METHOD_CALL:
-      strcpy(pending_load.function_name, last_unknown_function_name);
-      pending_load.pending_execution = true;
-      break;
-    default:
-      pending_load.pending_execution = false;
-  }
-  pend_cfm(loader_cfm);
-  live_loader_cfg = loader_cfm->cfg;
-}
-
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   //scarray_unit_test();
+  
+  app_cfg = cfg_new();
   
   pending_cfm_stack[0] = NULL;
   pending_cfm_stack[1] = NULL;
