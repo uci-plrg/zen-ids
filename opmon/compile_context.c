@@ -114,8 +114,13 @@ void function_compiled(zend_op_array *op_array)
     fqn->function.hash = hash_string(cfm.routine_name);
   
   cfm.dataset = dataset_routine_lookup(fqn->unit.hash, 0);  
-  cfm.cfg = routine_cfg_new(fqn->unit.hash, fqn->function.hash);
-  cfg_add_routine(app_cfg, cfm.cfg);
+  cfm.cfg = cfg_routine_lookup(app_cfg, fqn->unit.hash, fqn->function.hash);
+  if (cfm.cfg == NULL) {
+    cfm.cfg = routine_cfg_new(fqn->unit.hash, fqn->function.hash);
+    cfg_add_routine(app_cfg, cfm.cfg);
+  } else {
+    PRINT("(skipping existing routine)\n");
+  }
   fqn->function.cfm = cfm;
   
   sctable_add_or_replace(&routines_by_name, routine_key, fqn);
@@ -140,7 +145,7 @@ void function_compiled(zend_op_array *op_array)
         continue;
       }
       
-      cfg_add_opcode_edge(cfm.cfg, i, target.index);
+      routine_cfg_add_opcode_edge(cfm.cfg, i, target.index);
       PRINT("\t[create edge %u|0x%x(%u,%u) -> %u for {%s|%s, 0x%x|0x%x}]\n", 
             i, op->opcode, op->op1_type, op->op2_type, target.index,
             fqn->unit.path, fqn->function.cfm.routine_name,
@@ -164,8 +169,8 @@ void function_compiled(zend_op_array *op_array)
           fqn->unit.hash, fqn->function.hash);
       write_node(fqn->unit.hash, fqn->function.hash, cfg_opcode, i);
     }
-    for (i = 0; i < cfm.cfg->edges.size; i++) {
-      cfg_edge = routine_cfg_get_edge(cfm.cfg, i);
+    for (i = 0; i < cfm.cfg->opcode_edges.size; i++) {
+      cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
       write_op_edge(fqn->unit.hash, fqn->function.hash, cfg_edge->from_index, cfg_edge->to_index);
     }
   } else if (cfm.cfg->unit_hash != EVAL_HASH) {
@@ -174,8 +179,8 @@ void function_compiled(zend_op_array *op_array)
       dataset_routine_verify_opcode(cfm.dataset, i, 
                                     routine_cfg_get_opcode(cfm.cfg, i)->opcode);
     }
-    for (i = 0; i < cfm.cfg->edges.size; i++) {
-      cfg_edge = routine_cfg_get_edge(cfm.cfg, i);
+    for (i = 0; i < cfm.cfg->opcode_edges.size; i++) {
+      cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
       dataset_routine_verify_compiled_edge(cfm.dataset, cfg_edge->from_index, cfg_edge->to_index);
     }
   }

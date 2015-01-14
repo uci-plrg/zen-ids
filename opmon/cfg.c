@@ -24,7 +24,8 @@ routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash)
   cfg->unit_hash = unit_hash;
   cfg->routine_hash = routine_hash;
   scarray_init(&cfg->opcodes);
-  scarray_init(&cfg->edges);
+  scarray_init(&cfg->opcode_edges);
+  scarray_init(&cfg->routine_edges);
   return cfg;
 }
 
@@ -44,11 +45,23 @@ void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode,
   cfg_opcode->extended_value = extended_value;
 }
 
-void cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
+bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
+{
+  uint i;
+  cfg_opcode_edge_t *existing_edge;
+  for (i = 0; i < cfg->opcode_edges.size; i++) {
+    existing_edge = routine_cfg_get_opcode_edge(cfg, i);
+    if (existing_edge->from_index == from_index && existing_edge->to_index == to_index)
+      return true;
+  }
+  return false;
+}
+
+void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
 {
   cfg_opcode_edge_t *cfg_edge = malloc(sizeof(cfg_opcode_edge_t));
   memset(cfg_edge, 0, sizeof(cfg_opcode_edge_t));
-  scarray_append(&cfg->edges, cfg_edge);
+  scarray_append(&cfg->opcode_edges, cfg_edge);
   
   cfg_edge->from_index = from_index;
   cfg_edge->to_index = to_index;
@@ -58,7 +71,6 @@ cfg_t *cfg_new()
 {
   cfg_t *cfg = malloc(sizeof(cfg_t));
   scarray_init(&cfg->routines);
-  scarray_init(&cfg->edges);
   return cfg;
 }
 
@@ -67,12 +79,28 @@ void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine)
   scarray_append(&cfg->routines, routine);
 }
 
-void cfg_add_routine_edge(cfg_t *cfg, uint from_index, uint to_index,
-                          routine_cfg_t *from_routine, routine_cfg_t *to_routine)
+bool cfg_has_routine_edge(routine_cfg_t *from_routine, uint from_index, 
+                          routine_cfg_t *to_routine, uint to_index)
+{
+  uint i;
+  cfg_routine_edge_t *existing_edge;
+  for (i = 0; i < from_routine->routine_edges.size; i++) {
+    existing_edge = routine_cfg_get_routine_edge(from_routine, i);
+    if (existing_edge->from_index == from_index &&
+        is_same_routine_cfg(existing_edge->to_routine, to_routine) &&
+        existing_edge->to_index == to_index) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void cfg_add_routine_edge(routine_cfg_t *from_routine, uint from_index, 
+                          routine_cfg_t *to_routine, uint to_index)
 {
   cfg_routine_edge_t *cfg_edge = malloc(sizeof(cfg_routine_edge_t));
   memset(cfg_edge, 0, sizeof(cfg_routine_edge_t));
-  scarray_append(&cfg->edges, cfg_edge);
+  scarray_append(&from_routine->routine_edges, cfg_edge);
   
   cfg_edge->from_index = from_index;
   cfg_edge->to_index = to_index;

@@ -97,7 +97,7 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
                                   routine_cfg_t *to_cfg, uint to_index)
 {
   bool write_edge = true;
-  cfg_add_routine_edge(app_cfg, from_index, to_index, from_cfm->cfg, to_cfg);
+  cfg_add_routine_edge(from_cfm->cfg, from_index, to_cfg, to_index);
   
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->dataset, from_index, to_index,
@@ -123,7 +123,7 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
 static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, uint to_index)
 {
   bool write_edge = true;
-  cfg_add_opcode_edge(cfm->cfg, from_index, to_index);
+  routine_cfg_add_opcode_edge(cfm->cfg, from_index, to_index);
   
   if (cfm->dataset != NULL) {
     if (dataset_verify_opcode_edge(cfm->dataset, from_index, to_index)) {
@@ -256,13 +256,17 @@ static bool update_shadow_stack() // true if the stack changed
   if (shadow_frame > shadow_stack && to_cfm.cfg != NULL) {
     zend_op *op = &shadow_frame->opcodes[shadow_frame->last_index];
     compiled_edge_target_t compiled_target = get_compiled_edge_target(op, shadow_frame->last_index);
-                             
-    if (compiled_target.type != COMPILED_EDGE_CALL && op->opcode != ZEND_NEW)
-      WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n", 
-           compiled_target.type, op->opcode);
-                             
-    generate_routine_edge(&shadow_frame->cfm, shadow_frame->last_index, 
-                          to_cfm.cfg, 0); // 0 means entry, even if that opcode is not executable
+          
+    if (!cfg_has_routine_edge(shadow_frame->cfm.cfg, shadow_frame->last_index, to_cfm.cfg, 0)) {
+      if (compiled_target.type != COMPILED_EDGE_CALL && op->opcode != ZEND_NEW)
+        WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n", 
+             compiled_target.type, op->opcode);
+                               
+      generate_routine_edge(&shadow_frame->cfm, shadow_frame->last_index, 
+                            to_cfm.cfg, 0); // 0 means entry, even if that opcode is not executable
+    } else {
+      PRINT("(skipping existing routine edge)\n");
+    }
   }
   
   INCREMENT_STACK(shadow_stack, shadow_frame);
@@ -381,11 +385,19 @@ void opcode_executing(const zend_op *op)
       stack_event.state = STACK_STATE_NONE;
       
       if (exception_frame->execute_data == shadow_frame->execute_data) {
-        generate_opcode_edge(&shadow_frame->cfm, exception_frame->throw_index, 
-                             executing_node.index);
-      } else {
+        if (!routine_cfg_has_opcode_edge(shadow_frame->cfm.cfg, exception_frame->throw_index,
+                                         executing_node.index)) {
+          generate_opcode_edge(&shadow_frame->cfm, exception_frame->throw_index, 
+                               executing_node.index);
+        } else {
+          PRINT("(skipping existing exception edge)\n");
+        }
+      } else if (!cfg_has_routine_edge(exception_frame->cfm.cfg, exception_frame->throw_index,
+                 shadow_frame->cfm.cfg, executing_node.index)) {
         generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,
                               shadow_frame->cfm.cfg, executing_node.index);
+      } else {
+        PRINT("(skipping existing exception edge)\n");
       }
       DECREMENT_STACK(exception_stack, exception_frame);
       caught_exception = true;
@@ -449,8 +461,8 @@ void opcode_executing(const zend_op *op)
           zend_op *from_op = &shadow_frame->opcodes[shadow_frame->last_index];
           cfg_node_t from_node = { op->opcode, shadow_frame->last_index };
           
-          for (i = 0; i < shadow_frame->cfm.cfg->edges.size; i++) {
-            cfg_opcode_edge_t *edge = routine_cfg_get_edge(shadow_frame->cfm.cfg, i);
+          for (i = 0; i < shadow_frame->cfm.cfg->opcode_edges.size; i++) {
+            cfg_opcode_edge_t *edge = routine_cfg_get_opcode_edge(shadow_frame->cfm.cfg, i);
             if (edge->from_index == shadow_frame->last_index) {
               if (edge->to_index == executing_node.index) {
                 found = true;
