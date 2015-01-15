@@ -73,9 +73,6 @@ void function_compiled(zend_op_array *op_array)
     return;
   }
   
-  if (strstr(function_name, "closure") != NULL && strstr(function_name, "Asset") != NULL)
-    i = 7;
-  
   if (is_eval) {
     filename = "<any-file>";
   } else {
