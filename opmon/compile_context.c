@@ -8,6 +8,9 @@
 #include "compile_context.h"
 
 #define ROUTINE_NAME_LENGTH 256
+#define CLOSURE_NAME "{closure}"
+#define CLOSURE_NAME_LENGTH 9
+#define CLOSURE_NAME_TEMPLATE "<closure-%d>"
 
 typedef struct _compilation_unit_t {
   const char *path;
@@ -26,10 +29,24 @@ typedef struct _function_fqn_t {
 
 static sctable_t routines_by_name;
 static sctable_t routines_by_opcode_address;
+static uint closure_count = 0;
 
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
 extern cfg_t *app_cfg;
+
+inline int is_closure(const char *function_name)
+{
+  const char *closure_position;
+  uint len = strlen(function_name);
+  if (len < CLOSURE_NAME_LENGTH)
+    return -1;
+  closure_position = function_name + len - CLOSURE_NAME_LENGTH;
+  if (strcmp(closure_position, CLOSURE_NAME) == 0)
+    return (closure_position - function_name);
+  else 
+    return -1;
+}
 
 void init_compile_context()
 {
@@ -43,7 +60,7 @@ void init_compile_context()
 void function_compiled(zend_op_array *op_array)
 {
   uint i, eval_id;
-  bool is_script_body = false, is_eval = false;
+  bool is_script_body = false, is_eval = false, has_routine_name = false;;
   function_fqn_t *fqn;
   control_flow_metadata_t cfm;
   uint routine_key;
@@ -54,6 +71,7 @@ void function_compiled(zend_op_array *op_array)
     is_eval = true;
     eval_id = get_next_eval_id();
     sprintf(routine_name, "<eval-%d>", eval_id);
+    has_routine_name = true;
   } else if (op_array->type == ZEND_USER_FUNCTION) {
     filename = op_array->filename->val;
     
@@ -61,11 +79,19 @@ void function_compiled(zend_op_array *op_array)
       function_name = "<script-body>";
       is_script_body = true;
     } else {
-      function_name = op_array->function_name->val;
-      if (strcmp(function_name, "__lambda_func") == 0) {
-        is_eval = true;
-        eval_id = get_next_eval_id();
-        sprintf(routine_name, "<default>:lambda_%d", EG(lambda_count)+1);
+      int closure_index = is_closure(op_array->function_name->val);
+      if (closure_index >= 0) {
+        strncpy(routine_name, op_array->function_name->val, closure_index);
+        sprintf(routine_name + closure_index, CLOSURE_NAME_TEMPLATE, closure_count++);
+        has_routine_name = true;
+      } else {
+        function_name = op_array->function_name->val;
+        if (strcmp(function_name, "__lambda_func") == 0) {
+          is_eval = true;
+          eval_id = get_next_eval_id();
+          sprintf(routine_name, "<default>:lambda_%d", EG(lambda_count)+1);
+          has_routine_name = true;
+        }
       }
     }
   } else {
@@ -75,7 +101,7 @@ void function_compiled(zend_op_array *op_array)
   
   if (is_eval) {
     filename = "<any-file>";
-  } else {
+  } else if (!has_routine_name) {
     const char *classname;
     if (is_script_body) {
       classname = strrchr(op_array->filename->val, '/') + 1;
@@ -86,12 +112,10 @@ void function_compiled(zend_op_array *op_array)
         classname = op_array->scope->name->val;
     }
     sprintf(routine_name, "%s:%s", classname, function_name);
+    has_routine_name = true;
   }
   
   routine_key = hash_string(routine_name);
-  
-  WARN("--- Function compiled from opcodes at "PX": %s|%s\n", 
-       p2int(op_array->opcodes), filename, routine_name);
   
   fqn = malloc(sizeof(function_fqn_t));
   buffer = malloc(strlen(filename) + 1);
@@ -120,6 +144,9 @@ void function_compiled(zend_op_array *op_array)
   }
   fqn->function.cfm = cfm;
   
+  WARN("--- Function compiled from opcodes at "PX": %s|%s: 0x%x|0x%x\n", 
+       p2int(op_array->opcodes), filename, routine_name, fqn->unit.hash, fqn->function.hash);
+  
   sctable_add_or_replace(&routines_by_name, routine_key, fqn);
   sctable_add_or_replace(&routines_by_opcode_address, 
                          hash_addr(op_array->opcodes), fqn);
@@ -141,7 +168,7 @@ void function_compiled(zend_op_array *op_array)
               fqn->unit.hash, fqn->function.hash);
         continue;
       }
-      
+
       routine_cfg_add_opcode_edge(cfm.cfg, i, target.index);
       PRINT("\t[create edge %u|0x%x(%u,%u) -> %u for {%s|%s, 0x%x|0x%x}]\n", 
             i, op->opcode, op->op1_type, op->op2_type, target.index,
