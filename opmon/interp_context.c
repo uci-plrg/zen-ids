@@ -162,7 +162,7 @@ static bool shadow_stack_contains_frame(zend_execute_data *execute_data, zend_op
   return false;
 }
 
-static bool update_shadow_stack() // true if the stack changed
+static bool update_shadow_stack() // true if the stack pointer changed
 {
   control_flow_metadata_t to_cfm;
   zend_execute_data *execute_data = EG(current_execute_data);
@@ -291,7 +291,7 @@ static uint get_next_executable_index(uint from_index)
   uint i = from_index;
   while (true) {
     opcode = shadow_frame->opcodes[i].opcode;
-    if (zend_get_opcode_name(opcode) != NULL && opcode != ZEND_RECV)
+    if (zend_get_opcode_name(opcode) != NULL)
       break;
     i++;
   }
@@ -331,7 +331,7 @@ void opcode_executing(const zend_op *op)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
-  bool stack_changed, caught_exception = false;
+  bool stack_pointer_moved, caught_exception = false;
   
   if (pthread_self() != first_thread_id)
     ERROR("Multiple threads are not supported!\n");
@@ -352,8 +352,8 @@ void opcode_executing(const zend_op *op)
     return;
   }
   
-  stack_changed = update_shadow_stack();
-  
+  stack_pointer_moved = update_shadow_stack();
+    
   // todo: check remaining state/opcode mismatches
   if (op->opcode == ZEND_RETURN)
     stack_event.state = STACK_STATE_RETURNING;
@@ -401,7 +401,7 @@ void opcode_executing(const zend_op *op)
       }
       DECREMENT_STACK(exception_stack, exception_frame);
       caught_exception = true;
-    } // else... not sure why these get executed
+    } // else it was matching the Exception type (and missed)
   } else if (stack_event.state == STACK_STATE_UNWINDING) {
     WARN("Executing op %s while unwinding an exception!\n", zend_get_opcode_name(op->opcode));
   }
@@ -444,7 +444,7 @@ void opcode_executing(const zend_op *op)
               executing_node.index, zend_get_opcode_name(executing_node.opcode));
       }
           
-      // todo: verify call continuations here too (seemm to be missing)
+      // todo: verify call continuations here too (seems to be missing)
       if (is_fallthrough(&executing_node)) {
         PRINT("@ Verified fall-through %u -> %u in 0x%x|0x%x\n", 
               shadow_frame->last_index, executing_node.index,
@@ -455,7 +455,7 @@ void opcode_executing(const zend_op *op)
           WARN("Context entry reaches index %u, "
                "but the first executable node has index %u!\n",
                executing_node.index, get_next_executable_index(0));
-        } else if (!stack_changed) {
+        } else if (!stack_pointer_moved) {
           uint i;
           bool found = false;
           zend_op *from_op = &shadow_frame->opcodes[shadow_frame->last_index];
@@ -473,7 +473,8 @@ void opcode_executing(const zend_op *op)
           if (found) {
             PRINT("@ Verified opcode edge %u -> %u\n", 
                   shadow_frame->last_index, executing_node.index);
-          } else {
+          } else if (//executing_node.index != get_next_executable_index(0) ||
+              shadow_frame->opcodes[shadow_frame->last_index].opcode != ZEND_RETURN) { // slightly weak
             compiled_edge_target_t compiled_target = get_compiled_edge_target(from_op, shadow_frame->last_index);
             if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
               WARN("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",

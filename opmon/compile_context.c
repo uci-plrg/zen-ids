@@ -12,6 +12,8 @@
 #define CLOSURE_NAME_LENGTH 9
 #define CLOSURE_NAME_TEMPLATE "<closure-%d>"
 
+#define SPOT_DEBUG 1
+
 typedef struct _compilation_unit_t {
   const char *path;
   uint hash;
@@ -66,7 +68,10 @@ void function_compiled(zend_op_array *op_array)
   uint routine_key;
   const char *function_name;
   char *buffer, *filename, routine_name[ROUTINE_NAME_LENGTH];
-
+#ifdef SPOT_DEBUG  
+  bool spot = false;
+#endif
+  
   if (op_array->type == ZEND_EVAL_CODE) { // lambda or plain eval?
     is_eval = true;
     eval_id = get_next_eval_id();
@@ -143,6 +148,10 @@ void function_compiled(zend_op_array *op_array)
     PRINT("(skipping existing routine)\n");
   }
   fqn->function.cfm = cfm;
+
+#ifdef SPOT_DEBUG  
+  spot = (fqn->unit.hash == 0xf54cb4f1 && fqn->function.hash == 0xfc6651c2);
+#endif
   
   WARN("--- Function compiled from opcodes at "PX": %s|%s: 0x%x|0x%x\n", 
        p2int(op_array->opcodes), filename, routine_name, fqn->unit.hash, fqn->function.hash);
@@ -158,6 +167,13 @@ void function_compiled(zend_op_array *op_array)
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
     
+#ifdef SPOT_DEBUG  
+    if (spot) {
+      SPOT("Compiling opcode 0x%x at index %d of %s (0x%x|0x%x)\n",
+           op->opcode, i, routine_name, fqn->unit.hash, fqn->function.hash);
+    }
+#endif
+    
     routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, i);
     target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
@@ -169,6 +185,13 @@ void function_compiled(zend_op_array *op_array)
         continue;
       }
 
+#ifdef SPOT_DEBUG  
+      if (spot) {
+        SPOT("Compiling opcode edge %d -> %d for opcode 0x%x in %s (0x%x|0x%x)\n",
+             i, target.index, op->opcode, routine_name, fqn->unit.hash, fqn->function.hash);
+      }
+#endif
+    
       routine_cfg_add_opcode_edge(cfm.cfg, i, target.index);
       PRINT("\t[create edge %u|0x%x(%u,%u) -> %u for {%s|%s, 0x%x|0x%x}]\n", 
             i, op->opcode, op->op1_type, op->op2_type, target.index,

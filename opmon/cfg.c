@@ -65,6 +65,11 @@ void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_in
   
   cfg_edge->from_index = from_index;
   cfg_edge->to_index = to_index;
+  
+  if (cfg->unit_hash == 0xf54cb4f1 && cfg->routine_hash == 0xfc6651c2) {
+    SPOT("Compiling opcode edge %d -> %d in (0x%x|0x%x)\n",
+         from_index, to_index, cfg->unit_hash, cfg->routine_hash);
+  }
 }
 
 cfg_t *cfg_new()
