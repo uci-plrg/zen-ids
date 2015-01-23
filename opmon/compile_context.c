@@ -31,7 +31,7 @@ typedef struct _function_fqn_t {
 
 static sctable_t routines_by_name;
 static sctable_t routines_by_opcode_address;
-static uint closure_count = 0;
+static uint closure_count = 0; // must be per compilation unit!
 
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
@@ -139,7 +139,7 @@ void function_compiled(zend_op_array *op_array)
   else
     fqn->function.hash = hash_string(cfm.routine_name);
   
-  cfm.dataset = dataset_routine_lookup(fqn->unit.hash, 0);  
+  cfm.dataset = dataset_routine_lookup(fqn->unit.hash, fqn->function.hash);  
   cfm.cfg = cfg_routine_lookup(app_cfg, fqn->unit.hash, fqn->function.hash);
   if (cfm.cfg == NULL) {
     cfm.cfg = routine_cfg_new(fqn->unit.hash, fqn->function.hash);
@@ -150,11 +150,12 @@ void function_compiled(zend_op_array *op_array)
   fqn->function.cfm = cfm;
 
 #ifdef SPOT_DEBUG  
-  spot = (fqn->unit.hash == 0xf54cb4f1 && fqn->function.hash == 0xfc6651c2);
+  spot = (fqn->unit.hash == 0x7164dfad && fqn->function.hash == 0x933ca2cd);
 #endif
   
-  WARN("--- Function compiled from opcodes at "PX": %s|%s: 0x%x|0x%x\n", 
-       p2int(op_array->opcodes), filename, routine_name, fqn->unit.hash, fqn->function.hash);
+  WARN("--- Function compiled from opcodes at "PX": %s|%s: 0x%x|0x%x (dataset %s)\n", 
+       p2int(op_array->opcodes), filename, routine_name, fqn->unit.hash, fqn->function.hash,
+       cfm.dataset == NULL ? "not found" : "found");
   
   sctable_add_or_replace(&routines_by_name, routine_key, fqn);
   sctable_add_or_replace(&routines_by_opcode_address, 
@@ -210,15 +211,25 @@ void function_compiled(zend_op_array *op_array)
     cfg_opcode_edge_t *cfg_edge;
     for (i = 0; i < cfm.cfg->opcodes.size; i++) {
       cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
-      PRINT("\t[emit %s at %d for {%s|%s, 0x%x|0x%x}]\n", 
-            zend_get_opcode_name(cfg_opcode->opcode), i,
-          fqn->unit.path, fqn->function.cfm.routine_name,
-          fqn->unit.hash, fqn->function.hash);
+#ifdef SPOT_DEBUG  
+      if (spot) {
+        SPOT("\t[emit %s at %d for {%s|%s, 0x%x|0x%x}]\n", 
+              zend_get_opcode_name(cfg_opcode->opcode), i,
+              fqn->unit.path, fqn->function.cfm.routine_name,
+              fqn->unit.hash, fqn->function.hash);
+      }
+#endif
       write_node(fqn->unit.hash, fqn->function.hash, cfg_opcode, i);
     }
     for (i = 0; i < cfm.cfg->opcode_edges.size; i++) {
       cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
       write_op_edge(fqn->unit.hash, fqn->function.hash, cfg_edge->from_index, cfg_edge->to_index);
+#ifdef SPOT_DEBUG  
+      if (spot) {
+        SPOT("\t[emit %d -> %d in 0x%x|0x%x]\n", cfg_edge->from_index, 
+             cfg_edge->to_index, fqn->unit.hash, fqn->function.hash);
+      }
+#endif
     }
   } else if (cfm.cfg->unit_hash != EVAL_HASH) {
     cfg_opcode_edge_t *cfg_edge;
@@ -231,6 +242,8 @@ void function_compiled(zend_op_array *op_array)
       dataset_routine_verify_compiled_edge(cfm.dataset, cfg_edge->from_index, cfg_edge->to_index);
     }
   }
+  
+  flush_all_outputs();
 }
 
 const char *get_function_declaration_path(const char *routine_name)
@@ -285,6 +298,8 @@ compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
+    case ZEND_FE_RESET:
+    case ZEND_FE_FETCH:
       target.type = COMPILED_EDGE_DIRECT;
       target.index = op_index + ((zend_op *)op->op2.jmp_addr - op);
       break;

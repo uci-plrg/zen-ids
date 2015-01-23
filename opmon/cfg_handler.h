@@ -18,4 +18,6 @@ void write_op_edge(uint unit_hash, uint routine_hash, uint from_index, uint to_i
 void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_index, 
                         uint to_unit_hash, uint to_routine_hash, uint to_index);
 
+void flush_all_outputs();
+
 #endif

@@ -77,6 +77,7 @@ static dataset_hashtable_t *hashtable;
 static dataset_eval_list_t *eval_list; 
 
 #define RESOLVE_PTR(ptr, type) ((type *)(dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
+#define IS_CHAIN_TERMINUS(chain) (*(uint *)chain == 0)
 
 static bool is_fall_through(zend_uchar opcode, uint from_index, uint to_index) {
   switch (opcode) {
@@ -106,7 +107,7 @@ dataset_routine_t *dataset_routine_lookup(uint unit_hash, uint routine_hash)
     uint index = (unit_hash ^ routine_hash) & hashtable->mask;
     dataset_routine_t *routine;
     dataset_chain_t *chain = RESOLVE_PTR(hashtable->table[index], dataset_chain_t);
-    while (p2int(chain) != dataset_mapping) {
+    while (IS_CHAIN_TERMINUS(chain)) {
       routine = RESOLVE_PTR(chain->routine, dataset_routine_t);
       if (routine->unit_hash == unit_hash && routine->routine_hash == routine_hash)
         return routine;

@@ -119,3 +119,10 @@ void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_i
   fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&to_index, sizeof(uint), 1, cfg_files.routine_edge);
 }
+
+void flush_all_outputs()
+{
+  fflush(cfg_files.node);
+  fflush(cfg_files.op_edge);
+  fflush(cfg_files.routine_edge);
+}

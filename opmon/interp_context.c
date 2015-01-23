@@ -10,6 +10,7 @@
 #define MAX_STACK_FRAME_exception_stack 0x100
 #define MAX_STACK_FRAME_lambda_stack 0x100
 #define ROUTINE_NAME_LENGTH 256
+#define FLUSH_MASK 0xff
 
 #define INCREMENT_STACK(base, ptr) \
 do { \
@@ -62,7 +63,7 @@ static lambda_frame_t *lambda_frame;
 
 static stack_event_t stack_event;
 
-static bool is_initial_entry = true;
+static uint op_execution_count = 0;
 
 static uint first_thread_id;
 
@@ -333,6 +334,10 @@ void opcode_executing(const zend_op *op)
   zend_op_array *op_array = &execute_data->func->op_array;
   bool stack_pointer_moved, caught_exception = false;
   
+  op_execution_count++;
+  if (op_execution_count & FLUSH_MASK == 0)
+    flush_all_outputs();
+  
   if (pthread_self() != first_thread_id)
     ERROR("Multiple threads are not supported!\n");
   
@@ -387,6 +392,13 @@ void opcode_executing(const zend_op *op)
       if (exception_frame->execute_data == shadow_frame->execute_data) {
         if (!routine_cfg_has_opcode_edge(shadow_frame->cfm.cfg, exception_frame->throw_index,
                                          executing_node.index)) {
+                                           
+          if (executing_node.index == 252 &&
+              shadow_frame->cfm.cfg->unit_hash == 0xa96968d7 &&
+              shadow_frame->cfm.cfg->routine_hash == 0x6df96065) {
+            SPOT("halt!\n");
+          }
+            
           generate_opcode_edge(&shadow_frame->cfm, exception_frame->throw_index, 
                                executing_node.index);
         } else {
@@ -480,7 +492,17 @@ void opcode_executing(const zend_op *op)
               WARN("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
                    compiled_target.type, op->opcode);
             }
-            generate_opcode_edge(&shadow_frame->cfm, from_node.index, executing_node.index);
+            
+            if (executing_node.index == 252 &&
+                shadow_frame->cfm.cfg->unit_hash == 0xa96968d7 &&
+                shadow_frame->cfm.cfg->routine_hash == 0x6df96065) {
+              SPOT("halt!\n");
+            }
+            
+            if (!routine_cfg_has_opcode_edge(shadow_frame->cfm.cfg, from_node.index,
+                                             executing_node.index)) {
+              generate_opcode_edge(&shadow_frame->cfm, from_node.index, executing_node.index);
+            }
           }
         }
       }
