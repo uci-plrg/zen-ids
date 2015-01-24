@@ -39,6 +39,7 @@ void destroy_cfg_handler()
     fclose(cfg_files.node);
     fclose(cfg_files.op_edge);
     fclose(cfg_files.routine_edge);
+    fclose(cfg_files.routine_catalog);
   }
 }
 
@@ -76,6 +77,7 @@ static void open_output_files(const char *script_path)
   OPEN_CFG_FILE("/node.run", node);
   OPEN_CFG_FILE("/op-edge.run", op_edge);
   OPEN_CFG_FILE("/routine-edge.run", routine_edge);
+  OPEN_CFG_FILE("/routine-catalog.tab", routine_catalog);
   
 #undef OPEN_CFG_FILE
 }
@@ -118,6 +120,13 @@ void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_i
   fwrite(&to_unit_hash, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&to_index, sizeof(uint), 1, cfg_files.routine_edge);
+}
+
+void write_routine_catalog_entry(uint unit_hash, uint routine_hash, 
+                                 const char *unit_path, const char *routine_name)
+{
+  fprintf(cfg_files.routine_catalog, "0x%x|0x%x %s|%s\n", unit_hash, routine_hash,
+          unit_path, routine_name);
 }
 
 void flush_all_outputs()
