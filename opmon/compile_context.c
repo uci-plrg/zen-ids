@@ -11,8 +11,6 @@
 #define CLOSURE_NAME "{closure}"
 #define CLOSURE_NAME_LENGTH 9
 #define CLOSURE_NAME_TEMPLATE "<closure-%d>"
-#define EVAL_FILENAME_TAG "eval()'d code"
-#define EVAL_FILENAME_TAG_LEN 13
 
 // #define SPOT_DEBUG 1
 
@@ -39,7 +37,7 @@ static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL }
 
 extern cfg_t *app_cfg;
 
-static inline int is_closure(const char *function_name)
+inline int is_closure(const char *function_name)
 {
   const char *closure_position;
   uint len = strlen(function_name);
@@ -50,18 +48,6 @@ static inline int is_closure(const char *function_name)
     return (closure_position - function_name);
   else 
     return -1;
-}
-
-static inline bool is_eval_function(zend_op_array *op_array)
-{
-  if (op_array->filename == NULL) {
-    return op_array->type == ZEND_EVAL_CODE;
-  } else {
-    uint filename_len = strlen(op_array->filename->val);
-    const char *eval_tag = op_array->filename->val + 
-                           (filename_len - EVAL_FILENAME_TAG_LEN);
-    return strstr(eval_tag, EVAL_FILENAME_TAG) == eval_tag;
-  }
 }
 
 void init_compile_context()
@@ -77,7 +63,7 @@ void function_compiled(zend_op_array *op_array)
 {
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
-  bool has_routine_name = false, is_top_level = false;
+  bool has_routine_name = false, is_already_compiled = false;
   function_fqn_t *fqn;
   control_flow_metadata_t cfm;
   uint routine_key;
@@ -87,19 +73,17 @@ void function_compiled(zend_op_array *op_array)
   bool spot = false;
 #endif
   
-  if (is_eval_function(op_array)) { // lambda or plain eval?
+  if (op_array->type == ZEND_EVAL_CODE) { // lambda or plain eval?
     is_eval = true;
     eval_id = get_next_eval_id();
     sprintf(routine_name, "<eval-%d>", eval_id);
     has_routine_name = true;
-    is_top_level = true;
   } else if (op_array->type == ZEND_USER_FUNCTION) {
     filename = op_array->filename->val;
     
     if (op_array->function_name == NULL) {
       function_name = "<script-body>";
       is_script_body = true;
-      is_top_level = true;
     } else {
       int closure_index = is_closure(op_array->function_name->val);
       if (closure_index >= 0) {
@@ -156,13 +140,6 @@ void function_compiled(zend_op_array *op_array)
   else
     fqn->function.hash = hash_string(cfm.routine_name);
   
-#ifdef SPOT_DEBUG  
-  //if (fqn->unit.hash == 0x3985a938) {
-    SPOT("0x%x|0x%x: is eval? %d | %s:%s\n", fqn->unit.hash, fqn->function.hash, 
-         is_eval, filename, routine_name);
-  //}
-#endif
-  
   cfm.dataset = dataset_routine_lookup(fqn->unit.hash, fqn->function.hash);  
   cfm.cfg = cfg_routine_lookup(app_cfg, fqn->unit.hash, fqn->function.hash);
   if (cfm.cfg == NULL) {
@@ -170,10 +147,25 @@ void function_compiled(zend_op_array *op_array)
     cfg_add_routine(app_cfg, cfm.cfg);
     write_routine_catalog_entry(fqn->unit.hash, fqn->function.hash, filename, routine_name);
   } else {
-    PRINT("(skipping existing routine)\n");
-    if (is_top_level)
-      closure_count = 0;
-    return; // verify equal?
+    zend_op *op;
+    cfg_opcode_t *cfg_opcode;
+    bool recompile = false;
+    //cfg_opcode_edge_t *cfg_edge; // skipping edges for now
+    compiled_edge_target_t target;
+    for (i = 0; i < op_array->last; i++) {
+      op = &op_array->opcodes[i];
+      if (zend_get_opcode_name(op->opcode) == NULL)
+        continue;
+      cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
+      //cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
+      
+      if (op->opcode != cfg_opcode->opcode || op->extended_value != cfg_opcode->extended_value) {
+        recompile = true;
+        break;
+      }
+      //target = get_compiled_edge_target(op, i);
+    }
+    is_already_compiled = !recompile;
   }
   fqn->function.cfm = cfm;
 
@@ -181,13 +173,20 @@ void function_compiled(zend_op_array *op_array)
   spot = (fqn->unit.hash == 0x7164dfad && fqn->function.hash == 0x933ca2cd);
 #endif
   
-  WARN("--- Function compiled from opcodes at "PX": %s|%s: 0x%x|0x%x (dataset %s)\n", 
-       p2int(op_array->opcodes), filename, routine_name, fqn->unit.hash, fqn->function.hash,
-       cfm.dataset == NULL ? "not found" : "found");
+  PRINT("--- Function compiled from %d opcodes at "PX": %s|%s: 0x%x|0x%x (dataset %s)\n", 
+        op_array->last, p2int(op_array->opcodes), filename, routine_name, fqn->unit.hash, 
+        fqn->function.hash, cfm.dataset == NULL ? "not found" : "found");
   
   sctable_add_or_replace(&routines_by_name, routine_key, fqn);
   sctable_add_or_replace(&routines_by_opcode_address, 
                          hash_addr(op_array->opcodes), fqn);
+  
+  if (is_already_compiled) {
+    PRINT("(skipping existing routine 0x%x|0x%x at "PX")\n", fqn->unit.hash, fqn->function.hash,
+          p2int(op_array->opcodes));
+    fflush(stderr);
+    return; // verify equal?
+  }
   
   for (i = 0; i < op_array->last; i++) {
     compiled_edge_target_t target;
@@ -272,8 +271,6 @@ void function_compiled(zend_op_array *op_array)
   }
   
   flush_all_outputs();
-  if (is_top_level)
-    closure_count = 0;
 }
 
 const char *get_function_declaration_path(const char *routine_name)

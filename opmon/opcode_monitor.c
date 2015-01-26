@@ -10,6 +10,8 @@
 
 #define EC(f) opcode_monitor_globals.execution_context.f
 
+static uint pid;
+
 PHP_INI_BEGIN()
   STD_PHP_INI_ENTRY("opmon_dataset_dir", ".", PHP_INI_PERDIR, OnUpdateString, 
                     dataset_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
@@ -49,12 +51,10 @@ static zend_opcode_monitor_t monitor_functions;
 
 PHP_MINIT_FUNCTION(opcode_monitor)
 {
-  PRINT("Initializing the opcode monitor\n");
-  
   REGISTER_INI_ENTRIES();
   
-  PRINT("INI example: dataset dir is %s\n", INI_STR("opmon_dataset_dir"));
-  PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
+  //PRINT("INI example: dataset dir is %s\n", INI_STR("opmon_dataset_dir"));
+  //PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
   
   if (strlen(OPMON_G(dataset_dir)) > 200)
     ERROR("dataset dirname is too long. Please rebuild with a larger buffer.\n");

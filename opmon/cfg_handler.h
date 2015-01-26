@@ -14,6 +14,9 @@ void init_cfg_handler();
 void destroy_cfg_handler();
 
 void starting_script(const char *script_path);
+void worker_startup();
+void server_startup();
+
 void write_node(uint unit_hash, uint routine_hash, cfg_opcode_t *opcode, uint index);
 void write_op_edge(uint unit_hash, uint routine_hash, uint from_index, uint to_index);
 void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_index, 

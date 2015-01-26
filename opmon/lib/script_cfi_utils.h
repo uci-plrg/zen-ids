@@ -9,6 +9,13 @@
 
 #define SPOT(...) fprintf(stderr, "\t> #debug# "__VA_ARGS__)
 
+#define PERROR(...) \
+do { \
+  if (OPMON_G(verbose) >= ERROR_LEVEL) \
+    fprintf(stderr, "\t> #error# "__VA_ARGS__); \
+    perror("\t#error# "); \
+} while (0)
+
 #define ERROR(...) \
 do { \
   if (OPMON_G(verbose) >= ERROR_LEVEL) \
@@ -42,15 +49,16 @@ do { \
 #define p2int(p) ((uint_ptr_t) (p))
 #define int2p(p) ((byte *) (p))
 
-typedef struct _execution_context_t {
-  //const zend_op *base_op;
-  uint foo;
-} execution_context_t;
-
 typedef unsigned long long uint64;
 typedef unsigned char bool;
 typedef char byte;
 typedef uint64 uint_ptr_t;
+
+typedef struct _execution_context_t {
+  uint pid;
+  //const zend_op *base_op;
+  uint foo;
+} execution_context_t;
 
 enum {
   false,
@@ -74,6 +82,6 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 uint hash_string(const char *string);
 uint hash_addr(void *addr);
 void opmon_activate_printer();
-void opmon_setup_base_path(char *path, const char *category, const char *script_path);
+void opmon_setup_base_path(char *path, const char *category, const char *app_path);
 
 #endif

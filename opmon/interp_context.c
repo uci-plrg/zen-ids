@@ -451,9 +451,12 @@ void opcode_executing(const zend_op *op)
       expected_opcode = routine_cfg_get_opcode(shadow_frame->cfm.cfg, executing_node.index);
       if (executing_node.opcode != expected_opcode->opcode && 
           !is_alias(executing_node.opcode, expected_opcode->opcode)) {
-        ERROR("Expected opcode %s at index %u, but found opcode %s\n", 
-              zend_get_opcode_name(expected_opcode->opcode), 
-              executing_node.index, zend_get_opcode_name(executing_node.opcode));
+        ERROR("Expected opcode %s at index %u, but found opcode %s in opcodes "
+              PX"|"PX" of routine 0x%x|0x%x\n", 
+              zend_get_opcode_name(expected_opcode->opcode), executing_node.index, 
+              zend_get_opcode_name(executing_node.opcode), p2int(execute_data), 
+              p2int(op_array->opcodes), shadow_frame->cfm.cfg->unit_hash, 
+              shadow_frame->cfm.cfg->routine_hash);
       }
           
       // todo: verify call continuations here too (seems to be missing)

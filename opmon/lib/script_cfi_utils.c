@@ -32,7 +32,7 @@ uint hash_addr(void *addr)
   return hash;
 }
 
-void setup_base_path(char *path, const char *category, const char *script_path)
+void setup_base_path(char *path, const char *category, const char *app_path)
 {
   char *path_truncate;
   const char *script_filename;
@@ -50,9 +50,9 @@ void setup_base_path(char *path, const char *category, const char *script_path)
   if (stat(path, &dirinfo) != 0)
     mkdir(path, 0700);
 
-  script_filename = strrchr(script_path, '/');
+  script_filename = strrchr(app_path, '/');
   if (script_filename == NULL)
-    script_filename = script_path;
+    script_filename = app_path;
   else
     script_filename++;
   if ((strlen(path) + strlen(script_filename)) > 250)

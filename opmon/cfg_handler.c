@@ -8,6 +8,7 @@
 #include "cfg_handler.h"
 
 static cfg_files_t cfg_files;
+static char session_file_path[256] = {0};
 
 static inline void fnull(size_t size, FILE *file)
 {
@@ -33,7 +34,7 @@ void init_cfg_handler()
 
 void destroy_cfg_handler()
 {
-  PRINT("  === Close cfg file\n");
+  PRINT("  === Close cfg files\n");
   
   if (cfg_files.node != NULL)  {
     fclose(cfg_files.node);
@@ -41,6 +42,31 @@ void destroy_cfg_handler()
     fclose(cfg_files.routine_edge);
     fclose(cfg_files.routine_catalog);
   }
+}
+
+static void open_output_files_in_dir(char *cfg_file_path)
+{
+  char *cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
+  
+  SPOT("Attempting to open output files in dir %s\n", cfg_file_path);
+
+#define OPEN_CFG_FILE(filename, file_field) \
+  do { \
+    *cfg_file_truncate = '\0'; \
+    strcat(cfg_file_path, (filename)); \
+    cfg_files.file_field = fopen(cfg_file_path, "w"); \
+    if (cfg_files.file_field == NULL) \
+      ERROR("Failed to open cfg file cfg_files."#file_field"\n"); \
+    else \
+      SPOT("Successfully opened cfg_files."#file_field"\n"); \
+  } while (0);
+
+  OPEN_CFG_FILE("node.run", node);
+  OPEN_CFG_FILE("op-edge.run", op_edge);
+  OPEN_CFG_FILE("routine-edge.run", routine_edge);
+  OPEN_CFG_FILE("routine-catalog.tab", routine_catalog);
+  
+#undef OPEN_CFG_FILE
 }
 
 static void open_output_files(const char *script_path)
@@ -56,36 +82,117 @@ static void open_output_files(const char *script_path)
 
   setup_base_path(cfg_file_path, "runs", script_path);
   
-  if (stat(cfg_file_path, &dirinfo) != 0)
-    mkdir(cfg_file_path, 0700);
+  if (stat(cfg_file_path, &dirinfo) != 0) {
+    if (mkdir(cfg_file_path, 0700) != 0) {
+      ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
+      return;
+    }
+  }
   
   sprintf(run_id, "/%d.%d-%d.%d/", 
           calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
   strcat(cfg_file_path, run_id);
 
-  mkdir(cfg_file_path, 0700);
+  if (mkdir(cfg_file_path, 0700) != 0) {
+    ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
+    return;
+  }
   
-  cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
-
-#define OPEN_CFG_FILE(filename, file_field) \
-  do { \
-    *cfg_file_truncate = '\0'; \
-    strcat(cfg_file_path, (filename)); \
-    cfg_files.file_field = fopen(cfg_file_path, "w"); \
-  } while (0);
-
-  OPEN_CFG_FILE("/node.run", node);
-  OPEN_CFG_FILE("/op-edge.run", op_edge);
-  OPEN_CFG_FILE("/routine-edge.run", routine_edge);
-  OPEN_CFG_FILE("/routine-catalog.tab", routine_catalog);
-  
-#undef OPEN_CFG_FILE
+  open_output_files_in_dir(cfg_file_path);
 }
 
 void starting_script(const char *script_path)
 {
+  SPOT("starting_script %s on pid %d\n", script_path, getpid());
+  
   open_output_files(script_path);
   load_dataset(script_path);
+}
+
+void server_startup()
+{
+  char session_id[32] = {0};
+  char *cfg_file_truncate;
+  struct stat dirinfo;
+  time_t timestamp;
+  struct tm *calendar;
+  FILE *session_catalog_file;
+  
+  setup_base_path(session_file_path, "runs", "webserver");
+  
+  if (stat(session_file_path, &dirinfo) != 0) {
+    SPOT("Attempting to create webserver session directory %s\n", session_file_path);
+    if (mkdir(session_file_path, 0755) != 0) {
+      PERROR("Failed to create the webserver session directory: %s\n", session_file_path);
+      return;
+    }
+    SPOT("Successfully created webserver session directory %s\n", session_file_path);
+  }
+  
+  time(&timestamp);
+  calendar = localtime(&timestamp);
+  
+  strcat(session_file_path, "/");
+  cfg_file_truncate = session_file_path + strlen(session_file_path);
+  
+  strcat(session_file_path, "session_catalog.tab");
+  
+  session_catalog_file = fopen(session_file_path, "a");
+  if (session_catalog_file == NULL) {
+    PERROR("Failed to open the session catalog file %s for writing\n", session_file_path);
+    return;
+  } 
+  SPOT("Successfully opened the session catalog file %s for appending\n", session_file_path);
+  
+  sprintf(session_id, "session.%d.%d-%d.%d", 
+          calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
+  
+  fprintf(session_catalog_file, "%s\n", session_id);
+  fflush(session_catalog_file);
+  fclose(session_catalog_file);
+  SPOT("Successfully appended to the session catalog file %s\n", session_file_path);
+  
+  *cfg_file_truncate = '\0';
+  strcat(session_file_path, session_id);
+
+  if (mkdir(session_file_path, 0755) != 0) {
+    PERROR("Failed to create the webserver session directory %s\n", session_file_path);
+    return;
+  }
+  chmod(session_file_path, 0777); // running as root here, but child runs as www-data
+  
+  SPOT("Successfully created webserver session directory %s\n", session_file_path);
+}
+
+void worker_startup()
+{
+  char cfg_file_path[256] = {0}, session_id[24] = {0};
+  struct stat dirinfo;
+  FILE *session_dir;
+  
+  strcpy(cfg_file_path, session_file_path);
+  if (stat(cfg_file_path, &dirinfo) != 0) {
+    ERROR("Cannot find the webserver cfg directory %s\n", cfg_file_path);
+    return;
+  }
+  SPOT("Child %d found the CFG file path %s\n", getpid(), cfg_file_path);
+  fflush(stderr);
+  
+  strcat(cfg_file_path, "/");
+  sprintf(session_id, "worker-%u/", getpid());
+  strcat(cfg_file_path, session_id);
+  
+  SPOT("Child %d looking for worker directory %s\n", getpid(), cfg_file_path);
+  
+  if (stat(cfg_file_path, &dirinfo) != 0) {
+    if (mkdir(cfg_file_path, 0755) != 0) {
+      PERROR("Failed to create worker directory %s\n", cfg_file_path);
+      return;
+    }
+    SPOT("Successfully created worker directory %s\n", cfg_file_path);
+  }
+  
+  open_output_files_in_dir(cfg_file_path);
 }
 
 void write_node(uint unit_hash, uint routine_hash, cfg_opcode_t *opcode, uint index)
@@ -134,4 +241,5 @@ void flush_all_outputs()
   fflush(cfg_files.node);
   fflush(cfg_files.op_edge);
   fflush(cfg_files.routine_edge);
+  fflush(stderr);
 }
