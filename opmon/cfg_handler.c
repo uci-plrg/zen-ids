@@ -183,6 +183,7 @@ void worker_startup()
   strcat(cfg_file_path, session_id);
   
   SPOT("Child %d looking for worker directory %s\n", getpid(), cfg_file_path);
+  fflush(stderr);
   
   if (stat(cfg_file_path, &dirinfo) != 0) {
     if (mkdir(cfg_file_path, 0755) != 0) {

@@ -1,4 +1,5 @@
 #include "php.h"
+#include "../../php/ext/session/php_session.h"
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_utils.h"
 #include "metadata_handler.h"
@@ -333,6 +334,15 @@ void opcode_executing(const zend_op *op)
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
   bool stack_pointer_moved, caught_exception = false;
+  zend_string *session_var = zend_string_init("_SESSION", sizeof("_SESSION") - 1, 0);
+  
+  if (ps_globals.http_session_vars.value.ref != NULL) {
+    //zval *session = zend_hash_find(Z_ARRVAL_P(Z_REFVAL(ps_globals.http_session_vars)), session_var);
+    zval *session = zend_hash_find(&EG(symbol_table).ht, session_var);
+    zend_string_release(session_var);
+    if (session != NULL)
+      SPOT("Session is "PX"\n", p2int(session));
+  }
   
   op_execution_count++;
   if (op_execution_count & FLUSH_MASK == 0)

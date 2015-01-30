@@ -14,6 +14,7 @@ do { \
   if (OPMON_G(verbose) >= ERROR_LEVEL) \
     fprintf(stderr, "\t> #error# "__VA_ARGS__); \
     perror("\t#error# "); \
+    fflush(stderr); \
 } while (0)
 
 #define ERROR(...) \

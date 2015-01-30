@@ -21,8 +21,26 @@ PHP_INI_END()
 
 static PHP_GINIT_FUNCTION(opcode_monitor);
 
+PHP_FUNCTION(set_user_level)
+{
+  int argc = ZEND_NUM_ARGS();
+  long user_level;
+  long blog_id;
+  if (zend_parse_parameters(argc TSRMLS_CC, "ll", &user_level, &blog_id) == FAILURE) {
+    ERROR("Failed to parse parameters in a call to set_user_level()\n");
+    return;
+  }
+  
+  SPOT("ScriptCFI receives a call to set_user_level to %d on blog %d\n", user_level, blog_id);
+}
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_set_user_level, 0, 0, 2)
+  ZEND_ARG_INFO(0, level)
+  ZEND_ARG_INFO(0, blog_id)
+ZEND_END_ARG_INFO()
+
 static zend_function_entry php_opcode_monitor_functions[] = {
-  PHP_FE(opcode_monitor_string, NULL)
+  PHP_FE(set_user_level, arginfo_set_user_level)
   {NULL, NULL, NULL}
 };
 
@@ -79,10 +97,4 @@ PHP_MINFO_FUNCTION(opcode_monitor)
 static PHP_GINIT_FUNCTION(opcode_monitor)
 {
   opcode_monitor_globals->execution_context.foo = 3;
-}
-
-PHP_FUNCTION(opcode_monitor_string)
-{
-  PRINT("Executing the opcode monitor function\n");
-  RETURN_STRING("Opcode monitor says: 'Hello World'");
 }

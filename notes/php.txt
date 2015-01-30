@@ -4,7 +4,31 @@ The PHP instance to run is php/bin/php.
 
 This build of PHP requires the environment variable PHP_HOME.
 
-To build php, go to the top-level php directory and:
+First install the pre-requisites:
+
+apt-get install autoconf
+$PHP_HOME/fix-bison 
+apt-get install apache2-dev
+apt-get install libxml2
+apt-get install libxml2-dev
+apt-get install libssl-dev
+apt-get install libcurl4-openssl-dev pkg-config
+apt-get install libicu-dev
+apt-get install libmcrypt-dev
+apt-get install libtidy-dev
+# manually install libxdiff
+cd /hd/temp
+wget http://www.xmailserver.org/libxdiff-0.23.tar.gz
+tar -xzf libxdiff-0.23.tar.gz 
+cd libxdiff-0.23
+./configure
+make
+make install
+apt-get install libxslt1.1
+apt-get remove libxslt1.1
+apt-get install libxslt1-dev
+
+Next build php: go to the top-level php directory and:
 
 1. ./buildconf
 2. ./current-config # it does this:
