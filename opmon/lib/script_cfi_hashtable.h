@@ -20,6 +20,7 @@ typedef struct _sctable_t {
   uint  resize_threshold;    /*  = capacity * load_factor */
 } sctable_t;
 
+/* caller must have previously set `t->hash_bits` */
 void
 sctable_init(sctable_t *t);
 

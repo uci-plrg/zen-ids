@@ -1,7 +1,7 @@
 #include "php.h"
-#include "../../php/ext/session/php_session.h"
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_utils.h"
+#include "lib/script_cfi_hashtable.h"
 #include "metadata_handler.h"
 #include "cfg_handler.h"
 #include "compile_context.h"
@@ -64,6 +64,9 @@ static lambda_frame_t *lambda_frame;
 
 static stack_event_t stack_event;
 
+static user_session_t current_session;
+static zend_string *user_session_key;
+
 static uint op_execution_count = 0;
 
 static uint first_thread_id;
@@ -87,6 +90,9 @@ void initialize_interp_context()
   stack_event.state = STACK_STATE_NONE;
   
   first_thread_id = pthread_self();
+  
+  current_session.user_level = -1L;
+  user_session_key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
 }
 
 static void push_exception_frame()
@@ -273,9 +279,10 @@ static bool update_shadow_stack() // true if the stack pointer changed
   
   INCREMENT_STACK(shadow_stack, shadow_frame);
   
-  WARN("--- Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
-        to_cfm.routine_name, p2int(execute_data), 
-        p2int(op_array->opcodes), p2int(to_cfm.cfg));
+  PRINT("<session> <%ld|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+       current_session.user_level, getpid(),
+       to_cfm.routine_name, p2int(execute_data), 
+       p2int(op_array->opcodes), p2int(to_cfm.cfg));
   
   {
     shadow_frame->execute_data = execute_data;
@@ -285,6 +292,32 @@ static bool update_shadow_stack() // true if the stack pointer changed
   }
   
   return true;
+}
+
+static void update_user_session()
+{
+  /*
+  if (is_php_session_active()) {
+    user_session_t *session_user;
+    zval *session_zval = php_get_session_var(user_session_key);
+    if (session_zval == NULL || session_zval->value.ptr == NULL) {
+      zval temp_session_user;
+      session_user = malloc(sizeof(user_session_t));
+      session_user->user_level = -1L;
+      ZVAL_PTR(&temp_session_user, session_user);
+      php_set_session_var(user_session_key, &temp_session_user, NULL);
+      PRINT("<session> No user session during update--created new session user with level -1\n");
+    } else {
+      session_user = (user_session_t *) session_zval->value.ptr;
+    }
+    current_session = *session_user;
+    PRINT("<session> Updated current user session to level %ld\n", current_session.user_level);
+  } else {
+    //PRINT("<session> No session active during update!\n");
+    //if (current_session.user_level >= 0)
+    //  current_session.user_level = -1L;
+  }
+  */
 }
 
 static uint get_next_executable_index(uint from_index)
@@ -334,16 +367,9 @@ void opcode_executing(const zend_op *op)
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
   bool stack_pointer_moved, caught_exception = false;
-  zend_string *session_var = zend_string_init("_SESSION", sizeof("_SESSION") - 1, 0);
   
-  if (ps_globals.http_session_vars.value.ref != NULL) {
-    //zval *session = zend_hash_find(Z_ARRVAL_P(Z_REFVAL(ps_globals.http_session_vars)), session_var);
-    zval *session = zend_hash_find(&EG(symbol_table).ht, session_var);
-    zend_string_release(session_var);
-    if (session != NULL)
-      SPOT("Session is "PX"\n", p2int(session));
-  }
-  
+  update_user_session();
+
   op_execution_count++;
   if (op_execution_count & FLUSH_MASK == 0)
     flush_all_outputs();

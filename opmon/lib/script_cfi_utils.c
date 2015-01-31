@@ -1,6 +1,7 @@
 #include "php.h"
-
 #include "script_cfi_utils.h"
+
+#define IS_SESSION(vars) (Z_ISREF_P(&vars) && Z_TYPE_P(Z_REFVAL(vars)) == IS_ARRAY)
 
 uint hash_string(const char *string)
 {
@@ -65,3 +66,26 @@ void setup_base_path(char *path, const char *category, const char *app_path)
     *path_truncate = '\0';
 }
 
+bool is_php_session_active()
+{
+  return PS(id) != NULL && IS_SESSION(PS(http_session_vars));
+}
+
+void *php_session_lookup_var(zend_string *key)
+{
+  if (!IS_SESSION(PS(http_session_vars)))
+    return NULL;
+  
+  HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
+  return zend_hash_find(session_table, key);
+  
+}
+
+void php_session_set_var(zend_string *key, void *value)
+{
+  if (!IS_SESSION(PS(http_session_vars)))
+    return;
+  
+  HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
+  zend_hash_update(session_table, key, value);
+}

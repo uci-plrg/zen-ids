@@ -2,6 +2,7 @@
 #define _SCRIPT_CFI_UTILS_H_ 1
 
 #include "php.h"
+#include "../../php/ext/session/php_session.h"
 
 #define ERROR_LEVEL 1
 #define WARN_LEVEL 2
@@ -40,6 +41,7 @@ do { \
 #define EVAL_PATH "<eval>"
 #define EVAL_FUNCTION_NAME "<eval>"
 #define EVAL_HASH 0x00000000U
+#define USER_SESSION_KEY "__opmon_user_session"
 
 #define UNKNOWN_CONTEXT_ID 0xffffffffU
 
@@ -60,6 +62,10 @@ typedef struct _execution_context_t {
   //const zend_op *base_op;
   uint foo;
 } execution_context_t;
+
+typedef struct _user_session_t {
+  long user_level;
+} user_session_t;
 
 enum {
   false,
@@ -84,5 +90,9 @@ uint hash_string(const char *string);
 uint hash_addr(void *addr);
 void opmon_activate_printer();
 void opmon_setup_base_path(char *path, const char *category, const char *app_path);
+
+bool is_php_session_active();
+void *php_session_lookup_var(zend_string *key);
+void php_session_set_var(zend_string *key, void *value);
 
 #endif

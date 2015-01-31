@@ -10,6 +10,8 @@
 
 #define EC(f) opcode_monitor_globals.execution_context.f
 
+static zend_string *user_session_key;
+
 static uint pid;
 
 PHP_INI_BEGIN()
@@ -30,8 +32,32 @@ PHP_FUNCTION(set_user_level)
     ERROR("Failed to parse parameters in a call to set_user_level()\n");
     return;
   }
+
+  if (is_php_session_active()) {
+    //user_session_t *session_user;
+    zval *session_zval = php_get_session_var(user_session_key);
+    if (session_zval == NULL || session_zval->value.ptr == NULL) {
+      session_zval = malloc(sizeof(zval));
+      //zval session_user;
+      //session_user = malloc(sizeof(user_session_t));
+      //session_user->user_level = -1L;
+      ZVAL_LONG(session_zval, user_level);
+      //ZVAL_UNDEF(session_zval);
+      // ZVAL_PTR(&temp_session_user, session_user);
+      session_zval = php_set_session_var(user_session_key, session_zval, NULL);
+      PRINT("<session> No user session during update--created new session user with level -1\n");
+    } else {
+      SPOT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
+      Z_LVAL_P(session_zval) = user_level;
+      //session_user = (user_session_t *) session_zval->value.ptr;
+    }
+    SPOT("<session> Set session user with level %ld\n", Z_LVAL_P(session_zval));
+  } else {
+    ERROR("<session> User level assigned with no active PHP session!\n");
+  }
   
-  SPOT("ScriptCFI receives a call to set_user_level to %d on blog %d\n", user_level, blog_id);
+  SPOT("ScriptCFI receives a call to set_user_level to %ld on blog %ld on pid 0x%x\n", 
+       user_level, blog_id, getpid());
 }
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_set_user_level, 0, 0, 2)
@@ -73,6 +99,8 @@ PHP_MINIT_FUNCTION(opcode_monitor)
   
   //PRINT("INI example: dataset dir is %s\n", INI_STR("opmon_dataset_dir"));
   //PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
+  
+  user_session_key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
   
   if (strlen(OPMON_G(dataset_dir)) > 200)
     ERROR("dataset dirname is too long. Please rebuild with a larger buffer.\n");
