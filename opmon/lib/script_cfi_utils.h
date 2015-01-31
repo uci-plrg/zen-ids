@@ -92,7 +92,7 @@ void opmon_activate_printer();
 void opmon_setup_base_path(char *path, const char *category, const char *app_path);
 
 bool is_php_session_active();
-void *php_session_lookup_var(zend_string *key);
-void php_session_set_var(zend_string *key, void *value);
+zval *php_session_lookup_var(zend_string *key);
+zval *php_session_set_var(zend_string *key, zval *value);
 
 #endif

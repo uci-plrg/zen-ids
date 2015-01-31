@@ -65,7 +65,6 @@ static lambda_frame_t *lambda_frame;
 static stack_event_t stack_event;
 
 static user_session_t current_session;
-static zend_string *user_session_key;
 
 static uint op_execution_count = 0;
 
@@ -92,7 +91,6 @@ void initialize_interp_context()
   first_thread_id = pthread_self();
   
   current_session.user_level = -1L;
-  user_session_key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
 }
 
 static void push_exception_frame()
@@ -296,28 +294,22 @@ static bool update_shadow_stack() // true if the stack pointer changed
 
 static void update_user_session()
 {
-  /*
   if (is_php_session_active()) {
-    user_session_t *session_user;
-    zval *session_zval = php_get_session_var(user_session_key);
-    if (session_zval == NULL || session_zval->value.ptr == NULL) {
-      zval temp_session_user;
-      session_user = malloc(sizeof(user_session_t));
-      session_user->user_level = -1L;
-      ZVAL_PTR(&temp_session_user, session_user);
-      php_set_session_var(user_session_key, &temp_session_user, NULL);
-      PRINT("<session> No user session during update--created new session user with level -1\n");
+    zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
+    zval *session_zval = php_get_session_var(key);
+    if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
+      current_session.user_level = -1L;
+      PRINT("<session> Session has no user level for key %s during update on pid 0x%x--assigning level -1\n", key->val, getpid());
     } else {
-      session_user = (user_session_t *) session_zval->value.ptr;
+      PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
+      current_session.user_level = Z_LVAL_P(session_zval);
     }
-    current_session = *session_user;
+    zend_string_release(key);
+    
     PRINT("<session> Updated current user session to level %ld\n", current_session.user_level);
   } else {
-    //PRINT("<session> No session active during update!\n");
-    //if (current_session.user_level >= 0)
-    //  current_session.user_level = -1L;
+    // TODO: why is the session sometimes inactive??
   }
-  */
 }
 
 static uint get_next_executable_index(uint from_index)
