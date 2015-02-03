@@ -71,6 +71,7 @@ bool is_php_session_active()
   return PS(id) != NULL && IS_SESSION(PS(http_session_vars));
 }
 
+// unused
 zval *php_session_lookup_var(zend_string *key)
 {
   if (!IS_SESSION(PS(http_session_vars)))
@@ -87,15 +88,8 @@ zval *php_session_set_var(zend_string *key, zval *value)
   if (!IS_SESSION(PS(http_session_vars)))
     return;
   
-  // copying these functions:
-  //   zend_fetch_dimension_address_inner(Z_ARRVAL_P(container), dim, dim_type, type TSRMLS_CC); 
-  //   zend_assign_to_variable(cell, value, IS_CONST TSRMLS_CC);
-  
   HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
   cell = zend_hash_add_new(session_table, key, &EG(uninitialized_zval));
-  // via ZVAL_INDIRECT?
   ZVAL_COPY_VALUE(cell, value);
   return cell;
-  
-  // broken way: zend_hash_update(session_table, key, value);
 }

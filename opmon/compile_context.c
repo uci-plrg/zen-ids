@@ -220,7 +220,7 @@ void function_compiled(zend_op_array *op_array)
       }
 #endif
     
-      routine_cfg_add_opcode_edge(cfm.cfg, i, target.index);
+      routine_cfg_add_opcode_edge(cfm.cfg, i, target.index, USER_LEVEL_COMPILER);
       PRINT("\t[create edge %u|0x%x(%u,%u) -> %u for {%s|%s, 0x%x|0x%x}]\n", 
             i, op->opcode, op->op1_type, op->op2_type, target.index,
             fqn->unit.path, fqn->function.cfm.routine_name,
@@ -250,7 +250,8 @@ void function_compiled(zend_op_array *op_array)
     }
     for (i = 0; i < cfm.cfg->opcode_edges.size; i++) {
       cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
-      write_op_edge(fqn->unit.hash, fqn->function.hash, cfg_edge->from_index, cfg_edge->to_index);
+      write_op_edge(fqn->unit.hash, fqn->function.hash, cfg_edge->from_index, 
+                    cfg_edge->to_index, USER_LEVEL_COMPILER);
 #ifdef SPOT_DEBUG  
       if (spot) {
         SPOT("\t[emit %d -> %d in 0x%x|0x%x]\n", cfg_edge->from_index, 

@@ -13,6 +13,7 @@ typedef struct _cfg_node_t {
 typedef struct _cfg_opcode_edge_t {
   uint from_index;
   uint to_index;
+  user_level_t user_level;
 } cfg_opcode_edge_t;
 
 typedef struct _cfg_opcode_t {
@@ -32,6 +33,7 @@ typedef struct _routine_cfg_t {
 typedef struct _cfg_routine_edge_t {
   uint from_index;
   uint to_index;
+  user_level_t user_level;
   routine_cfg_t *from_routine;
   routine_cfg_t *to_routine;
 } cfg_routine_edge_t;
@@ -86,13 +88,15 @@ routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash);
 void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, 
                                zend_uchar extended_value, uint index);
 bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
-void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
+void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index,
+                                 user_level_t user_level);
 
 cfg_t *cfg_new();
 void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine);
 bool cfg_has_routine_edge(routine_cfg_t *from_routine, uint from_index, 
                           routine_cfg_t *to_routine, uint to_index);
 void cfg_add_routine_edge(routine_cfg_t *from_routine, uint from_index, 
-                          routine_cfg_t *to_routine, uint to_index);
+                          routine_cfg_t *to_routine, uint to_index, 
+                          user_level_t user_level);
 
 #endif

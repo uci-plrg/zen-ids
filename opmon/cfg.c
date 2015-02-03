@@ -57,7 +57,8 @@ bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_in
   return false;
 }
 
-void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
+void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index,
+                                 user_level_t user_level)
 {
   cfg_opcode_edge_t *cfg_edge = malloc(sizeof(cfg_opcode_edge_t));
   memset(cfg_edge, 0, sizeof(cfg_opcode_edge_t));
@@ -65,10 +66,11 @@ void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_in
   
   cfg_edge->from_index = from_index;
   cfg_edge->to_index = to_index;
+  cfg_edge->user_level = user_level;
   
   if (cfg->unit_hash == 0xf54cb4f1 && cfg->routine_hash == 0xfc6651c2) {
-    SPOT("Compiling opcode edge %d -> %d in (0x%x|0x%x)\n",
-         from_index, to_index, cfg->unit_hash, cfg->routine_hash);
+    SPOT("Compiling opcode edge %d -> %d at level %d in (0x%x|0x%x)\n",
+         from_index, to_index, user_level, cfg->unit_hash, cfg->routine_hash);
   }
 }
 
@@ -101,7 +103,8 @@ bool cfg_has_routine_edge(routine_cfg_t *from_routine, uint from_index,
 }
 
 void cfg_add_routine_edge(routine_cfg_t *from_routine, uint from_index, 
-                          routine_cfg_t *to_routine, uint to_index)
+                          routine_cfg_t *to_routine, uint to_index, 
+                          user_level_t user_level)
 {
   cfg_routine_edge_t *cfg_edge = malloc(sizeof(cfg_routine_edge_t));
   memset(cfg_edge, 0, sizeof(cfg_routine_edge_t));
@@ -111,4 +114,5 @@ void cfg_add_routine_edge(routine_cfg_t *from_routine, uint from_index,
   cfg_edge->to_index = to_index;
   cfg_edge->from_routine = from_routine;
   cfg_edge->to_routine = to_routine;
+  cfg_edge->user_level = user_level;
 }

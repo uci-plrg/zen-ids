@@ -63,8 +63,13 @@ typedef struct _execution_context_t {
   uint foo;
 } execution_context_t;
 
+typedef enum _user_level_t {
+  USER_LEVEL_COMPILER = 0x3e,
+  USER_LEVEL_BOTTOM = 0x3f
+} user_level_t;
+
 typedef struct _user_session_t {
-  long user_level;
+  user_level_t user_level;
 } user_session_t;
 
 enum {
@@ -92,6 +97,7 @@ void opmon_activate_printer();
 void opmon_setup_base_path(char *path, const char *category, const char *app_path);
 
 bool is_php_session_active();
+// unused
 zval *php_session_lookup_var(zend_string *key);
 zval *php_session_set_var(zend_string *key, zval *value);
 

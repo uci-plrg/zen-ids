@@ -90,7 +90,7 @@ void initialize_interp_context()
   
   first_thread_id = pthread_self();
   
-  current_session.user_level = -1L;
+  current_session.user_level = USER_LEVEL_BOTTOM;
 }
 
 static void push_exception_frame()
@@ -103,7 +103,7 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
                                   routine_cfg_t *to_cfg, uint to_index)
 {
   bool write_edge = true;
-  cfg_add_routine_edge(from_cfm->cfg, from_index, to_cfg, to_index);
+  cfg_add_routine_edge(from_cfm->cfg, from_index, to_cfg, to_index, current_session.user_level);
   
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->dataset, from_index, to_index,
@@ -122,14 +122,14 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
           from_cfm->cfg->routine_hash, from_index, 
           to_cfg->unit_hash, to_cfg->routine_hash);
     write_routine_edge(from_cfm->cfg->unit_hash, from_cfm->cfg->routine_hash, from_index, 
-                       to_cfg->unit_hash, to_cfg->routine_hash, to_index);
+                       to_cfg->unit_hash, to_cfg->routine_hash, to_index, current_session.user_level);
   }
 }
 
 static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, uint to_index)
 {
   bool write_edge = true;
-  routine_cfg_add_opcode_edge(cfm->cfg, from_index, to_index);
+  routine_cfg_add_opcode_edge(cfm->cfg, from_index, to_index, current_session.user_level);
   
   if (cfm->dataset != NULL) {
     if (dataset_verify_opcode_edge(cfm->dataset, from_index, to_index)) {
@@ -143,7 +143,7 @@ static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, 
   if (write_edge) {
     PRINT("<MON> New opcode edge [0x%x|0x%x %u -> %u]\n", 
           cfm->cfg->unit_hash, cfm->cfg->routine_hash, from_index, to_index);
-    write_op_edge(cfm->cfg->unit_hash, cfm->cfg->routine_hash, from_index, to_index);
+    write_op_edge(cfm->cfg->unit_hash, cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
   }
 }
 
@@ -277,10 +277,10 @@ static bool update_shadow_stack() // true if the stack pointer changed
   
   INCREMENT_STACK(shadow_stack, shadow_frame);
   
-  PRINT("<session> <%ld|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
-       current_session.user_level, getpid(),
-       to_cfm.routine_name, p2int(execute_data), 
-       p2int(op_array->opcodes), p2int(to_cfm.cfg));
+  PRINT("<session> <%d|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+        current_session.user_level, getpid(),
+        to_cfm.routine_name, p2int(execute_data), 
+        p2int(op_array->opcodes), p2int(to_cfm.cfg));
   
   {
     shadow_frame->execute_data = execute_data;
@@ -298,15 +298,15 @@ static void update_user_session()
     zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
     zval *session_zval = php_get_session_var(key);
     if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
-      current_session.user_level = -1L;
+      current_session.user_level = USER_LEVEL_BOTTOM;
       PRINT("<session> Session has no user level for key %s during update on pid 0x%x--assigning level -1\n", key->val, getpid());
     } else {
       PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
-      current_session.user_level = Z_LVAL_P(session_zval);
+      current_session.user_level = (uint) Z_LVAL_P(session_zval);
     }
     zend_string_release(key);
     
-    PRINT("<session> Updated current user session to level %ld\n", current_session.user_level);
+    PRINT("<session> Updated current user session to level %d\n", current_session.user_level);
   } else {
     // TODO: why is the session sometimes inactive??
   }
