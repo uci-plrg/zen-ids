@@ -254,5 +254,6 @@ void flush_all_outputs()
   fflush(cfg_files.node);
   fflush(cfg_files.op_edge);
   fflush(cfg_files.routine_edge);
+  fflush(cfg_files.routine_catalog);
   fflush(stderr);
 }
