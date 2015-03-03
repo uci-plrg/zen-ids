@@ -31,7 +31,6 @@ static control_flow_metadata_t *initial_context = (control_flow_metadata_t *)int
 
 static control_flow_metadata_t *pending_cfm_stack[MAX_STACK_FRAME];
 
-static routine_cfg_t *live_loader_cfg;
 static char last_unknown_function_name[MAX_FUNCTION_NAME];
 static pending_load_t pending_load;
 
@@ -62,7 +61,7 @@ static void init_call(const zend_op *op)
   uint i, j, original_function_length;
   char function_name[MAX_FUNCTION_NAME];
   control_flow_metadata_t *pending_cfm;
-  
+
   if (op->opcode == ZEND_INIT_METHOD_CALL || op->opcode == ZEND_INIT_STATIC_METHOD_CALL) {
     zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
     const char *type = NULL;
@@ -91,14 +90,14 @@ static void init_call(const zend_op *op)
   }
   j = strlen(function_name);
   CHECK_FUNCTION_NAME_LENGTH(j);
-    
+
   if (op->op2_type == IS_CONST) {
     const char *original_function_name = op->op2.zv->value.str->val;
     original_function_length = strlen(original_function_name + 1);
     CHECK_FUNCTION_NAME_LENGTH(j + original_function_length);
     for (i = 0; i <= original_function_length; i++) {
       function_name[i+j] = tolower(original_function_name[i]);
-    }      
+    }
     function_name[i+j] = '\0';
   } else if (op->op2_type == IS_CV || op->op2_type == IS_VAR) {
     zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
@@ -109,7 +108,7 @@ static void init_call(const zend_op *op)
       return;
     } else {
       const char *variable = variable_name->val;
-      
+
       if (*variable == '\0' && strncmp(variable+1, "lambda_", 7) == 0) {
         CHECK_FUNCTION_NAME_LENGTH(j + strlen(variable+1));
         strcat(function_name, variable+1);
@@ -118,7 +117,7 @@ static void init_call(const zend_op *op)
         CHECK_FUNCTION_NAME_LENGTH(j + original_function_length + 1);
         for (i = 0; i <= original_function_length; i++) {
           function_name[i+j] = tolower(variable[i]);
-        }      
+        }
         function_name[i+j] = '\0';
       }
     }
@@ -127,7 +126,7 @@ static void init_call(const zend_op *op)
     PRINT("  === init call to function identified by unknown reference\n");
     return;
   }
-  
+
   pending_cfm = get_cfm_by_name(function_name);
   if (pending_cfm == NULL) {
     if (strcmp("<default>:create_function", function_name) == 0) {
@@ -146,29 +145,31 @@ static void init_call(const zend_op *op)
 
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
+  //extern foo *foobar;
   //scarray_unit_test();
-  
+
   app_cfg = cfg_new();
-  
+
   pending_cfm_stack[0] = NULL;
   pending_cfm_stack[1] = NULL;
   pending_cfm_frame = 1;
   pend_cfm(initial_context);
-  live_loader_cfg = NULL;
-  
+
   pending_load.pending_execution = false;
-  
+
   init_compile_context();
   init_cfg_handler();
   init_metadata_handler();
-  
+
   monitor->set_top_level_script = starting_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
-  //monitor->notify_server_startup = server_startup;
   monitor->notify_worker_startup = worker_startup;
-  
-  server_startup();
+
+  SPOT("SAPI type: %s\n", EG(sapi_type));
+
+  if (strcmp(EG(sapi_type), "apache2handler") == 0)
+    server_startup();
 }
 
 void destroy_event_handler()

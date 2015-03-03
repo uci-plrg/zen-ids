@@ -34,7 +34,7 @@ void load_dataset(const char *script_path)
   strcat(dataset_path, ".set");
   
   if (stat(dataset_path, &fileinfo) != 0) {
-    PRINT("Failed to obtain file info for path %s. Skipping dataset operations.\n", dataset_path);
+    WARN("Failed to obtain file info for path %s. Skipping dataset operations.\n", dataset_path);
     dataset = NULL;
     return;
   }
@@ -42,17 +42,17 @@ void load_dataset(const char *script_path)
   
   dataset_file = open(dataset_path, O_RDONLY);
   if (dataset_file == -1) {
-    PRINT("Failed to open the dataset at path %s. Skipping dataset operations.\n", dataset_path);
+    WARN("Failed to open the dataset at path %s. Skipping dataset operations.\n", dataset_path);
     dataset = NULL;
     return;
   }
   
   dataset = mmap(NULL, dataset_size, PROT_READ, MAP_SHARED, dataset_file, 0);
   if (dataset == NULL) {
-    PRINT("Failed to map the dataset at path %s. Skipping dataset operations.\n", dataset_path);
+    WARN("Failed to map the dataset at path %s. Skipping dataset operations.\n", dataset_path);
     return;
   }
-  PRINT("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
+  STATUS("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
   
   install_dataset(dataset);
   eval_id = dataset_get_eval_count();

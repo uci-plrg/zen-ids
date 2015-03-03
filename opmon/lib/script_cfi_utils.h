@@ -9,6 +9,13 @@
 #define MESSAGE_LEVEL 3
 
 #define SPOT(...) fprintf(stderr, "\t> #debug# "__VA_ARGS__)
+#define STATUS(...) fprintf(stderr, "\t> #status# "__VA_ARGS__)
+
+#define MON(...) \
+do { \
+  if (OPMON_G(verbose) >= MESSAGE_LEVEL) \
+    fprintf(stderr, "\t> #monitor# "__VA_ARGS__); \
+} while (0)
 
 #define PERROR(...) \
 do { \

@@ -205,7 +205,7 @@ void function_compiled(zend_op_array *op_array)
     routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, i);
     target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
-      if (target.index > 0x1000) {
+      if (target.index >= op_array->last) {
         ERROR("Skipping foobar edge %u|0x%x(%u,%u) -> %u in {%s|%s, 0x%x|0x%x}\n", 
               i, op->opcode, op->op1_type, op->op2_type, target.index,
               fqn->unit.path, fqn->function.cfm.routine_name,
@@ -259,6 +259,7 @@ void function_compiled(zend_op_array *op_array)
       }
 #endif
     }
+    WARN("No dataset for routine 0x%x|0x%x\n", fqn->unit.hash, fqn->function.hash);
   } else if (cfm.cfg->unit_hash != EVAL_HASH) {
     cfg_opcode_edge_t *cfg_edge;
     for (i = 0; i < cfm.cfg->opcodes.size; i++) {
@@ -269,6 +270,7 @@ void function_compiled(zend_op_array *op_array)
       cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
       dataset_routine_verify_compiled_edge(cfm.dataset, cfg_edge->from_index, cfg_edge->to_index);
     }
+    WARN("Found dataset for routine 0x%x|0x%x\n", fqn->unit.hash, fqn->function.hash);
   }
   
   flush_all_outputs();

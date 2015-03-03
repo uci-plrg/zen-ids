@@ -162,6 +162,8 @@ void server_startup()
   chmod(session_file_path, 0777); // running as root here, but child runs as www-data
   
   SPOT("Successfully created webserver session directory %s\n", session_file_path);
+  
+  load_dataset("webserver");
 }
 
 void worker_startup()

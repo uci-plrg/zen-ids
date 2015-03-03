@@ -142,7 +142,7 @@ void dataset_match_eval(control_flow_metadata_t *cfm)
   for (i = 0; i < eval_list->count; i++) {
     routine = RESOLVE_PTR(eval_list->list[i], dataset_routine_t);
     if (match_eval_routines(routine, cfm->cfg)) {
-      PRINT("<MON> Matched eval %d to dataset eval %d\n", cfm->cfg->routine_hash, i);
+      MON("Matched eval %d to dataset eval %d\n", cfm->cfg->routine_hash, i);
       
       cfm->dataset = routine;
       cfm->cfg->routine_hash = i;
@@ -150,7 +150,7 @@ void dataset_match_eval(control_flow_metadata_t *cfm)
     }
   }
   
-  PRINT("<MON> Failed to match eval %d\n", cfm->cfg->routine_hash);
+  MON("Failed to match eval %d\n", cfm->cfg->routine_hash);
 }
 
 void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset, 
@@ -159,9 +159,9 @@ void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset,
   dataset_node_t *node = &dataset->nodes[from_index];
   if (to_index == (from_index + 1) || node->target_index == to_index || 
       is_fall_through(node->opcode, from_index, to_index)) {
-    PRINT("<MON> Verified compiled edge from %d to %d\n", from_index, to_index);
+    MON("Verified compiled edge from %d to %d\n", from_index, to_index);
   } else {
-    PRINT("<MON> Opcode edge mismatch at index %d: expected target %d but found target %d\n", 
+    MON("Opcode edge mismatch at index %d: expected target %d but found target %d\n", 
           from_index, node->target_index, to_index);
   }
 }
@@ -171,9 +171,9 @@ void dataset_routine_verify_opcode(dataset_routine_t *dataset, uint index,
 {
   dataset_node_t *node = &dataset->nodes[index];
   if (node->opcode == opcode) {
-    PRINT("<MON> Verified opcode %d at index %d\n", opcode, index);
+    MON("Verified opcode %d at index %d\n", opcode, index);
   } else {
-    PRINT("<MON> Opcode mismatch at index %d: expected %d but found %d\n", index, 
+    MON("Opcode mismatch at index %d: expected %d but found %d\n", index, 
           node->opcode, opcode);
   }
 }
