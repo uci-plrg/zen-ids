@@ -198,13 +198,13 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
 
   if (node->type == DATASET_NODE_TYPE_CALL) {
     dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
-
     for (i = 0; i < targets->target_count; i++) {
       if (targets->targets[i].unit_hash == to_unit_hash &&
           targets->targets[i].routine_hash == to_routine_hash &&
           MASK_TARGET_INDEX(targets->targets[i].index) == to_index)
         return true;
     }
+    return false; // debug stop
   } else if (node->type == DATASET_NODE_TYPE_EVAL) {
     dataset_eval_targets_t *targets = RESOLVE_PTR(node->eval_targets, dataset_eval_targets_t);
     for (i = 0; i < targets->target_count; i++) {
@@ -212,6 +212,7 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
           MASK_TARGET_INDEX(targets->targets[i].index) == to_index)
         return true;
     }
+    return false; // debug stop
   }
 
   return false;

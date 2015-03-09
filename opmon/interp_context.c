@@ -117,10 +117,10 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
   }
 
   if (write_edge) {
-    SPOT("<MON> New routine edge [0x%x|0x%x|%u -> 0x%x|0x%x]\n",
-          from_cfm->cfg->unit_hash,
-          from_cfm->cfg->routine_hash, from_index,
-          to_cfg->unit_hash, to_cfg->routine_hash);
+    zend_uchar opcode = routine_cfg_get_opcode(from_cfm->cfg, from_index)->opcode;
+    WARN("<MON> New routine edge from op 0x%x [0x%x|0x%x %u -> 0x%x|0x%x]\n",
+          opcode, from_cfm->cfg->unit_hash, from_cfm->cfg->routine_hash,
+          from_index, to_cfg->unit_hash, to_cfg->routine_hash);
     write_routine_edge(from_cfm->cfg->unit_hash, from_cfm->cfg->routine_hash, from_index,
                        to_cfg->unit_hash, to_cfg->routine_hash, to_index, current_session.user_level);
   }
@@ -141,7 +141,7 @@ static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, 
   }
 
   if (write_edge) {
-    SPOT("<MON> New opcode edge [0x%x|0x%x %u -> %u]\n",
+    WARN("<MON> New opcode edge [0x%x|0x%x %u -> %u]\n",
           cfm->cfg->unit_hash, cfm->cfg->routine_hash, from_index, to_index);
     write_op_edge(cfm->cfg->unit_hash, cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
   }
@@ -420,13 +420,6 @@ void opcode_executing(const zend_op *op)
       if (exception_frame->execute_data == shadow_frame->execute_data) {
         if (!routine_cfg_has_opcode_edge(shadow_frame->cfm.cfg, exception_frame->throw_index,
                                          executing_node.index)) {
-
-          if (executing_node.index == 252 &&
-              shadow_frame->cfm.cfg->unit_hash == 0xa96968d7 &&
-              shadow_frame->cfm.cfg->routine_hash == 0x6df96065) {
-            SPOT("halt!\n");
-          }
-
           generate_opcode_edge(&shadow_frame->cfm, exception_frame->throw_index,
                                executing_node.index);
         } else {
@@ -522,12 +515,6 @@ void opcode_executing(const zend_op *op)
             if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
               WARN("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
                    compiled_target.type, op->opcode);
-            }
-
-            if (executing_node.index == 252 &&
-                shadow_frame->cfm.cfg->unit_hash == 0xa96968d7 &&
-                shadow_frame->cfm.cfg->routine_hash == 0x6df96065) {
-              SPOT("halt!\n");
             }
 
             if (!routine_cfg_has_opcode_edge(shadow_frame->cfm.cfg, from_node.index,

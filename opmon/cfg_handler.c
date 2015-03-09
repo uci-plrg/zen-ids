@@ -35,7 +35,7 @@ void init_cfg_handler()
 void destroy_cfg_handler()
 {
   PRINT("  === Close cfg files\n");
-  
+
   if (cfg_files.node != NULL)  {
     fclose(cfg_files.node);
     fclose(cfg_files.op_edge);
@@ -47,7 +47,7 @@ void destroy_cfg_handler()
 static void open_output_files_in_dir(char *cfg_file_path)
 {
   char *cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
-  
+
   SPOT("Attempting to open output files in dir %s\n", cfg_file_path);
 
 #define OPEN_CFG_FILE(filename, file_field) \
@@ -65,7 +65,7 @@ static void open_output_files_in_dir(char *cfg_file_path)
   OPEN_CFG_FILE("op-edge.run", op_edge);
   OPEN_CFG_FILE("routine-edge.run", routine_edge);
   OPEN_CFG_FILE("routine-catalog.tab", routine_catalog);
-  
+
 #undef OPEN_CFG_FILE
 }
 
@@ -81,15 +81,15 @@ static void open_output_files(const char *script_path)
   calendar = localtime(&timestamp);
 
   setup_base_path(cfg_file_path, "runs", script_path);
-  
+
   if (stat(cfg_file_path, &dirinfo) != 0) {
     if (mkdir(cfg_file_path, 0700) != 0) {
       ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
       return;
     }
   }
-  
-  sprintf(run_id, "/%d.%d-%d.%d/", 
+
+  sprintf(run_id, "/%d.%d-%d.%d/",
           calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
   strcat(cfg_file_path, run_id);
 
@@ -97,14 +97,14 @@ static void open_output_files(const char *script_path)
     ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
     return;
   }
-  
+
   open_output_files_in_dir(cfg_file_path);
 }
 
 void starting_script(const char *script_path)
 {
   SPOT("starting_script %s on pid %d\n", script_path, getpid());
-  
+
   open_output_files(script_path);
   load_dataset(script_path);
 }
@@ -117,9 +117,9 @@ void server_startup()
   time_t timestamp;
   struct tm *calendar;
   FILE *session_catalog_file;
-  
+
   setup_base_path(session_file_path, "runs", "webserver");
-  
+
   if (stat(session_file_path, &dirinfo) != 0) {
     SPOT("Attempting to create webserver session directory %s\n", session_file_path);
     if (mkdir(session_file_path, 0755) != 0) {
@@ -128,30 +128,30 @@ void server_startup()
     }
     SPOT("Successfully created webserver session directory %s\n", session_file_path);
   }
-  
+
   time(&timestamp);
   calendar = localtime(&timestamp);
-  
+
   strcat(session_file_path, "/");
   cfg_file_truncate = session_file_path + strlen(session_file_path);
-  
+
   strcat(session_file_path, "session_catalog.tab");
-  
+
   session_catalog_file = fopen(session_file_path, "a");
   if (session_catalog_file == NULL) {
     PERROR("Failed to open the session catalog file %s for writing\n", session_file_path);
     return;
-  } 
+  }
   SPOT("Successfully opened the session catalog file %s for appending\n", session_file_path);
-  
-  sprintf(session_id, "session.%d.%d-%d.%d", 
+
+  sprintf(session_id, "session.%d.%d-%d.%d",
           calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
-  
+
   fprintf(session_catalog_file, "%s\n", session_id);
   fflush(session_catalog_file);
   fclose(session_catalog_file);
   SPOT("Successfully appended to the session catalog file %s\n", session_file_path);
-  
+
   *cfg_file_truncate = '\0';
   strcat(session_file_path, session_id);
 
@@ -160,9 +160,9 @@ void server_startup()
     return;
   }
   chmod(session_file_path, 0777); // running as root here, but child runs as www-data
-  
+
   SPOT("Successfully created webserver session directory %s\n", session_file_path);
-  
+
   load_dataset("webserver");
 }
 
@@ -171,7 +171,7 @@ void worker_startup()
   char cfg_file_path[256] = {0}, session_id[24] = {0};
   struct stat dirinfo;
   FILE *session_dir;
-  
+
   strcpy(cfg_file_path, session_file_path);
   if (stat(cfg_file_path, &dirinfo) != 0) {
     ERROR("Cannot find the webserver cfg directory %s\n", cfg_file_path);
@@ -179,14 +179,14 @@ void worker_startup()
   }
   SPOT("Child %d found the CFG file path %s\n", getpid(), cfg_file_path);
   fflush(stderr);
-  
+
   strcat(cfg_file_path, "/");
   sprintf(session_id, "worker-%u/", getpid());
   strcat(cfg_file_path, session_id);
-  
+
   SPOT("Child %d looking for worker directory %s\n", getpid(), cfg_file_path);
   fflush(stderr);
-  
+
   if (stat(cfg_file_path, &dirinfo) != 0) {
     if (mkdir(cfg_file_path, 0755) != 0) {
       PERROR("Failed to create worker directory %s\n", cfg_file_path);
@@ -194,7 +194,7 @@ void worker_startup()
     }
     SPOT("Successfully created worker directory %s\n", cfg_file_path);
   }
-  
+
   open_output_files_in_dir(cfg_file_path);
 }
 
@@ -213,28 +213,28 @@ void write_op_edge(uint unit_hash, uint routine_hash, uint from_index, uint to_i
                    user_level_t user_level)
 {
   PRINT("Write op-edge 0x%x|0x%x #%d -> #%d to cfg\n", unit_hash, routine_hash, from_index, to_index);
-  
+
   from_index |= (user_level << 26);
-  
+
   fwrite(&unit_hash, sizeof(uint), 1, cfg_files.op_edge);
   fwrite(&routine_hash, sizeof(uint), 1, cfg_files.op_edge);
   fwrite(&from_index, sizeof(uint), 1, cfg_files.op_edge);
   fwrite(&to_index, sizeof(uint), 1, cfg_files.op_edge);
 }
 
-/* 6 x 4 bytes: { from_unit_hash | from_routine_hash | user_level (6) from_index (26) | 
+/* 6 x 4 bytes: { from_unit_hash | from_routine_hash | user_level (6) from_index (26) |
  *                to_unit_hash | to_routine_hash | to_index }
  */
-void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_index, 
+void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_index,
                         uint to_unit_hash, uint to_routine_hash, uint to_index,
                         user_level_t user_level)
 {
-  PRINT("Write routine-edge {0x%x|0x%x #%d} -> {0x%x|0x%x #%d to cfg\n", 
-        from_unit_hash, from_routine_hash, from_index, 
+  PRINT("Write routine-edge {0x%x|0x%x #%d} -> {0x%x|0x%x #%d} to cfg\n",
+        from_unit_hash, from_routine_hash, from_index,
         to_unit_hash, to_routine_hash, to_index);
-  
+
   from_index |= (user_level << 26);
-  
+
   fwrite(&from_unit_hash, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files.routine_edge);
   fwrite(&from_index, sizeof(uint), 1, cfg_files.routine_edge);
@@ -244,7 +244,7 @@ void write_routine_edge(uint from_unit_hash, uint from_routine_hash, uint from_i
 }
 
 /* text line: "<unit_hash>|<routine_hash> <unit_path>|<routine_name>" */
-void write_routine_catalog_entry(uint unit_hash, uint routine_hash, 
+void write_routine_catalog_entry(uint unit_hash, uint routine_hash,
                                  const char *unit_path, const char *routine_name)
 {
   fprintf(cfg_files.routine_catalog, "0x%x|0x%x %s|%s\n", unit_hash, routine_hash,

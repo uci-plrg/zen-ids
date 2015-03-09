@@ -174,7 +174,7 @@ void function_compiled(zend_op_array *op_array)
 #endif
 
   if (cfm.dataset == NULL) {
-    SPOT("--- Function compiled from %d opcodes at "PX": %s|%s: 0x%x|0x%x"
+    WARN("--- Function compiled from %d opcodes at "PX": %s|%s: 0x%x|0x%x"
          " (dataset not found)\n",
          op_array->last, p2int(op_array->opcodes), filename, routine_name,
          fqn->unit.hash, fqn->function.hash);
