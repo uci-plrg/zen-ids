@@ -12,6 +12,7 @@ if test "$PHP_OPCODE_MONITOR" != "no"; then
                  event_handler.c \
                  interp_context.c \
                  compile_context.c \
+                 operand_resolver.c \
                  dataset.c \
                  metadata_handler.c \
                  cfg.c \

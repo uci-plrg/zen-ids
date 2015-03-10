@@ -68,7 +68,7 @@ Created extension "opcode-monitor". Build with "./current-config", which
 does this:
 
   > cd ext/opmon
-  > ../../php/scripts/phpize  # may need to set it executable
+  > ../../php/scripts/phpize  # may need to set it executable (requires autoconf)
   > ./current-config # it does this:
        configure 
          --enable-opcode-monitor 

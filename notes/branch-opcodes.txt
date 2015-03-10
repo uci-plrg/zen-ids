@@ -1,0 +1,36 @@
+init static fcall
+op 0x71
+line 0x2d2
+
+      2 0x15 ZEND_CAST (loader)
+      1 0x1e * ZEND_ASSIGN_CONCAT
+     32 0x3e * ZEND_RETURN
+     54 0x44 ZEND_NEW (loader)
+      3 0x4c ? ZEND_UNSET_OBJ (accessor?)
+      4 0x4d ZEND_FE_RESET (accessor)
+      4 0x4e ZEND_FE_FETCH (accessor)
+      1 0x4f ZEND_FE_FETCH (accessor)
+     26 0x51 ? ZEND_FETCH_DIM_R (accessor?)
+     72 0x52 ? ZEND_FETCH_OBJ_R (accessor?)
+      1 0x55 ? ZEND_FETCH_OBJ_W (accessor?)
+     49 0x5d ? ZEND_FETCH_DIM_FUNC_ARG (accessor?)
+    135 0x5e ? ZEND_FETCH_OBJ_FUNC_ARG (accessor?)
+      1 0x63 ? ZEND_FETCH_CONSTANT (loader?)
+     18 0x6c ZEND_THROW (bug?)
+     10 0x6d ZEND_FETCH_CLASS (loader)
+      2 0x6f * ZEND_RETURN_BY_REF
+     11 0x71 ZEND_INIT_STATIC_METHOD_CALL (loader)
+      2 0x73 ? ZEND_ISSET_ISEMPTY_DIM_OBJ (accessor?)
+     19 0x88 ZEND_ASSIGN_OBJ (accessor)
+      6 0x90 ? ZEND_ADD_INTERFACE (loader?)
+     40 0x94 ZEND_ISSET_ISEMPTY_PROP_OBJ (accessor)
+
+
+
+Hi Mom,
+
+Well, I won't know for sure about the internship until a couple weeks after my interviews, which are March 24th. But I had a practice interview with Derek (co-author on my paper), and he thinks I should have no problems passing. He doesn't interview interns very often, but since his project is owned by Google, he can get all the internal information about how they approve candidates (technically Derek is a Google employee). I definitely won't have any competition, since he is already inviting me for the internship--it's just a matter of meeting the minimum expectations for an intern. We're all assuming there won't be any problem.
+
+I've decided that for my next music project I'm going to work on a little piece for band that I started about 12 years ago. It's a tribute to John Stanford, who was the Superintendent of Seattle schools at that time. He made a big effort to improve the reading level of all students, especially those at the lowest levels, because literacy has such a significant impact on a person's ability to function in society and contribute in meaningful ways. So my music will reflect that idea by passing 4 or 5 short riffs around each section of the band, kind of like singing a round--as if the band is sharing 4 or 5 ideas among themselves, each section giving their own unique perspective to each riff. I suppose this kind of communication and collaboration is possible in a society with no written language, but it still requires substantial education and intellectual development, which I think was the real point of Stanford's reading curriculum. Scott Brown, the director of Roosevelt's bands, was a friend of John Stanford, so he was interested in the piece and had his band play through my first couple of drafts. We decided it needed revising, but at the time I didn't have a teacher who could help me with it. Now that I've studied with Ian for the last 5 years, I think it won't be too difficult for me to finish the piece, and Ian can help me if I need it.
+
+Since the piece has kind of a pop music style, I've been listening to some Jazz and pop music to remind myself how it normally goes (since otherwise I only listen to classical stuff). This week I listened to Michael Jackson's biggest album "Thriller", which was released when I was in 5th grade. At the time it seemed like serious business to me, since it was so popular and such a big deal to everyone. But watching the "Thriller" video now, it's very funny, I never realized Michael Jackson was such a silly goofball. He plays a high school teenager who turns into a werewolf and chases his girlfriend through the woods, among many other ridiculous scenes, clearly making a big joke of himself and putting a comical twist on his fancy dancing. It seems like most glamorous pop stars wouldn't be quite so amused about playing the antagonist--especially a demonic monster! There's a lot of intriguing psychology to the whole story, which is probably part of what made it so popular. It was also fun to hear my trombone teacher playing on the album, since it's one of the things he is well known for.

@@ -5,6 +5,7 @@
 #include "cfg_handler.h"
 #include "dataset.h"
 #include "metadata_handler.h"
+#include "operand_resolver.h"
 #include "compile_context.h"
 
 #define ROUTINE_NAME_LENGTH 256
@@ -79,7 +80,7 @@ void function_compiled(zend_op_array *op_array)
     sprintf(routine_name, "<eval-%d>", eval_id);
     has_routine_name = true;
   } else if (op_array->type == ZEND_USER_FUNCTION) {
-    filename = op_array->filename->val;
+    filename = zend_resolve_path(op_array->filename->val, op_array->filename->len);
 
     if (op_array->function_name == NULL) {
       function_name = "<script-body>";
@@ -102,7 +103,7 @@ void function_compiled(zend_op_array *op_array)
     }
   } else {
     PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
-    return;
+    goto exit;
   }
 
   if (is_eval) {
@@ -193,7 +194,7 @@ void function_compiled(zend_op_array *op_array)
     PRINT("(skipping existing routine 0x%x|0x%x at "PX")\n", fqn->unit.hash, fqn->function.hash,
           p2int(op_array->opcodes));
     fflush(stderr);
-    return; // verify equal?
+    goto exit; // verify equal?
   }
 
   for (i = 0; i < op_array->last; i++) {
@@ -209,6 +210,50 @@ void function_compiled(zend_op_array *op_array)
            op->opcode, i, routine_name, fqn->unit.hash, fqn->function.hash);
     }
 #endif
+
+    switch (op->opcode) {
+      case ZEND_INCLUDE_OR_EVAL: {
+        if (op->op1_type == IS_CONST) {
+          switch (op->extended_value) {
+            case ZEND_INCLUDE:
+            case ZEND_REQUIRE:
+            case ZEND_INCLUDE_ONCE:
+            case ZEND_REQUIRE_ONCE: {
+              const char *to_path = resolve_constant_include(op);
+              uint to_unit_hash = hash_string(to_path), to_routine_hash;
+              char to_unit_path[ROUTINE_NAME_LENGTH], to_routine_name[ROUTINE_NAME_LENGTH];
+
+              if (to_path[0] == '/') {
+                strcpy(to_unit_path, to_path);
+                efree((char *) to_path); // always only this branch?
+              } else {
+                char *to_unit_filename;
+                strcpy(to_unit_path, filename);
+                to_unit_filename = strrchr(to_unit_path, '/') + 1;
+                to_unit_filename[0] = '\0';
+                strcat(to_unit_path, to_path);
+              }
+
+              to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
+              if (to_path == NULL)
+                to_path = to_unit_path;
+              SPOT("Opcode %d includes file %s\n", i, to_path);
+
+              sprintf(to_routine_name, "%s:<script-body>", strrchr(to_path, '/') + 1);
+              to_routine_hash = hash_string(to_routine_name);
+              write_routine_edge(fqn->unit.hash, fqn->function.hash, i,
+                                 to_unit_hash, to_routine_hash, 0, USER_LEVEL_BOTTOM);
+              efree((char *) to_path);
+            } break;
+            case ZEND_EVAL: {
+              char *eval_body = resolve_eval_body(op);
+              SPOT("Opcode %d calls eval(%s)\n", i, eval_body);
+              free(eval_body);
+            } break;
+          }
+        }
+      } break;
+    }
 
     routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, i);
     target = get_compiled_edge_target(op, i);
@@ -282,6 +327,10 @@ void function_compiled(zend_op_array *op_array)
   }
 
   flush_all_outputs();
+
+exit:
+  if (op_array->type == ZEND_USER_FUNCTION)
+    efree(filename);
 }
 
 const char *get_function_declaration_path(const char *routine_name)
