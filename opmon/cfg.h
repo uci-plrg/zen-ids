@@ -22,7 +22,6 @@ typedef struct _cfg_opcode_t {
 } cfg_opcode_t;
 
 typedef struct _routine_cfg_t {
-  uint unit_hash;
   uint routine_hash;
   scarray_t opcodes;        // cfg_opcode_t *
   scarray_t opcode_edges;   // cfg_opcode_edge_t *
@@ -42,10 +41,10 @@ typedef struct _cfg_t {
   scarray_t routines; // routine_cfg_t *
 } cfg_t;
 
-static inline bool 
+static inline bool
 is_same_routine_cfg(routine_cfg_t *first, routine_cfg_t *second)
 {
-  return first->unit_hash == second->unit_hash && first->routine_hash == second->routine_hash;
+  return first->routine_hash == second->routine_hash;
 }
 
 static inline routine_cfg_t *
@@ -55,12 +54,12 @@ cfg_get_routine(cfg_t *cfg, uint index)
 }
 
 static inline routine_cfg_t *
-cfg_routine_lookup(cfg_t *cfg, uint unit_hash, uint routine_hash)
+cfg_routine_lookup(cfg_t *cfg, uint routine_hash)
 {
   uint i;
   for (i = 0; i < cfg->routines.size; i++) {
     routine_cfg_t *routine = cfg_get_routine(cfg, i);
-    if (routine->unit_hash == unit_hash && routine->routine_hash == routine_hash)
+    if (routine->routine_hash == routine_hash)
       return routine;
   }
   return NULL;
@@ -84,8 +83,8 @@ routine_cfg_get_routine_edge(routine_cfg_t *routine, uint index)
   return (cfg_routine_edge_t *) scarray_get(&routine->routine_edges, index);
 }
 
-routine_cfg_t *routine_cfg_new(uint unit_hash, uint routine_hash);
-void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, 
+routine_cfg_t *routine_cfg_new(uint routine_hash);
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode,
                                zend_uchar extended_value, uint index);
 bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
 void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index,
@@ -93,10 +92,10 @@ void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_in
 
 cfg_t *cfg_new();
 void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine);
-bool cfg_has_routine_edge(routine_cfg_t *from_routine, uint from_index, 
+bool cfg_has_routine_edge(routine_cfg_t *from_routine, uint from_index,
                           routine_cfg_t *to_routine, uint to_index);
-void cfg_add_routine_edge(routine_cfg_t *from_routine, uint from_index, 
-                          routine_cfg_t *to_routine, uint to_index, 
+void cfg_add_routine_edge(routine_cfg_t *from_routine, uint from_index,
+                          routine_cfg_t *to_routine, uint to_index,
                           user_level_t user_level);
 
 #endif

@@ -10,7 +10,6 @@
 
 typedef struct _dataset_call_target_t {
   uint routine_hash;
-  uint unit_hash;
   uint index;
 } dataset_call_target_t;
 
@@ -51,7 +50,6 @@ typedef struct _dataset_node_t {
 } dataset_node_t;
 
 struct _dataset_routine_t {
-  uint unit_hash;
   uint routine_hash;
   uint node_count;
   dataset_node_t nodes[1];
@@ -103,10 +101,10 @@ uint dataset_get_eval_count()
   return eval_list->count;
 }
 
-dataset_routine_t *dataset_routine_lookup(uint unit_hash, uint routine_hash)
+dataset_routine_t *dataset_routine_lookup(uint routine_hash)
 {
-  if (dataset_mapping != 0 && unit_hash != EVAL_HASH) { // cannot lookup eval by id
-    uint index = (unit_hash ^ routine_hash) & hashtable->mask;
+  if (dataset_mapping != 0) { // cannot lookup eval by id <eval>
+    uint index = routine_hash & hashtable->mask;
     dataset_routine_t *routine;
     dataset_chain_t *chain;
 
@@ -116,7 +114,7 @@ dataset_routine_t *dataset_routine_lookup(uint unit_hash, uint routine_hash)
     chain = RESOLVE_PTR(hashtable->table[index], dataset_chain_t);
     while (!IS_CHAIN_TERMINUS(chain)) {
       routine = RESOLVE_PTR(chain->routine, dataset_routine_t);
-      if (routine->unit_hash == unit_hash && routine->routine_hash == routine_hash)
+      if (routine->routine_hash == routine_hash)
         return routine;
       chain++;
     }
@@ -191,7 +189,7 @@ bool dataset_verify_opcode_edge(dataset_routine_t *dataset, uint from_index,
 }
 
 bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
-                                 uint to_index, uint to_unit_hash, uint to_routine_hash)
+                                 uint to_index, uint to_routine_hash)
 {
   uint i;
   dataset_node_t *node = &dataset->nodes[from_index];
@@ -199,8 +197,7 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
   if (node->type == DATASET_NODE_TYPE_CALL) {
     dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
     for (i = 0; i < targets->target_count; i++) {
-      if (targets->targets[i].unit_hash == to_unit_hash &&
-          targets->targets[i].routine_hash == to_routine_hash &&
+      if (targets->targets[i].routine_hash == to_routine_hash &&
           MASK_TARGET_INDEX(targets->targets[i].index) == to_index)
         return true;
     }
@@ -208,8 +205,7 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
   } else if (node->type == DATASET_NODE_TYPE_EVAL) {
     dataset_eval_targets_t *targets = RESOLVE_PTR(node->eval_targets, dataset_eval_targets_t);
     for (i = 0; i < targets->target_count; i++) {
-      if (targets->targets[i].eval_id == to_unit_hash &&
-          MASK_TARGET_INDEX(targets->targets[i].index) == to_index)
+      if (MASK_TARGET_INDEX(targets->targets[i].index) == to_index)
         return true;
     }
     return false; // debug stop

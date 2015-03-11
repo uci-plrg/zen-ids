@@ -107,22 +107,19 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
 
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->dataset, from_index, to_index,
-                                    to_cfg->unit_hash, to_cfg->routine_hash)) {
+                                    to_cfg->routine_hash)) {
       write_edge = false;
-      PRINT("<MON> Verified routine edge [0x%x|0x%x|%u -> 0x%x|0x%x]\n",
-            from_cfm->cfg->unit_hash,
-            from_cfm->cfg->routine_hash, from_index,
-            to_cfg->unit_hash, to_cfg->routine_hash);
+      PRINT("<MON> Verified routine edge [0x%x|%u -> 0x%x]\n",
+            from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
     }
   }
 
   if (write_edge) {
     zend_uchar opcode = routine_cfg_get_opcode(from_cfm->cfg, from_index)->opcode;
-    WARN("<MON> New routine edge from op 0x%x [0x%x|0x%x %u -> 0x%x|0x%x]\n",
-          opcode, from_cfm->cfg->unit_hash, from_cfm->cfg->routine_hash,
-          from_index, to_cfg->unit_hash, to_cfg->routine_hash);
-    write_routine_edge(from_cfm->cfg->unit_hash, from_cfm->cfg->routine_hash, from_index,
-                       to_cfg->unit_hash, to_cfg->routine_hash, to_index, current_session.user_level);
+    WARN("<MON> New routine edge from op 0x%x [0x%x %u -> 0x%x]\n",
+          opcode, from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
+    write_routine_edge(from_cfm->cfg->routine_hash, from_index,
+                       to_cfg->routine_hash, to_index, current_session.user_level);
   }
 }
 
@@ -134,16 +131,15 @@ static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, 
   if (cfm->dataset != NULL) {
     if (dataset_verify_opcode_edge(cfm->dataset, from_index, to_index)) {
       write_edge = false;
-      PRINT("<MON> Verified opcode edge [0x%x|0x%x %u -> %u]\n",
-            cfm->cfg->unit_hash,
+      PRINT("<MON> Verified opcode edge [0x%x %u -> %u]\n",
             cfm->cfg->routine_hash, from_index, to_index);
     }
   }
 
   if (write_edge) {
-    WARN("<MON> New opcode edge [0x%x|0x%x %u -> %u]\n",
-          cfm->cfg->unit_hash, cfm->cfg->routine_hash, from_index, to_index);
-    write_op_edge(cfm->cfg->unit_hash, cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
+    WARN("<MON> New opcode edge [0x%x %u -> %u]\n",
+          cfm->cfg->routine_hash, from_index, to_index);
+    write_op_edge(cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
   }
 }
 
@@ -376,9 +372,9 @@ void opcode_executing(const zend_op *op)
       zend_op *throw_op = &shadow_frame->opcodes[shadow_frame->last_index];
       stack_event.state = STACK_STATE_UNWINDING;
       push_exception_frame();
-      WARN("Exception thrown at op %d in opcodes "PX"|"PX" of routine 0x%x|0x%x\n",
+      WARN("Exception thrown at op %d in opcodes "PX"|"PX" of routine 0x%x\n",
            shadow_frame->last_index, p2int(execute_data), p2int(op_array->opcodes),
-           shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
+           shadow_frame->cfm.cfg->routine_hash);
     } else {
       DECREMENT_STACK(shadow_stack, shadow_frame);
     }
@@ -408,13 +404,12 @@ void opcode_executing(const zend_op *op)
           DECREMENT_STACK(shadow_stack, shadow_frame);
         } while (shadow_frame->execute_data != execute_data);
       }
-      WARN("Exception at op %d of 0x%x|0x%x caught at op %d in opcodes "PX"|"PX" of 0x%x|0x%x\n",
+      WARN("Exception at op %d of 0x%x caught at op %d in opcodes "PX"|"PX" of 0x%x\n",
            exception_frame->throw_index,
-           exception_frame->cfm.cfg->unit_hash,
            exception_frame->cfm.cfg->routine_hash,
            executing_node.index,
            p2int(shadow_frame->execute_data), p2int(shadow_frame->opcodes),
-           shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
+           shadow_frame->cfm.cfg->routine_hash);
       stack_event.state = STACK_STATE_NONE;
 
       if (exception_frame->execute_data == shadow_frame->execute_data) {
@@ -461,30 +456,28 @@ void opcode_executing(const zend_op *op)
 
     if (executing_node.index > 0x1000 ||
         executing_node.index >= shadow_frame->cfm.cfg->opcodes.size) {
-      ERROR("attempt to execute foobar op %u in opcodes "PX"|"PX" of routine 0x%x|0x%x\n",
+      ERROR("attempt to execute foobar op %u in opcodes "PX"|"PX" of routine 0x%x\n",
             executing_node.index, p2int(execute_data), p2int(op_array->opcodes),
-            shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
+            shadow_frame->cfm.cfg->routine_hash);
     } else {
-      PRINT("@ Executing %s at index %u of 0x%x|0x%x\n",
+      PRINT("@ Executing %s at index %u of 0x%x\n",
             zend_get_opcode_name(executing_node.opcode), executing_node.index,
-            shadow_frame->cfm.cfg->unit_hash, shadow_frame->cfm.cfg->routine_hash);
+            shadow_frame->cfm.cfg->routine_hash);
 
       expected_opcode = routine_cfg_get_opcode(shadow_frame->cfm.cfg, executing_node.index);
       if (executing_node.opcode != expected_opcode->opcode &&
           !is_alias(executing_node.opcode, expected_opcode->opcode)) {
         ERROR("Expected opcode %s at index %u, but found opcode %s in opcodes "
-              PX"|"PX" of routine 0x%x|0x%x\n",
+              PX"|"PX" of routine 0x%x\n",
               zend_get_opcode_name(expected_opcode->opcode), executing_node.index,
               zend_get_opcode_name(executing_node.opcode), p2int(execute_data),
-              p2int(op_array->opcodes), shadow_frame->cfm.cfg->unit_hash,
-              shadow_frame->cfm.cfg->routine_hash);
+              p2int(op_array->opcodes), shadow_frame->cfm.cfg->routine_hash);
       }
 
       // todo: verify call continuations here too (seems to be missing)
       if (is_fallthrough(&executing_node)) {
-        PRINT("@ Verified fall-through %u -> %u in 0x%x|0x%x\n",
+        PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
               shadow_frame->last_index, executing_node.index,
-              shadow_frame->cfm.cfg->unit_hash,
               shadow_frame->cfm.cfg->routine_hash);
       } else if (!caught_exception) {
         if (shadow_frame->last_index == CONTEXT_ENTRY) {
