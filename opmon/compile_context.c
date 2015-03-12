@@ -66,7 +66,7 @@ void function_compiled(zend_op_array *op_array)
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
   function_fqn_t *fqn;
-  control_flow_metadata_t cfm;
+  control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename, routine_name[ROUTINE_NAME_LENGTH];
 #ifdef SPOT_DEBUG
@@ -105,10 +105,7 @@ void function_compiled(zend_op_array *op_array)
 
   if (has_routine_name) {
     fqn = malloc(sizeof(function_fqn_t));
-    buffer = malloc(strlen(routine_name) + 1);
-    strcpy(buffer, routine_name);
-    fqn->unit.path = buffer;
-    buffer = NULL;
+    fqn->unit.path = "<eval>";
 
     fqn->unit.site_root = locate_site_root(op_array->filename->val);
     if (fqn->unit.site_root == NULL) {
@@ -160,8 +157,10 @@ void function_compiled(zend_op_array *op_array)
   else
     fqn->function.hash = hash_routine(cfm.routine_name);
 
-  cfm.dataset = dataset_routine_lookup(fqn->function.hash);
-  cfm.cfg = cfg_routine_lookup(app_cfg, fqn->function.hash);
+  if (!is_eval) {
+    cfm.dataset = dataset_routine_lookup(fqn->function.hash);
+    cfm.cfg = cfg_routine_lookup(app_cfg, fqn->function.hash);
+  }
   if (cfm.cfg == NULL) {
     cfm.cfg = routine_cfg_new(fqn->function.hash); // crash in eval-function-test.php
     cfg_add_routine(app_cfg, cfm.cfg);
@@ -358,7 +357,7 @@ void function_compiled(zend_op_array *op_array)
 #endif
     }
     WARN("No dataset for routine 0x%x\n", fqn->function.hash);
-  } else if (false /*<eval>*/) {
+  } else if (is_eval_routine(fqn->function.hash)) {
     cfg_opcode_edge_t *cfg_edge;
     for (i = 0; i < cfm.cfg->opcodes.size; i++) {
       dataset_routine_verify_opcode(cfm.dataset, i,

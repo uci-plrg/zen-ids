@@ -257,12 +257,8 @@ static bool update_shadow_stack() // true if the stack pointer changed
         ERROR("Failed to find opcodes for function %s\n", routine_name);
       }
     }
-    if (monitored_cfm != NULL) {
+    if (monitored_cfm != NULL)
       to_cfm = *monitored_cfm;
-
-      SPOT("Found opcodes at "PX"|"PX" for %s\n", p2int(execute_data),
-           p2int(op_array->opcodes), op_array->filename->val);
-    }
   }
 
   if (shadow_frame > shadow_stack && to_cfm.cfg != NULL) {

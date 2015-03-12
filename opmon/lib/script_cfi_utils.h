@@ -119,9 +119,14 @@ static inline bool is_eval_routine(uint routine_hash)
   return (routine_hash & 0x80000000) > 0;
 }
 
-static inline hash_eval(uint eval_id)
+static inline uint hash_eval(uint eval_id)
 {
-  return (eval_id & 0x80000000);
+  return (eval_id | 0x80000000);
+}
+
+static inline uint get_eval_id(uint eval_hash)
+{
+  return (eval_hash & 0x7fffffff);
 }
 
 #endif

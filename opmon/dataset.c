@@ -147,10 +147,10 @@ void dataset_match_eval(control_flow_metadata_t *cfm)
   for (i = 0; i < eval_list->count; i++) {
     routine = RESOLVE_PTR(eval_list->list[i], dataset_routine_t);
     if (match_eval_routines(routine, cfm->cfg)) {
-      MON("Matched eval %d to dataset eval %d\n", cfm->cfg->routine_hash, i);
+      MON("Matched eval %d to dataset eval %d\n", get_eval_id(cfm->cfg->routine_hash), i);
 
       cfm->dataset = routine;
-      cfm->cfg->routine_hash = i;
+      cfm->cfg->routine_hash = hash_eval(i);
       return;
     }
   }
