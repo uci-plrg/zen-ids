@@ -114,18 +114,25 @@ void function_compiled(zend_op_array *op_array)
     }
   } else {
     const char *classname;
+    bool free_filename = false;
 
-    filename = zend_resolve_path(op_array->filename->val, op_array->filename->len);
-    if (filename == NULL) {
-      ERROR("Cannot resolve compilation unit filename %s for op_array->type = %d\n",
-            op_array->filename->val, op_array->type);
-      return;
+    if (strncmp(op_array->filename->val, "phar://", 7) == 0) {
+      filename = op_array->filename->val;
+    } else {
+      filename = zend_resolve_path(op_array->filename->val, op_array->filename->len);
+      if (filename == NULL) {
+        ERROR("Cannot resolve compilation unit filename %s for op_array->type = %d\n",
+              op_array->filename->val, op_array->type);
+        return;
+      }
+      free_filename = true;
     }
     fqn = malloc(sizeof(function_fqn_t));
     fqn->unit.site_root = locate_site_root(filename);
     if (fqn->unit.site_root == NULL) {
       ERROR("Cannot find site root for filename %s\n", filename);
-      efree(filename);
+      if (free_filename)
+        efree(filename);
       return;
     }
     site_filename = filename + strlen(fqn->unit.site_root);
@@ -133,7 +140,8 @@ void function_compiled(zend_op_array *op_array)
     strcpy(buffer, site_filename);
     fqn->unit.path = buffer;
     buffer = NULL;
-    efree(filename);
+    if (free_filename)
+      efree(filename);
     filename = site_filename = NULL;
 
     if (is_script_body) {
@@ -241,6 +249,7 @@ void function_compiled(zend_op_array *op_array)
               const char *site_to_path, *internal_to_path = resolve_constant_include(op);
               uint to_routine_hash;
               char to_unit_path[ROUTINE_NAME_LENGTH], to_routine_name[ROUTINE_NAME_LENGTH];
+              bool free_internal_to_path = false;
 
               // make the included path absolute
               if (internal_to_path[0] == '/') {
@@ -262,15 +271,17 @@ void function_compiled(zend_op_array *op_array)
 
               internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
               if (internal_to_path == NULL) {
-                ERROR("Failed to identify the included file %s\n", to_unit_path);
-                return;
+                internal_to_path = to_unit_path;
+              } else {
+                free_internal_to_path = true;
               }
               site_to_path = internal_to_path + strlen(fqn->unit.site_root);
               sprintf(to_routine_name, "%s:<script-body>", site_to_path);
 
-              SPOT("Opcode %d includes file %s\n", i, site_to_path);
+              WARN("Opcode %d includes file %s\n", i, site_to_path);
 
-              efree((char *) internal_to_path);
+              if (free_internal_to_path)
+                efree((char *) internal_to_path);
               internal_to_path = site_to_path = NULL;
 
               to_routine_hash = hash_routine(to_routine_name);
@@ -279,7 +290,7 @@ void function_compiled(zend_op_array *op_array)
             } break;
             case ZEND_EVAL: {
               char *eval_body = resolve_eval_body(op);
-              SPOT("Opcode %d calls eval(%s)\n", i, eval_body);
+              PRINT("Opcode %d calls eval(%s)\n", i, eval_body);
               free(eval_body);
             } break;
           }
@@ -287,15 +298,15 @@ void function_compiled(zend_op_array *op_array)
       } break;
       case ZEND_NEW: {
         if (op->op1_type == IS_CONST)
-          SPOT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
+          PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
       } break;
       case ZEND_INIT_FCALL_BY_NAME: {
         if (op->op2_type == IS_CONST)
-          SPOT("Opcode %d calls function %s()\n", i, Z_STRVAL_P(op->op2.zv));
+          PRINT("Opcode %d calls function %s()\n", i, Z_STRVAL_P(op->op2.zv));
       } break;
       case ZEND_INIT_METHOD_CALL: {
         if (op->op2_type == IS_CONST)
-          SPOT("Opcode %d calls method %s()\n", i, Z_STRVAL_P(op->op2.zv));
+          PRINT("Opcode %d calls method %s()\n", i, Z_STRVAL_P(op->op2.zv));
       } break;
     }
 

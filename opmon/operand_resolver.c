@@ -50,8 +50,8 @@ const char *resolve_constant_include(zend_op *op)
     return_path = malloc(length);
     strcpy(return_path, val);
 
-    SPOT("malloc %ld bytes for return_path %s\n",
-         length, return_path);
+    PRINT("malloc %ld bytes for return_path %s\n",
+          length, return_path);
   }
 
 	if (Z_TYPE(tmp_inc_filename) != IS_UNDEF) {
@@ -85,6 +85,20 @@ char *resolve_eval_body(zend_op *op)
   return eval_body;
 }
 
+static const char *new_site_root(const char *buffer)
+{
+  site_root_list_t *new_root;
+
+  SPOT("Found site root %s\n", buffer);
+
+  new_root = malloc(sizeof(site_root_list_t));
+  new_root->site_root = buffer;
+  new_root->length = strlen(buffer);
+  new_root->next = site_root_list;
+  site_root_list = new_root;
+  return new_root->site_root;
+}
+
 const char *locate_site_root(const char *filename /*absolute path*/)
 {
   char *buffer, *parent_dir;
@@ -103,20 +117,20 @@ const char *locate_site_root(const char *filename /*absolute path*/)
   buffer = malloc(length + SITE_ROOT_FILENAME_LEN + 1);
   strcpy(buffer, filename);
 
+  if (strcmp(buffer + length - 5, ".phar") == 0) {
+    strcpy(buffer, "phar://");
+    strcat(buffer, filename);
+    if (buffer[strlen(buffer) - 1] != '/')
+      strcat(buffer, "/");
+    return new_site_root(buffer);
+  }
+
   while ((parent_dir = strrchr(buffer, '/')) != NULL) {
     parent_dir[1] = '\0'; // truncate after last slash
     strcat(buffer, SITE_ROOT_FILENAME);
     if (stat(buffer, &file_info) == 0) {
-      next_root = malloc(sizeof(site_root_list_t));
       parent_dir[1] = '\0'; // remove filename
-
-      SPOT("Found site root %s\n", buffer);
-
-      next_root->site_root = buffer;
-      next_root->length = strlen(buffer);
-      next_root->next = site_root_list;
-      site_root_list = next_root;
-      return next_root->site_root;
+      return new_site_root(buffer);
     }
     parent_dir[0] = '\0'; // truncate at last slash
   }
