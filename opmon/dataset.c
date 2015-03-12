@@ -103,7 +103,7 @@ uint dataset_get_eval_count()
 
 dataset_routine_t *dataset_routine_lookup(uint routine_hash)
 {
-  if (dataset_mapping != 0) { // cannot lookup eval by id <eval>
+  if (dataset_mapping != 0 && !is_eval_routine(routine_hash)) {
     uint index = routine_hash & hashtable->mask;
     dataset_routine_t *routine;
     dataset_chain_t *chain;

@@ -103,10 +103,14 @@ static void open_output_files(const char *script_path)
 
 void starting_script(const char *script_path)
 {
-  SPOT("starting_script %s on pid %d\n", script_path, getpid());
+  char *resolved_path = zend_resolve_path(script_path, strlen(script_path));
 
-  open_output_files(script_path);
-  load_dataset(script_path);
+  SPOT("starting_script %s on pid %d\n", resolved_path, getpid());
+
+  open_output_files(resolved_path);
+  load_dataset(resolved_path);
+
+  efree(resolved_path);
 }
 
 void server_startup()

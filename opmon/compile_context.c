@@ -16,6 +16,7 @@
 // #define SPOT_DEBUG 1
 
 typedef struct _compilation_unit_t {
+  const char *site_root; // ends in '/'
   const char *path;
 } compilation_unit_t;
 
@@ -29,7 +30,7 @@ typedef struct _function_fqn_t {
   compilation_routine_t function;
 } function_fqn_t;
 
-static sctable_t routines_by_name;
+static sctable_t routines_by_hash;
 static sctable_t routines_by_opcode_address;
 static uint closure_count = 0; // must be per compilation unit!
 
@@ -52,8 +53,8 @@ inline int is_closure(const char *function_name)
 
 void init_compile_context()
 {
-  routines_by_name.hash_bits = 8;
-  sctable_init(&routines_by_name);
+  routines_by_hash.hash_bits = 8;
+  sctable_init(&routines_by_hash);
 
   routines_by_opcode_address.hash_bits = 8;
   sctable_init(&routines_by_opcode_address);
@@ -66,9 +67,8 @@ void function_compiled(zend_op_array *op_array)
   bool has_routine_name = false, is_already_compiled = false;
   function_fqn_t *fqn;
   control_flow_metadata_t cfm;
-  uint routine_key;
   const char *function_name;
-  char *buffer, *filename, routine_name[ROUTINE_NAME_LENGTH];
+  char *buffer, *filename, *site_filename, routine_name[ROUTINE_NAME_LENGTH];
 #ifdef SPOT_DEBUG
   bool spot = false;
 #endif
@@ -79,8 +79,6 @@ void function_compiled(zend_op_array *op_array)
     sprintf(routine_name, "<eval-%d>", eval_id);
     has_routine_name = true;
   } else if (op_array->type == ZEND_USER_FUNCTION) {
-    filename = zend_resolve_path(op_array->filename->val, op_array->filename->len);
-
     if (op_array->function_name == NULL) {
       function_name = "<script-body>";
       is_script_body = true;
@@ -102,15 +100,47 @@ void function_compiled(zend_op_array *op_array)
     }
   } else {
     PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
-    goto exit;
+    return;
   }
 
-  if (is_eval) {
-    filename = "<any-file>";
-  } else if (!has_routine_name) {
+  if (has_routine_name) {
+    fqn = malloc(sizeof(function_fqn_t));
+    buffer = malloc(strlen(routine_name) + 1);
+    strcpy(buffer, routine_name);
+    fqn->unit.path = buffer;
+    buffer = NULL;
+
+    fqn->unit.site_root = locate_site_root(op_array->filename->val);
+    if (fqn->unit.site_root == NULL) {
+      ERROR("Cannot find site root for eval %s\n", op_array->filename->val);
+      return;
+    }
+  } else {
     const char *classname;
+
+    filename = zend_resolve_path(op_array->filename->val, op_array->filename->len);
+    if (filename == NULL) {
+      ERROR("Cannot resolve compilation unit filename %s for op_array->type = %d\n",
+            op_array->filename->val, op_array->type);
+      return;
+    }
+    fqn = malloc(sizeof(function_fqn_t));
+    fqn->unit.site_root = locate_site_root(filename);
+    if (fqn->unit.site_root == NULL) {
+      ERROR("Cannot find site root for filename %s\n", filename);
+      efree(filename);
+      return;
+    }
+    site_filename = filename + strlen(fqn->unit.site_root);
+    buffer = malloc(strlen(site_filename) + 1);
+    strcpy(buffer, site_filename);
+    fqn->unit.path = buffer;
+    buffer = NULL;
+    efree(filename);
+    filename = site_filename = NULL;
+
     if (is_script_body) {
-      classname = strrchr(op_array->filename->val, '/') + 1;
+      classname = fqn->unit.path;
     } else {
       if (op_array->scope == NULL)
         classname = "<default>";
@@ -121,27 +151,21 @@ void function_compiled(zend_op_array *op_array)
     has_routine_name = true;
   }
 
-  routine_key = hash_string(routine_name);
-
-  fqn = malloc(sizeof(function_fqn_t));
-  buffer = malloc(strlen(filename) + 1);
-  strcpy(buffer, filename);
-  fqn->unit.path = buffer;
-
   buffer = malloc(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
+  buffer = NULL;
   if (is_eval)
-    fqn->function.hash = eval_id;
+    fqn->function.hash = hash_eval(eval_id);
   else
-    fqn->function.hash = hash_string(cfm.routine_name);
+    fqn->function.hash = hash_routine(cfm.routine_name);
 
   cfm.dataset = dataset_routine_lookup(fqn->function.hash);
   cfm.cfg = cfg_routine_lookup(app_cfg, fqn->function.hash);
   if (cfm.cfg == NULL) {
     cfm.cfg = routine_cfg_new(fqn->function.hash); // crash in eval-function-test.php
     cfg_add_routine(app_cfg, cfm.cfg);
-    write_routine_catalog_entry(fqn->function.hash, filename, routine_name);
+    write_routine_catalog_entry(fqn->function.hash, fqn->unit.path, routine_name);
   } else {
     zend_op *op;
     cfg_opcode_t *cfg_opcode;
@@ -155,7 +179,8 @@ void function_compiled(zend_op_array *op_array)
       cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
       //cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
 
-      if (op->opcode != cfg_opcode->opcode || op->extended_value != cfg_opcode->extended_value) {
+      if (op->opcode != cfg_opcode->opcode ||
+          op->extended_value != cfg_opcode->extended_value) {
         recompile = true;
         break;
       }
@@ -172,16 +197,16 @@ void function_compiled(zend_op_array *op_array)
   if (cfm.dataset == NULL) {
     WARN("--- Function compiled from %d opcodes at "PX": %s|%s: 0x%x"
          " (dataset not found)\n",
-         op_array->last, p2int(op_array->opcodes), filename, routine_name,
+         op_array->last, p2int(op_array->opcodes), fqn->unit.path, routine_name,
          fqn->function.hash);
   } else {
     PRINT("--- Function compiled from %d opcodes at "PX": %s|%s: 0x%x"
           " (dataset found)\n",
-          op_array->last, p2int(op_array->opcodes), filename, routine_name,
+          op_array->last, p2int(op_array->opcodes), fqn->unit.path, routine_name,
           fqn->function.hash);
   }
 
-  sctable_add_or_replace(&routines_by_name, routine_key, fqn);
+  sctable_add_or_replace(&routines_by_hash, fqn->function.hash, fqn);
   sctable_add_or_replace(&routines_by_opcode_address,
                          hash_addr(op_array->opcodes), fqn);
 
@@ -189,7 +214,7 @@ void function_compiled(zend_op_array *op_array)
     PRINT("(skipping existing routine 0x%x at "PX")\n", fqn->function.hash,
           p2int(op_array->opcodes));
     fflush(stderr);
-    goto exit; // verify equal?
+    return; // verify equal?
   }
 
   for (i = 0; i < op_array->last; i++) {
@@ -214,32 +239,44 @@ void function_compiled(zend_op_array *op_array)
             case ZEND_REQUIRE:
             case ZEND_INCLUDE_ONCE:
             case ZEND_REQUIRE_ONCE: {
-              const char *to_path = resolve_constant_include(op);
+              const char *site_to_path, *internal_to_path = resolve_constant_include(op);
               uint to_routine_hash;
               char to_unit_path[ROUTINE_NAME_LENGTH], to_routine_name[ROUTINE_NAME_LENGTH];
 
               // make the included path absolute
-              if (to_path[0] == '/') {
-                strcpy(to_unit_path, to_path);
-                efree((char *) to_path); // always only this branch?
-              } else {
+              if (internal_to_path[0] == '/') {
+                strcpy(to_unit_path, internal_to_path);
+              } else { // `internal_to_path` is just the to filename
                 char *to_unit_filename;
-                strcpy(to_unit_path, filename);
-                to_unit_filename = strrchr(to_unit_path, '/') + 1;
-                to_unit_filename[0] = '\0';
-                strcat(to_unit_path, to_path);
+                strcpy(to_unit_path, fqn->unit.site_root);
+                strcat(to_unit_path, fqn->unit.path);
+                to_unit_filename = strrchr(to_unit_path, '/');
+                if (to_unit_filename == NULL) {
+                  to_unit_filename = to_unit_path;
+                } else {
+                  to_unit_filename++;
+                  to_unit_filename[0] = '\0'; // truncate to remove the from filename
+                }
+                strcat(to_unit_path, internal_to_path); // `internal_to_path` is just the to filename
               }
+              free((char *) internal_to_path);
 
-              to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
-              if (to_path == NULL)
-                to_path = to_unit_path;
-              SPOT("Opcode %d includes file %s\n", i, to_path);
+              internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
+              if (internal_to_path == NULL) {
+                ERROR("Failed to identify the included file %s\n", to_unit_path);
+                return;
+              }
+              site_to_path = internal_to_path + strlen(fqn->unit.site_root);
+              sprintf(to_routine_name, "%s:<script-body>", site_to_path);
 
-              sprintf(to_routine_name, "%s:<script-body>", strrchr(to_path, '/') + 1);
-              to_routine_hash = hash_string(to_routine_name);
+              SPOT("Opcode %d includes file %s\n", i, site_to_path);
+
+              efree((char *) internal_to_path);
+              internal_to_path = site_to_path = NULL;
+
+              to_routine_hash = hash_routine(to_routine_name);
               write_routine_edge(fqn->function.hash, i,
                                  to_routine_hash, 0, USER_LEVEL_BOTTOM);
-              efree((char *) to_path);
             } break;
             case ZEND_EVAL: {
               char *eval_body = resolve_eval_body(op);
@@ -335,28 +372,14 @@ void function_compiled(zend_op_array *op_array)
   }
 
   flush_all_outputs();
-
-exit:
-  if (op_array->type == ZEND_USER_FUNCTION && !is_eval)
-    efree(filename); // crash in lambda-test.php
 }
 
-const char *get_function_declaration_path(const char *routine_name)
-{
-  function_fqn_t *fqn;
-
-  fqn = (function_fqn_t *) sctable_lookup(&routines_by_name, hash_string(routine_name));
-  if (fqn == NULL)
-    return "unknown";
-  else
-    return fqn->unit.path;
-}
-
+// (can never find an eval this way)
 control_flow_metadata_t *get_cfm_by_name(const char *routine_name)
 {
   function_fqn_t *fqn;
 
-  fqn = (function_fqn_t *) sctable_lookup(&routines_by_name, hash_string(routine_name));
+  fqn = (function_fqn_t *) sctable_lookup(&routines_by_hash, hash_routine(routine_name));
   if (fqn == NULL)
     return NULL;
   else

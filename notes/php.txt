@@ -78,3 +78,10 @@ does this:
 
 -----------------
 
+Debugging apache:
+
+  - login to ubuntu-1 as root
+  - stop apache
+  - source /etc/apache2/envvars
+  - gdb $(which apache2)
+  - run -X

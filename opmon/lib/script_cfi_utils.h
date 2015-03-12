@@ -108,4 +108,20 @@ bool is_php_session_active();
 zval *php_session_lookup_var(zend_string *key);
 zval *php_session_set_var(zend_string *key, zval *value);
 
+static inline uint hash_routine(const char *routine_name)
+{
+  uint hash = hash_string(routine_name);
+  return (hash & 0x7fffffff);
+}
+
+static inline bool is_eval_routine(uint routine_hash)
+{
+  return (routine_hash & 0x80000000) > 0;
+}
+
+static inline hash_eval(uint eval_id)
+{
+  return (eval_id & 0x80000000);
+}
+
 #endif

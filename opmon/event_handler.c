@@ -56,11 +56,12 @@ static inline control_flow_metadata_t *peek_cfm()
   return pending_cfm_stack[pending_cfm_frame-1];
 }
 
+// deprecated
 static void init_call(const zend_op *op)
 {
   uint i, j, original_function_length;
   char function_name[MAX_FUNCTION_NAME];
-  control_flow_metadata_t *pending_cfm;
+  control_flow_metadata_t *pending_cfm = NULL;
 
   if (op->opcode == ZEND_INIT_METHOD_CALL || op->opcode == ZEND_INIT_STATIC_METHOD_CALL) {
     zend_execute_data *execute_data = EG(current_execute_data); // referenced implicitly by EX_VAR (next line)
@@ -127,7 +128,8 @@ static void init_call(const zend_op *op)
     return;
   }
 
-  pending_cfm = get_cfm_by_name(function_name);
+  // deprecated
+  //pending_cfm = get_cfm_by_name(function_name);
   if (pending_cfm == NULL) {
     if (strcmp("<default>:create_function", function_name) == 0) {
       PRINT("  === init call to create_function\n");
@@ -137,8 +139,9 @@ static void init_call(const zend_op *op)
       strcpy(last_unknown_function_name, function_name);
     }
   } else {
-    const char *source_path = get_function_declaration_path(function_name);
-    PRINT("  === init call to function %s|%s\n", source_path, function_name);
+    // deprecated
+    //const char *source_path = get_function_declaration_path(function_name);
+    //PRINT("  === init call to function %s|%s\n", source_path, function_name);
   }
   pend_cfm(pending_cfm);
 }
@@ -176,4 +179,5 @@ void destroy_event_handler()
 {
   destroy_cfg_handler();
   destroy_metadata_handler();
+  destroy_operand_resolver();
 }

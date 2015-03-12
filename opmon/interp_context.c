@@ -213,45 +213,55 @@ static bool update_shadow_stack() // true if the stack pointer changed
   if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
     to_cfm = get_last_eval_cfm();
   } else {
-    char routine_name[ROUTINE_NAME_LENGTH];
-    const char *classname, *function_name;
     control_flow_metadata_t *monitored_cfm = NULL;
-
-    if (op_array->function_name == NULL) {     // script-body
-      classname = (strrchr(op_array->filename->val, '/') + 1);
-      function_name = "<script-body>";
-    } else if (op_array->scope == NULL || (op_array->fn_flags & ZEND_ACC_CLOSURE)) {
-      classname = "<default>";                 // function call
-      /*
-      if (strcmp(op_array->function_name->val, "__lambda_func") == 0) {
-        function_name = lambda_frame->name;
-        DECREMENT_STACK(lambda_stack, lambda_frame);
-      } else {
-      */
-        function_name = op_array->function_name->val;
-      //}
-    } else if (execute_data->This.value.obj == NULL) { // static method call
-      classname = op_array->scope->name->val;
-      function_name = op_array->function_name->val;
-    } else {                                   // instance method call
-      classname = op_array->scope->name->val;
-      function_name = op_array->function_name->val;
-    }
-    sprintf(routine_name, "%s:%s", classname, function_name);
 
     if (monitored_cfm == NULL)
       monitored_cfm = get_cfm_by_opcodes_address(op_array->opcodes);
-    if (monitored_cfm == NULL)
-      monitored_cfm = get_cfm_by_name(routine_name);
     if (monitored_cfm == NULL) {
-      char *routine_name_buffer = malloc(strlen(routine_name)+10);
-      sprintf(routine_name_buffer, "<missing>%s", routine_name);
-      to_cfm.routine_name = (const char *)routine_name_buffer;
-      to_cfm.cfg = NULL;
-      to_cfm.dataset = NULL;
-      ERROR("Failed to find opcodes for function %s\n", routine_name);
-    } else {
+      char routine_name[ROUTINE_NAME_LENGTH];
+      const char *classname, *function_name;
+
+      if (op_array->function_name == NULL) {     // script-body
+        classname = (strrchr(op_array->filename->val, '/') + 1); // relativize
+        function_name = "<script-body>";
+      } else if (op_array->scope == NULL || (op_array->fn_flags & ZEND_ACC_CLOSURE)) {
+        classname = "<default>";                 // function call
+        /*
+        if (strcmp(op_array->function_name->val, "__lambda_func") == 0) {
+          function_name = lambda_frame->name;
+          DECREMENT_STACK(lambda_stack, lambda_frame);
+        } else {
+        */
+          function_name = op_array->function_name->val;
+        //}
+      } else if (execute_data->This.value.obj == NULL) { // static method call
+        classname = op_array->scope->name->val;
+        function_name = op_array->function_name->val;
+      } else {                                   // instance method call
+        classname = op_array->scope->name->val;
+        function_name = op_array->function_name->val;
+      }
+
+      sprintf(routine_name, "%s:%s", classname, function_name);
+
+      SPOT("Lookup cfm by name %s\n", routine_name);
+
+      monitored_cfm = get_cfm_by_name(routine_name);
+
+      if (monitored_cfm == NULL) {
+        char *routine_name_buffer = malloc(strlen(routine_name)+10);
+        sprintf(routine_name_buffer, "<missing>%s", routine_name);
+        to_cfm.routine_name = (const char *)routine_name_buffer;
+        to_cfm.cfg = NULL;
+        to_cfm.dataset = NULL;
+        ERROR("Failed to find opcodes for function %s\n", routine_name);
+      }
+    }
+    if (monitored_cfm != NULL) {
       to_cfm = *monitored_cfm;
+
+      SPOT("Found opcodes at "PX"|"PX" for %s\n", p2int(execute_data),
+           p2int(op_array->opcodes), op_array->filename->val);
     }
   }
 
