@@ -9,6 +9,7 @@
 
 #define MAX_FUNCTION_NAME 256
 #define MAX_STACK_FRAME 256
+#define ENV_STATIC_ANALYSIS "OPMON_STATIC_ANALYSIS"
 
 #define CHECK_FUNCTION_NAME_LENGTH(len) \
 do { \
@@ -33,6 +34,8 @@ static control_flow_metadata_t *pending_cfm_stack[MAX_STACK_FRAME];
 
 static char last_unknown_function_name[MAX_FUNCTION_NAME];
 static pending_load_t pending_load;
+
+static const char *static_analysis;
 
 cfg_t *app_cfg;
 
@@ -146,10 +149,22 @@ static void init_call(const zend_op *op)
   pend_cfm(pending_cfm);
 }
 
+const char *get_static_analysis()
+{
+  return static_analysis;
+}
+
+bool is_static_analysis()
+{
+  return static_analysis != NULL;
+}
+
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   //extern foo *foobar;
   //scarray_unit_test();
+
+  static_analysis = getenv(ENV_STATIC_ANALYSIS);
 
   app_cfg = cfg_new();
 

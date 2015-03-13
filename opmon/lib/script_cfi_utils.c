@@ -15,14 +15,14 @@ uint hash_string(const char *string)
     string += 4;
     hash = hash ^ (hash << 5) ^ four;
   }
-  
+
   if (i > 0) {
     four = 0;
     while (i-- > 0)
       four = (four << 8) | *string++;
     hash = hash ^ (hash << 5) ^ four;
   }
-  
+
   return hash;
 }
 
@@ -38,16 +38,16 @@ void setup_base_path(char *path, const char *category, const char *app_path)
   char *path_truncate;
   const char *script_filename;
   struct stat dirinfo;
-  
+
   strcat(path, OPMON_G(dataset_dir));
-  
+
   uint len = strlen(path);
   if (path[len-1] != '/')
     path[len] = '/';
-  
+
   strcat(path, category);
   strcat(path, "/");
-  
+
   if (stat(path, &dirinfo) != 0)
     mkdir(path, 0700);
 
@@ -76,7 +76,7 @@ zval *php_session_lookup_var(zend_string *key)
 {
   if (!IS_SESSION(PS(http_session_vars)))
     return NULL;
-  
+
   HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
   return zend_hash_find(session_table, key);
 }
@@ -84,10 +84,10 @@ zval *php_session_lookup_var(zend_string *key)
 zval *php_session_set_var(zend_string *key, zval *value)
 {
   zval *cell;
-  
+
   if (!IS_SESSION(PS(http_session_vars)))
     return;
-  
+
   HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
   cell = zend_hash_add_new(session_table, key, &EG(uninitialized_zval));
   ZVAL_COPY_VALUE(cell, value);

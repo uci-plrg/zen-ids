@@ -5,6 +5,7 @@
 #include <fcntl.h>
 
 #include "lib/script_cfi_utils.h"
+#include "event_handler.h"
 #include "cfg_handler.h"
 
 static cfg_files_t cfg_files;
@@ -44,7 +45,7 @@ void destroy_cfg_handler()
   }
 }
 
-static void open_output_files_in_dir(char *cfg_file_path)
+static void open_output_files_in_dir(char *cfg_file_path, const char *mode)
 {
   char *cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
 
@@ -54,7 +55,7 @@ static void open_output_files_in_dir(char *cfg_file_path)
   do { \
     *cfg_file_truncate = '\0'; \
     strcat(cfg_file_path, (filename)); \
-    cfg_files.file_field = fopen(cfg_file_path, "w"); \
+    cfg_files.file_field = fopen(cfg_file_path, mode); \
     if (cfg_files.file_field == NULL) \
       ERROR("Failed to open cfg file cfg_files."#file_field"\n"); \
     else \
@@ -98,17 +99,39 @@ static void open_output_files(const char *script_path)
     return;
   }
 
-  open_output_files_in_dir(cfg_file_path);
+  open_output_files_in_dir(cfg_file_path, "w");
 }
 
 void starting_script(const char *script_path)
 {
+  struct stat dirinfo;
   char *resolved_path = zend_resolve_path(script_path, strlen(script_path));
 
-  SPOT("starting_script %s on pid %d\n", resolved_path, getpid());
+  if (is_static_analysis()) {
+    const char *analysis = get_static_analysis();
+    char cfg_file_path[256] = {0};
 
-  open_output_files(resolved_path);
-  load_dataset(resolved_path);
+    SPOT("Starting static analysis '%s' of file %s on pid %d\n",
+         analysis, resolved_path, getpid());
+
+    setup_base_path(cfg_file_path, "runs", analysis);
+    strcat(cfg_file_path, "/");
+
+    if (stat(cfg_file_path, &dirinfo) != 0) {
+      if (mkdir(cfg_file_path, 0700) != 0) {
+        ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
+        return;
+      }
+    }
+
+    open_output_files_in_dir(cfg_file_path, "a");
+    load_dataset(analysis);
+  } else {
+    SPOT("starting_script %s on pid %d\n", resolved_path, getpid());
+
+    open_output_files(resolved_path);
+    load_dataset(resolved_path);
+  }
 
   efree(resolved_path);
 }
@@ -199,7 +222,7 @@ void worker_startup()
     SPOT("Successfully created worker directory %s\n", cfg_file_path);
   }
 
-  open_output_files_in_dir(cfg_file_path);
+  open_output_files_in_dir(cfg_file_path, "w");
 }
 
 /* 3 x 4 bytes: { routine_hash | opcode | index } */

@@ -2,6 +2,7 @@
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_hashtable.h"
 #include "cfg.h"
+#include "event_handler.h"
 #include "cfg_handler.h"
 #include "dataset.h"
 #include "metadata_handler.h"
@@ -109,8 +110,8 @@ void function_compiled(zend_op_array *op_array)
 
     fqn->unit.site_root = locate_site_root(op_array->filename->val);
     if (fqn->unit.site_root == NULL) {
-      ERROR("Cannot find site root for eval %s\n", op_array->filename->val);
-      return;
+      WARN("Cannot find site root for eval %s. Defaulting to '/'\n", op_array->filename->val);
+      fqn->unit.site_root = "/";
     }
   } else {
     const char *classname;
@@ -130,10 +131,8 @@ void function_compiled(zend_op_array *op_array)
     fqn = malloc(sizeof(function_fqn_t));
     fqn->unit.site_root = locate_site_root(filename);
     if (fqn->unit.site_root == NULL) {
-      ERROR("Cannot find site root for filename %s\n", filename);
-      if (free_filename)
-        efree(filename);
-      return;
+      WARN("Cannot find site root for filename %s. Defaulting to '/'\n", filename);
+      fqn->unit.site_root = "/";
     }
     site_filename = filename + strlen(fqn->unit.site_root);
     buffer = malloc(strlen(site_filename) + 1);
@@ -238,76 +237,90 @@ void function_compiled(zend_op_array *op_array)
     }
 #endif
 
-    switch (op->opcode) {
-      case ZEND_INCLUDE_OR_EVAL: {
-        if (op->op1_type == IS_CONST) {
-          switch (op->extended_value) {
-            case ZEND_INCLUDE:
-            case ZEND_REQUIRE:
-            case ZEND_INCLUDE_ONCE:
-            case ZEND_REQUIRE_ONCE: {
-              const char *site_to_path, *internal_to_path = resolve_constant_include(op);
-              uint to_routine_hash;
-              char to_unit_path[ROUTINE_NAME_LENGTH], to_routine_name[ROUTINE_NAME_LENGTH];
-              bool free_internal_to_path = false;
+    if (is_static_analysis()) {
+      uint to_routine_hash;
+      switch (op->opcode) {
+        case ZEND_INCLUDE_OR_EVAL: {
+          if (op->op1_type == IS_CONST) {
+            switch (op->extended_value) {
+              case ZEND_INCLUDE:
+              case ZEND_REQUIRE:
+              case ZEND_INCLUDE_ONCE:
+              case ZEND_REQUIRE_ONCE: {
+                const char *site_to_path, *internal_to_path = resolve_constant_include(op);
+                char to_unit_path[ROUTINE_NAME_LENGTH], to_routine_name[ROUTINE_NAME_LENGTH];
+                bool free_internal_to_path = false;
 
-              // make the included path absolute
-              if (internal_to_path[0] == '/') {
-                strcpy(to_unit_path, internal_to_path);
-              } else { // `internal_to_path` is just the to filename
-                char *to_unit_filename;
-                strcpy(to_unit_path, fqn->unit.site_root);
-                strcat(to_unit_path, fqn->unit.path);
-                to_unit_filename = strrchr(to_unit_path, '/');
-                if (to_unit_filename == NULL) {
-                  to_unit_filename = to_unit_path;
-                } else {
-                  to_unit_filename++;
-                  to_unit_filename[0] = '\0'; // truncate to remove the from filename
+                // make the included path absolute
+                if (internal_to_path[0] == '/') {
+                  strcpy(to_unit_path, internal_to_path);
+                } else { // `internal_to_path` is just the to filename
+                  char *to_unit_filename;
+                  strcpy(to_unit_path, fqn->unit.site_root);
+                  strcat(to_unit_path, fqn->unit.path);
+                  to_unit_filename = strrchr(to_unit_path, '/');
+                  if (to_unit_filename == NULL) {
+                    to_unit_filename = to_unit_path;
+                  } else {
+                    to_unit_filename++;
+                    to_unit_filename[0] = '\0'; // truncate to remove the from filename
+                  }
+                  strcat(to_unit_path, internal_to_path); // `internal_to_path` is just the to filename
                 }
-                strcat(to_unit_path, internal_to_path); // `internal_to_path` is just the to filename
-              }
-              free((char *) internal_to_path);
+                free((char *) internal_to_path);
 
-              internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
-              if (internal_to_path == NULL) {
-                internal_to_path = to_unit_path;
-              } else {
-                free_internal_to_path = true;
-              }
-              site_to_path = internal_to_path + strlen(fqn->unit.site_root);
-              sprintf(to_routine_name, "%s:<script-body>", site_to_path);
+                internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
+                if (internal_to_path == NULL) {
+                  internal_to_path = to_unit_path;
+                } else {
+                  free_internal_to_path = true;
+                }
+                site_to_path = internal_to_path + strlen(fqn->unit.site_root);
+                sprintf(to_routine_name, "%s:<script-body>", site_to_path);
 
-              WARN("Opcode %d includes file %s\n", i, site_to_path);
+                if (free_internal_to_path)
+                  efree((char *) internal_to_path);
+                internal_to_path = site_to_path = NULL;
 
-              if (free_internal_to_path)
-                efree((char *) internal_to_path);
-              internal_to_path = site_to_path = NULL;
+                to_routine_hash = hash_routine(to_routine_name);
 
-              to_routine_hash = hash_routine(to_routine_name);
-              write_routine_edge(fqn->function.hash, i,
-                                 to_routine_hash, 0, USER_LEVEL_BOTTOM);
-            } break;
-            case ZEND_EVAL: {
-              char *eval_body = resolve_eval_body(op);
-              PRINT("Opcode %d calls eval(%s)\n", i, eval_body);
-              free(eval_body);
-            } break;
+                WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
+
+                write_routine_edge(fqn->function.hash, i,
+                                   to_routine_hash, 0, USER_LEVEL_BOTTOM);
+              } break;
+              case ZEND_EVAL: {
+                char *eval_body = resolve_eval_body(op);
+                PRINT("Opcode %d calls eval(%s)\n", i, eval_body);
+                free(eval_body);
+              } break;
+            }
           }
-        }
-      } break;
-      case ZEND_NEW: {
-        if (op->op1_type == IS_CONST)
-          PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
-      } break;
-      case ZEND_INIT_FCALL_BY_NAME: {
-        if (op->op2_type == IS_CONST)
-          PRINT("Opcode %d calls function %s()\n", i, Z_STRVAL_P(op->op2.zv));
-      } break;
-      case ZEND_INIT_METHOD_CALL: {
-        if (op->op2_type == IS_CONST)
-          PRINT("Opcode %d calls method %s()\n", i, Z_STRVAL_P(op->op2.zv));
-      } break;
+        } break;
+        case ZEND_NEW: {
+          if (op->op1_type == IS_CONST)
+            PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
+        } break;
+        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_METHOD_CALL: {
+          if (op->op2_type == IS_CONST) {
+            const char *classname;
+            char routine_name[ROUTINE_NAME_LENGTH];
+
+            if (op_array->scope == NULL)
+              classname = "<default>";
+            else
+              classname = op_array->scope->name->val;
+            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+            to_routine_hash = hash_routine(routine_name);
+
+            SPOT("Opcode %d calls function %s (0x%x)\n", i, routine_name, to_routine_hash);
+
+            write_routine_edge(fqn->function.hash, i,
+                               to_routine_hash, 0, USER_LEVEL_BOTTOM);
+          }
+        } break;
+      }
     }
 
     routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, i);
