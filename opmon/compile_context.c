@@ -239,6 +239,8 @@ void function_compiled(zend_op_array *op_array)
 
     if (is_static_analysis()) {
       uint to_routine_hash;
+      const char *classname;
+
       switch (op->opcode) {
         case ZEND_INCLUDE_OR_EVAL: {
           if (op->op1_type == IS_CONST) {
@@ -301,16 +303,44 @@ void function_compiled(zend_op_array *op_array)
           if (op->op1_type == IS_CONST)
             PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
         } break;
-        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME: {
+          if (op->op2_type == IS_CONST) {
+            if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL)
+              break; // ignore builtins for now
+
+            classname = "<default>";
+            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+            to_routine_hash = hash_routine(routine_name);
+
+            SPOT("Opcode %d calls function %s (0x%x)\n", i, routine_name, to_routine_hash);
+
+            write_routine_edge(fqn->function.hash, i,
+                               to_routine_hash, 0, USER_LEVEL_BOTTOM);
+          }
+        } break;
         case ZEND_INIT_METHOD_CALL: {
           if (op->op2_type == IS_CONST) {
-            const char *classname;
-            char routine_name[ROUTINE_NAME_LENGTH];
+            char routine_name[ROUTINE_NAME_LENGTH]; // no need to shadow
 
-            if (op_array->scope == NULL)
-              classname = "<default>";
-            else
+            if (op->op1_type == IS_UNUSED) {
               classname = op_array->scope->name->val;
+            } else {
+              WARN("Call to method %s on unknown type\n", Z_STRVAL_P(op->op2.zv));
+              break;
+            }
+            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+            to_routine_hash = hash_routine(routine_name);
+
+            SPOT("Opcode %d calls method %s (0x%x)\n", i, routine_name, to_routine_hash);
+
+            write_routine_edge(fqn->function.hash, i,
+                               to_routine_hash, 0, USER_LEVEL_BOTTOM);
+          }
+        } break;
+        case ZEND_INIT_STATIC_METHOD_CALL: {
+          if (op->op1_type == IS_CONST && op->op2_type == IS_CONST) {
+            classname = Z_STRVAL_P(op->op1.zv);
             sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
             to_routine_hash = hash_routine(routine_name);
 
