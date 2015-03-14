@@ -84,6 +84,20 @@ enum {
   true
 };
 
+#define INCREMENT_STACK(base, ptr) \
+do { \
+  (ptr)++; \
+  if (((ptr) - (base)) >= MAX_STACK_FRAME_##base) \
+    ERROR(#ptr" exceeds max stack frame!\n"); \
+} while (0)
+
+#define DECREMENT_STACK(base, ptr) \
+do { \
+  (ptr)--; \
+  if ((ptr) <= (base)) \
+    ERROR(#ptr" hit stack bottom!\n"); \
+} while (0)
+
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;

@@ -13,6 +13,7 @@
 #define CLOSURE_NAME "{closure}"
 #define CLOSURE_NAME_LENGTH 9
 #define CLOSURE_NAME_TEMPLATE "<closure-%d>"
+#define MAX_STACK_FRAME_fcall_stack 0x100
 
 // #define SPOT_DEBUG 1
 
@@ -31,6 +32,14 @@ typedef struct _function_fqn_t {
   compilation_routine_t function;
 } function_fqn_t;
 
+typedef struct _fcall_init_t {
+  uint init_index;
+  uint routine_hash;
+} fcall_init_t;
+
+fcall_init_t fcall_stack[MAX_STACK_FRAME_fcall_stack];
+fcall_init_t *fcall_frame;
+
 static sctable_t routines_by_hash;
 static sctable_t routines_by_opcode_address;
 static uint closure_count = 0; // must be per compilation unit!
@@ -38,6 +47,39 @@ static uint closure_count = 0; // must be per compilation unit!
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
 extern cfg_t *app_cfg;
+
+static inline void push_fcall_init(uint index, uint routine_hash, const char *routine_name)
+{
+  SPOT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
+
+  INCREMENT_STACK(fcall_stack, fcall_frame);
+  fcall_frame->init_index = index;
+  fcall_frame->routine_hash = routine_hash;
+}
+
+static inline void push_fcall_skip(uint index)
+{
+  INCREMENT_STACK(fcall_stack, fcall_frame);
+  fcall_frame->init_index = index;
+  fcall_frame->routine_hash = 0;
+}
+
+static inline bool has_fcall_init(uint index)
+{
+  return fcall_frame->init_index == index && fcall_frame->routine_hash > 0;
+}
+
+static inline fcall_init_t *pop_fcall_init()
+{
+  fcall_init_t *top = fcall_frame;
+  DECREMENT_STACK(fcall_stack, fcall_frame);
+  return top;
+}
+
+static inline void reset_fcall_stack()
+{
+  fcall_frame = fcall_stack + 1;
+}
 
 inline int is_closure(const char *function_name)
 {
@@ -59,6 +101,8 @@ void init_compile_context()
 
   routines_by_opcode_address.hash_bits = 8;
   sctable_init(&routines_by_opcode_address);
+
+  memset(fcall_stack, 0, sizeof(fcall_init_t));
 }
 
 void function_compiled(zend_op_array *op_array)
@@ -223,6 +267,9 @@ void function_compiled(zend_op_array *op_array)
     return; // verify equal?
   }
 
+  if (is_static_analysis())
+    reset_fcall_stack();
+
   for (i = 0; i < op_array->last; i++) {
     compiled_edge_target_t target;
     zend_op *op = &op_array->opcodes[i];
@@ -230,12 +277,8 @@ void function_compiled(zend_op_array *op_array)
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
 
-#ifdef SPOT_DEBUG
-    if (spot) {
-      SPOT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
-           op->opcode, i, routine_name, fqn->function.hash);
-    }
-#endif
+    PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
+          op->opcode, i, routine_name, fqn->function.hash);
 
     if (is_static_analysis()) {
       uint to_routine_hash;
@@ -303,26 +346,33 @@ void function_compiled(zend_op_array *op_array)
           if (op->op1_type == IS_CONST)
             PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
         } break;
-        case ZEND_INIT_FCALL:
-        case ZEND_INIT_FCALL_BY_NAME: {
-          if (op->op2_type == IS_CONST) {
-            if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL)
-              break; // ignore builtins for now
-
-            classname = "<default>";
-            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
-            to_routine_hash = hash_routine(routine_name);
-
-            SPOT("Opcode %d calls function %s (0x%x)\n", i, routine_name, to_routine_hash);
-
+        case ZEND_DO_FCALL: {
+          fcall_init_t *fcall = pop_fcall_init();
+          if (fcall->routine_hash > 0) {
+            SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
             write_routine_edge(fqn->function.hash, i,
-                               to_routine_hash, 0, USER_LEVEL_BOTTOM);
+                               fcall->routine_hash, 0, USER_LEVEL_BOTTOM);
           }
+        } break;
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME:
+          if (op->op2_type != IS_CONST)
+            break;
+        case ZEND_INIT_NS_FCALL_BY_NAME: {
+          // in ZEND_INIT_FCALL_BY_NAME_SPEC_CONST_HANDLER:
+          //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
+          //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
+
+          if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL)
+            break; // ignore builtins for now
+
+          classname = "<default>";
+          sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+          to_routine_hash = hash_routine(routine_name);
+          push_fcall_init(i, to_routine_hash, routine_name);
         } break;
         case ZEND_INIT_METHOD_CALL: {
           if (op->op2_type == IS_CONST) {
-            char routine_name[ROUTINE_NAME_LENGTH]; // no need to shadow
-
             if (op->op1_type == IS_UNUSED) {
               classname = op_array->scope->name->val;
             } else {
@@ -331,11 +381,7 @@ void function_compiled(zend_op_array *op_array)
             }
             sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
             to_routine_hash = hash_routine(routine_name);
-
-            SPOT("Opcode %d calls method %s (0x%x)\n", i, routine_name, to_routine_hash);
-
-            write_routine_edge(fqn->function.hash, i,
-                               to_routine_hash, 0, USER_LEVEL_BOTTOM);
+            push_fcall_init(i, to_routine_hash, routine_name);
           }
         } break;
         case ZEND_INIT_STATIC_METHOD_CALL: {
@@ -343,13 +389,25 @@ void function_compiled(zend_op_array *op_array)
             classname = Z_STRVAL_P(op->op1.zv);
             sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
             to_routine_hash = hash_routine(routine_name);
-
-            SPOT("Opcode %d calls function %s (0x%x)\n", i, routine_name, to_routine_hash);
-
-            write_routine_edge(fqn->function.hash, i,
-                               to_routine_hash, 0, USER_LEVEL_BOTTOM);
+            push_fcall_init(i, to_routine_hash, routine_name);
           }
         } break;
+        case ZEND_INIT_USER_CALL: {
+          //ERROR("Found ZEND_INIT_USER_CALL: check semantics!\n");
+        } break;
+      }
+
+      switch (op->opcode) {
+          case ZEND_NEW:
+          case ZEND_INIT_FCALL:
+          case ZEND_INIT_FCALL_BY_NAME:
+          case ZEND_INIT_NS_FCALL_BY_NAME:
+          case ZEND_INIT_METHOD_CALL:
+          case ZEND_INIT_STATIC_METHOD_CALL:
+          case ZEND_INIT_USER_CALL: {
+            if (!has_fcall_init(i))
+              push_fcall_skip(i);
+          } break;
       }
     }
 

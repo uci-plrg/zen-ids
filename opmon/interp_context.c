@@ -7,25 +7,11 @@
 #include "compile_context.h"
 #include "interp_context.h"
 
-#define MAX_STACK_FRAME_shadow_stack 0x100000
+#define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
 #define MAX_STACK_FRAME_lambda_stack 0x100
 #define ROUTINE_NAME_LENGTH 256
 #define FLUSH_MASK 0xff
-
-#define INCREMENT_STACK(base, ptr) \
-do { \
-  (ptr)++; \
-  if (((ptr) - (base)) >= MAX_STACK_FRAME_##base) \
-    ERROR(#ptr" exceeds max stack frame!\n"); \
-} while (0)
-
-#define DECREMENT_STACK(base, ptr) \
-do { \
-  (ptr)--; \
-  if ((ptr) <= (base)) \
-    ERROR(#ptr" hit stack bottom!\n"); \
-} while (0)
 
 typedef struct _shadow_frame_t {
   zend_execute_data *execute_data;
