@@ -283,6 +283,7 @@ void function_compiled(zend_op_array *op_array)
     if (is_static_analysis()) {
       uint to_routine_hash;
       const char *classname;
+      bool ignore_call = false;
 
       switch (op->opcode) {
         case ZEND_INCLUDE_OR_EVAL: {
@@ -363,8 +364,10 @@ void function_compiled(zend_op_array *op_array)
           //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
           //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
 
-          if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL)
+          if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL) {
+            ignore_call = true;
             break; // ignore builtins for now
+          }
 
           classname = "<default>";
           sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
@@ -405,8 +408,20 @@ void function_compiled(zend_op_array *op_array)
           case ZEND_INIT_METHOD_CALL:
           case ZEND_INIT_STATIC_METHOD_CALL:
           case ZEND_INIT_USER_CALL: {
-            if (!has_fcall_init(i))
+            if (!has_fcall_init(i)) {
               push_fcall_skip(i);
+
+              if (!ignore_call) {
+                SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x).",
+                     i, op->opcode, routine_name, fqn->unit.path, op->lineno, fqn->function.hash);
+                if (cfm.dataset != NULL) {
+                  uint target_count = dataset_get_call_target_count(cfm.dataset, i);
+                  if (target_count > 0)
+                    fprintf(stderr, " Dataset has %d edges.", target_count);
+                }
+                fprintf(stderr, "\n");
+              }
+            }
           } break;
       }
     }

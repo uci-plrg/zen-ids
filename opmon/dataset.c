@@ -213,3 +213,13 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
 
   return false;
 }
+
+uint dataset_get_call_target_count(dataset_routine_t *dataset, uint from_index)
+{
+  dataset_node_t *node = &dataset->nodes[from_index];
+  if (node->type == DATASET_NODE_TYPE_CALL) {
+    dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
+    return targets->target_count;
+  }
+  return 0;
+}
