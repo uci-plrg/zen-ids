@@ -35,6 +35,7 @@ typedef struct _function_fqn_t {
 typedef struct _fcall_init_t {
   uint init_index;
   uint routine_hash;
+  zend_uchar opcode;
 } fcall_init_t;
 
 fcall_init_t fcall_stack[MAX_STACK_FRAME_fcall_stack];
@@ -48,20 +49,23 @@ static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL }
 
 extern cfg_t *app_cfg;
 
-static inline void push_fcall_init(uint index, uint routine_hash, const char *routine_name)
+static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_hash,
+                                   const char *routine_name)
 {
   SPOT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
 
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
   fcall_frame->routine_hash = routine_hash;
+  fcall_frame->opcode = opcode;
 }
 
-static inline void push_fcall_skip(uint index)
+static inline void push_fcall_skip(uint index, zend_uchar opcode)
 {
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
   fcall_frame->routine_hash = 0;
+  fcall_frame->opcode = opcode;
 }
 
 static inline bool has_fcall_init(uint index)
@@ -353,6 +357,11 @@ void function_compiled(zend_op_array *op_array)
             SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
             write_routine_edge(fqn->function.hash, i,
                                fcall->routine_hash, 0, USER_LEVEL_BOTTOM);
+          } else if (fcall->opcode > 0) {
+            SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
+                 "Dataset: %s. edges: %d.\n", i, fcall->opcode, cfm.routine_name, fqn->unit.path,
+                 op->lineno, fqn->function.hash, cfm.dataset == NULL ? "missing" : "found",
+                 cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.dataset, i));
           }
         } break;
         case ZEND_INIT_FCALL:
@@ -372,7 +381,7 @@ void function_compiled(zend_op_array *op_array)
           classname = "<default>";
           sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
           to_routine_hash = hash_routine(routine_name);
-          push_fcall_init(i, to_routine_hash, routine_name);
+          push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
         } break;
         case ZEND_INIT_METHOD_CALL: {
           if (op->op2_type == IS_CONST) {
@@ -384,15 +393,22 @@ void function_compiled(zend_op_array *op_array)
             }
             sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
             to_routine_hash = hash_routine(routine_name);
-            push_fcall_init(i, to_routine_hash, routine_name);
+            push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
           }
         } break;
         case ZEND_INIT_STATIC_METHOD_CALL: {
+          classname = NULL;
           if (op->op1_type == IS_CONST && op->op2_type == IS_CONST) {
             classname = Z_STRVAL_P(op->op1.zv);
+          } else if (op->op1_type == IS_VAR && op->op2_type == IS_UNUSED) {
+            if ((op-1)->extended_value == ZEND_FETCH_CLASS_SELF)
+              classname = op_array->scope->name->val;
+          }
+
+          if (classname != NULL) {
             sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
             to_routine_hash = hash_routine(routine_name);
-            push_fcall_init(i, to_routine_hash, routine_name);
+            push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
           }
         } break;
         case ZEND_INIT_USER_CALL: {
@@ -408,20 +424,8 @@ void function_compiled(zend_op_array *op_array)
           case ZEND_INIT_METHOD_CALL:
           case ZEND_INIT_STATIC_METHOD_CALL:
           case ZEND_INIT_USER_CALL: {
-            if (!has_fcall_init(i)) {
-              push_fcall_skip(i);
-
-              if (!ignore_call) {
-                SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x).",
-                     i, op->opcode, routine_name, fqn->unit.path, op->lineno, fqn->function.hash);
-                if (cfm.dataset != NULL) {
-                  uint target_count = dataset_get_call_target_count(cfm.dataset, i);
-                  if (target_count > 0)
-                    fprintf(stderr, " Dataset has %d edges.", target_count);
-                }
-                fprintf(stderr, "\n");
-              }
-            }
+            if (!has_fcall_init(i))
+              push_fcall_skip(i, ignore_call ? 0 : op->opcode);
           } break;
       }
     }

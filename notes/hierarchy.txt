@@ -1,0 +1,37 @@
+
+zend_compile.c:zend_compile_class_ref():
+(gdb) p compiler_globals.active_op_array->opcodes[1] { 0, 0 (classname literal) }
+$7 = {handler = 0x0, op1 = {constant = 0x0, var = 0x0, num = 0x0, opline_num = 0x0, jmp_addr = 0x0, zv = 0x0}, op2 = {constant = 0x0, var = 0x0,
+    num = 0x0, opline_num = 0x0, jmp_addr = 0x0, zv = 0x0}, result = {constant = 0x1, var = 0x1, num = 0x1, opline_num = 0x1, jmp_addr = 0x1, zv = 0x1},
+  extended_value = 0x0, lineno = 0x11, opcode = 0x6d, op1_type = 0x8, op2_type = 0x1, result_type = 0x4}
+
+zend_compile.c:zend_compile_class_decl()
+(gdb) p compiler_globals.active_op_array->opcodes[2] { 3 (runtime definition key), 2 (classname literal) }
+$9 = {handler = 0x0, op1 = {constant = 0x3, var = 0x3, num = 0x3, opline_num = 0x3, jmp_addr = 0x3, zv = 0x3}, op2 = {constant = 0x2, var = 0x2,
+    num = 0x2, opline_num = 0x2, jmp_addr = 0x2, zv = 0x2}, result = {constant = 0x2, var = 0x2, num = 0x2, opline_num = 0x2, jmp_addr = 0x2, zv = 0x2},
+  extended_value = 0x1, lineno = 0x11, opcode = 0x8c, op1_type = 0x1, op2_type = 0x1, result_type = 0x4}
+
+(gdb) p compiler_globals.context
+$12 = {opcodes_size = 0x40, vars_size = 0x0, literals_size = 0x10, current_brk_cont = 0xffffffff, backpatch_count = 0x0, in_finally = 0x0, labels = 0x0}
+(gdb) p compiler_globals.active_op_array->literals
+$13 = (zval *) 0x7fffeec5f3c0
+(gdb) pf compiler_globals.active_op_array->literals[3] (opcode 0x8c op1: some "runtime definition key")
+
+(gdb) pf compiler_globals.active_op_array->literals[2] (opcode 0x8c op2: classname)
+somethingelse
+(gdb) pf compiler_globals.active_op_array->literals[1] (???)
+something
+(gdb) pf compiler_globals.active_op_array->literals[0] (opcode 0x6d op2: classname (super))
+Something
+
+
+------
+
+Hierarchy extraction needs to be a separate pass. The compile pass will need:
+
+ · class (by hash)
+   · defined methods (lookup by name: search? hash?)
+
+Could use 2 hashtables: class by name hash, method by classname:methodname hash
+
+How much does this really help? We can resolve some of the instance calls, but certainly not all of them. At runtime we could use the hierarchy to validate the call, but then how exploitable are those call sites? If the object structure got messed up at runtime, it would be possible to call outside the hierarchy. But is that really a vulnerability?

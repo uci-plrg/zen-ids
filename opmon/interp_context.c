@@ -150,7 +150,7 @@ static bool shadow_stack_contains_frame(zend_execute_data *execute_data, zend_op
   return false;
 }
 
-static bool update_shadow_stack() // true if the stack pointer changed
+static bool update_shadow_stack(const zend_op *op) // true if the stack pointer changed
 {
   control_flow_metadata_t to_cfm;
   zend_execute_data *execute_data = EG(current_execute_data);
@@ -247,7 +247,8 @@ static bool update_shadow_stack() // true if the stack pointer changed
       to_cfm = *monitored_cfm;
   }
 
-  if (shadow_frame > shadow_stack && to_cfm.cfg != NULL) {
+  if (shadow_frame > shadow_stack && to_cfm.cfg != NULL &&
+      zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) == NULL) { // skip builtins
     zend_op *op = &shadow_frame->opcodes[shadow_frame->last_index];
     compiled_edge_target_t compiled_target = get_compiled_edge_target(op, shadow_frame->last_index);
 
@@ -373,7 +374,7 @@ void opcode_executing(const zend_op *op)
     return;
   }
 
-  stack_pointer_moved = update_shadow_stack();
+  stack_pointer_moved = update_shadow_stack(op);
 
   // todo: check remaining state/opcode mismatches
   if (op->opcode == ZEND_RETURN)
