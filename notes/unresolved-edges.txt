@@ -1,0 +1,19 @@
+
+Features to investigate:
+
+  1. __call function
+    
+     ====== GREP function.*\<__call\> ======
+
+    src/wp-includes/class-simplepie.php:3023:   public function __call($method, $args)
+    src/wp-includes/capabilities.php:92:    public function __call( $name, $arguments ) {
+    src/wp-includes/comment.php:287:    public function __call( $name, $arguments ) {
+    src/wp-includes/class-wp-xmlrpc-server.php:163: public function __call( $name, $arguments ) {
+    src/wp-includes/class-oembed.php:181:   public function __call( $name, $arguments ) {
+    src/wp-includes/user.php:1092:  public function __call( $name, $arguments ) {
+    src/wp-includes/query.php:4019: public function __call( $name, $arguments ) {
+    src/wp-includes/pluggable-deprecated.php:184:public function __call( $name, $arguments ) {
+    src/wp-admin/includes/class-wp-list-table.php:218:  public function __call( $name, $arguments ) {
+
+  2. 
+

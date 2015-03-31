@@ -56,6 +56,8 @@ static uint op_execution_count = 0;
 
 static uint first_thread_id;
 
+static zend_op entry_op;
+
 #define CONTEXT_ENTRY 0xffffffffU
 
 extern cfg_files_t cfg_files;
@@ -64,7 +66,15 @@ extern cfg_t *app_cfg;
 void initialize_interp_context()
 {
   memset(shadow_stack, 0, sizeof(shadow_frame_t));
-  shadow_frame = shadow_stack;
+  shadow_frame = (shadow_stack + 1);
+  // fake node for entry point
+  memset(&entry_op, 0, sizeof(zend_op));
+  entry_op.opcode = ENTRY_POINT_OPCODE;
+  entry_op.extended_value = ENTRY_POINT_EXTENDED_VALUE;
+  shadow_frame->opcodes = &entry_op;
+  shadow_frame->cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
+  routine_cfg_assign_opcode(shadow_frame->cfm.cfg, ENTRY_POINT_OPCODE,
+                            ENTRY_POINT_EXTENDED_VALUE, 0);
 
   memset(exception_stack, 0, 2 * sizeof(exception_frame_t));
   exception_frame = exception_stack + 1;
@@ -77,6 +87,13 @@ void initialize_interp_context()
   first_thread_id = pthread_self();
 
   current_session.user_level = USER_LEVEL_BOTTOM;
+}
+
+static void reset_shadow_stack()
+{
+  if (shadow_frame > shadow_stack)
+    SPOT("Resetting shadow stack at frame %d\n", (int)(shadow_frame - shadow_stack));
+  shadow_frame = shadow_stack;
 }
 
 static void push_exception_frame()
@@ -150,6 +167,11 @@ static bool shadow_stack_contains_frame(zend_execute_data *execute_data, zend_op
   return false;
 }
 
+#define IS_TOP_FRAME(ex) \
+  (VM_FRAME_KIND((ex)->frame_info) == VM_FRAME_TOP_CODE || \
+   VM_FRAME_KIND((ex)->frame_info) == VM_FRAME_TOP_FUNCTION)
+
+
 static bool update_shadow_stack(const zend_op *op) // true if the stack pointer changed
 {
   control_flow_metadata_t to_cfm;
@@ -179,6 +201,9 @@ static bool update_shadow_stack(const zend_op *op) // true if the stack pointer 
                (shadow_frame->execute_data != execute_data ||
                 op_array->opcodes != shadow_frame->opcodes));
 
+      //SPOT("<0x%x> Return %s -> %s (%d)\n", getpid(), shadow_prev->cfm.routine_name,
+      //     shadow_frame->cfm.routine_name, (int)(shadow_frame - shadow_stack));
+
       if (shadow_frame == shadow_stack) {
         ERROR("Shadow stack unwound %d frames and "
               "hit bottom looking for execute_data "PX"\n",
@@ -190,9 +215,14 @@ static bool update_shadow_stack(const zend_op *op) // true if the stack pointer 
             to_cfm.routine_name, p2int(execute_data),
             p2int(shadow_frame->opcodes), p2int(to_cfm.cfg));
       return true;
+    } else if (IS_TOP_FRAME(execute_data)) {
+      SPOT("Recycle frame %d for %s | %s\n", (int)(shadow_frame - shadow_stack),
+           shadow_frame->cfm.routine_name,
+           op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
+      DECREMENT_STACK(shadow_stack, shadow_frame);
     } else {
-      WARN("Invalid return: shadow stack does not contain execute_data "PX". "
-           "Calling instead\n", p2int(execute_data));
+      SPOT("<0x%x> Invalid return: shadow stack does not contain execute_data "PX". "
+           "Calling instead\n", getpid(), p2int(execute_data));
     }
   }
 
@@ -247,8 +277,10 @@ static bool update_shadow_stack(const zend_op *op) // true if the stack pointer 
       to_cfm = *monitored_cfm;
   }
 
-  if (shadow_frame > shadow_stack && to_cfm.cfg != NULL &&
-      zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) == NULL) { // skip builtins
+  // TODO: skip builtins like
+  //   op->op2.zv != NULL &&
+  //   zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) == NULL
+  if (to_cfm.cfg != NULL) {
     zend_op *op = &shadow_frame->opcodes[shadow_frame->last_index];
     compiled_edge_target_t compiled_target = get_compiled_edge_target(op, shadow_frame->last_index);
 
@@ -256,6 +288,13 @@ static bool update_shadow_stack(const zend_op *op) // true if the stack pointer 
       if (compiled_target.type != COMPILED_EDGE_CALL && op->opcode != ZEND_NEW)
         WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n",
              compiled_target.type, op->opcode);
+      if (shadow_frame == (shadow_stack + 1)) {
+        if (shadow_frame->cfm.cfg->routine_hash != ENTRY_POINT_HASH)
+          ERROR("Incorrect hash for fake routine entry node: 0x%x\n",
+                shadow_frame->cfm.cfg->routine_hash);
+
+        SPOT("Entry edge to %s (0x%x)\n", to_cfm.routine_name, to_cfm.cfg->routine_hash);
+      }
 
       generate_routine_edge(&shadow_frame->cfm, shadow_frame->last_index,
                             to_cfm.cfg, 0); // 0 means entry, even if that opcode is not executable
@@ -264,6 +303,9 @@ static bool update_shadow_stack(const zend_op *op) // true if the stack pointer 
     }
   }
 
+  //SPOT("<0x%x> Call %s -> %s (%d)\n", getpid(), shadow_frame->cfm.routine_name, to_cfm.routine_name,
+  //     (int)(shadow_frame - shadow_stack) + 1);
+
   INCREMENT_STACK(shadow_stack, shadow_frame);
 
   PRINT("<session> <%d|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
@@ -271,12 +313,10 @@ static bool update_shadow_stack(const zend_op *op) // true if the stack pointer 
         to_cfm.routine_name, p2int(execute_data),
         p2int(op_array->opcodes), p2int(to_cfm.cfg));
 
-  {
-    shadow_frame->execute_data = execute_data;
-    shadow_frame->opcodes = op_array->opcodes;
-    shadow_frame->last_index = CONTEXT_ENTRY;
-    shadow_frame->cfm = to_cfm;
-  }
+  shadow_frame->execute_data = execute_data;
+  shadow_frame->opcodes = op_array->opcodes;
+  shadow_frame->last_index = CONTEXT_ENTRY;
+  shadow_frame->cfm = to_cfm;
 
   return true;
 }
@@ -377,9 +417,10 @@ void opcode_executing(const zend_op *op)
   stack_pointer_moved = update_shadow_stack(op);
 
   // todo: check remaining state/opcode mismatches
-  if (op->opcode == ZEND_RETURN)
+  if (op->opcode == ZEND_RETURN) {
+    //SPOT("Preparing return from %s\n", shadow_frame->cfm.routine_name);
     stack_event.state = STACK_STATE_RETURNING;
-  else if (stack_event.state == STACK_STATE_UNWINDING && op->opcode != ZEND_FAST_RET &&
+  } else if (stack_event.state == STACK_STATE_UNWINDING && op->opcode != ZEND_FAST_RET &&
            op->opcode != ZEND_CATCH) {
     //exception_frame->suspended = true;
     stack_event.state = STACK_STATE_NONE;

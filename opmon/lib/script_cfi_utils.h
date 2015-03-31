@@ -47,7 +47,9 @@ do { \
 
 #define EVAL_PATH "<eval>"
 #define EVAL_FUNCTION_NAME "<eval>"
-#define EVAL_HASH 0x00000000U
+#define ENTRY_POINT_HASH 1
+#define ENTRY_POINT_OPCODE ZEND_DO_FCALL
+#define ENTRY_POINT_EXTENDED_VALUE 0xff
 #define USER_SESSION_KEY "__opmon_user_session"
 
 #define UNKNOWN_CONTEXT_ID 0xffffffffU

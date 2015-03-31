@@ -38,7 +38,7 @@ typedef struct _cfg_routine_edge_t {
 } cfg_routine_edge_t;
 
 typedef struct _cfg_t {
-  scarray_t routines; // routine_cfg_t *
+  scarray_t routines; // routine_cfg_t * // TODO: shouldn't I be a hashtable?
 } cfg_t;
 
 static inline bool
