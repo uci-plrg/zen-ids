@@ -1,0 +1,36 @@
+#!/bin/bash
+
+function usage() {
+  echo -n "select-run [ -d <target: directory> | -l <target: log> ] "
+  echo "<index> [ <grep-token> ]"
+}
+
+while getopts ":dl" option
+do
+  case $option in
+    d) directory=true;;
+    l) log=true;;
+    *) usage && exit;;
+  esac
+done
+
+shift $(( $OPTIND - 1 ))
+
+index=$1
+filter=$2
+
+run_catalog=$PHP_DATASET_DIR/runs.tab
+
+if [ -z "$filter" ]
+then
+  file=$(tail -$index $run_catalog | head -1)
+else
+  file=$(egrep "$filter" $run_catalog | tail -$index | head -1)
+fi
+
+[ -z "$file" ] && exit
+
+[ ! -z "$directory" ] && echo $(dirname "$file") && exit
+[ ! -z "$log" ] && echo "$file" && exit
+echo "Error: please choose an option [ -d  | -l ]"
+

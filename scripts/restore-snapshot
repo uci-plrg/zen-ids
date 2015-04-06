@@ -1,0 +1,47 @@
+#!/bin/bash
+
+function usage() {
+  echo "Usage: restore-snapshot -s <src> -d <db-name> -w <web-path>"
+}
+
+function ping_database() {
+  mysql -u root -e "use $1" 2> /dev/null
+  [ $? -eq 0 ] && echo "ok"
+}
+
+while getopts "d:w:s:" option
+do
+  case $option in
+    d) db=$OPTARG;;
+    s) src=$OPTARG;;
+    w) web=$OPTARG;;
+  esac
+done
+
+[ -z "$src" ] || [ -z "$db" ] || [ -z "$web" ] && usage && exit
+[ ! -e "$src" ] && echo "Cannot find source directory \"$src\". Exiting now." && exit
+[ ! -e "$web" ] && echo "Cannot find web directory \"$web\". Exiting now." && exit
+[ -z "$(ping_database $db)" ] && echo "No such database \"$db\". Exiting now." && exit
+
+site_files="$src/site-files.tar.gz"
+db_data="$src/$db.sql"
+
+[ ! -e "$site_files" ] && echo "Cannot find website tarball \"$site_files\". Exiting now." && exit
+[ ! -e "$db_data" ] && echo "Cannot find db data \"$db_data\". Exiting now." && exit
+
+while (true)
+do
+  read -d $'\n' -p "Restoring site $src to web path $web and db $db. Continue? [Y/n] " ok
+  if [ -z "$ok" ]
+  then
+    break
+  else
+    case $ok in
+      [yY]) break;;
+      [nN]) echo "aborted"; exit;;
+      *) echo "What's that?";;
+    esac
+  fi
+done
+
+echo "Restoring..."

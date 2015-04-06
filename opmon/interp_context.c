@@ -328,7 +328,8 @@ static void update_user_session()
     zval *session_zval = php_get_session_var(key);
     if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
       current_session.user_level = USER_LEVEL_BOTTOM;
-      PRINT("<session> Session has no user level for key %s during update on pid 0x%x--assigning level -1\n", key->val, getpid());
+      PRINT("<session> Session has no user level for key %s during update on pid 0x%x"
+            "--assigning level -1\n", key->val, getpid());
     } else {
       PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
       current_session.user_level = (uint) Z_LVAL_P(session_zval);
@@ -538,7 +539,8 @@ void opcode_executing(const zend_op *op)
                   shadow_frame->last_index, executing_node.index);
           } else if (//executing_node.index != get_next_executable_index(0) ||
               shadow_frame->opcodes[shadow_frame->last_index].opcode != ZEND_RETURN) { // slightly weak
-            compiled_edge_target_t compiled_target = get_compiled_edge_target(from_op, shadow_frame->last_index);
+            compiled_edge_target_t compiled_target;
+            compiled_target = get_compiled_edge_target(from_op, shadow_frame->last_index);
             if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
               WARN("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
                    compiled_target.type, op->opcode);

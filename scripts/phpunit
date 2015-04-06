@@ -1,0 +1,3 @@
+#!/bin/bash
+
+monitor-php /hd/script-safe/php/scripts/phpunit.phar $@

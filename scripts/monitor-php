@@ -1,0 +1,65 @@
+#!/bin/bash
+
+[ -z "$PHP_HOME" ] && \
+  echo "This script requires the environment variable PHP_HOME." \
+       "Exiting now." && \
+  exit
+
+[ -z "$PHP_DATASET_DIR" ] && \
+  echo "This script requires the environment variable PHP_DATASET_DIR." \
+       "Exiting now." && \
+  exit
+
+while getopts "a:d" option
+do
+  case $option in
+    a) php_options="$php_options -l"; 
+       export OPMON_STATIC_ANALYSIS=$OPTARG;;
+    d) debug=true;;
+  esac
+done
+
+shift $(( $OPTIND - 1 ))
+
+script=$1
+shift
+
+if [ ! -z "$debug" ]
+then
+  gdb --args $PHP_HOME/bin/php $php_options $script $@
+  exit
+fi
+
+rundir=$PHP_DATASET_DIR/runs
+mkdir -p $rundir
+
+logdir=$PHP_HOME/logs
+mkdir -p $logdir
+log=$(mktemp $logdir/monitor-XXXXX.log)
+
+echo "Logging to intermediate file $log"
+
+[ ! -f "$script" ] && echo "Script '$script' does not exist! Exiting now." && exit
+
+echo "Monitor PHP on script ["$(basename "$script")"]" > $log
+$PHP_HOME/bin/php $php_options $script $@ &>> $log
+
+if [ -z "$OPMON_STATIC_ANALYSIS" ]
+then
+  script_basename=$(basename $script)
+  script_basename=${script_basename%.*}
+  run_output_dir=$rundir/$script_basename
+  run_data_dir=$(ls -td $run_output_dir/* 2> /dev/null | head -1)
+else
+  script_basename=$(echo $script | sed "s/\//_/g")
+  script_basename=${script_basename%.*}
+  run_data_dir=$rundir/$OPMON_STATIC_ANALYSIS
+fi
+run_log="$run_data_dir/$script_basename.log"
+
+mv $log $run_log
+echo "    Output: $run_log"
+
+run_catalog=$PHP_DATASET_DIR/runs.tab
+echo "$run_log" >> $run_catalog
+

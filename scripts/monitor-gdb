@@ -1,0 +1,12 @@
+#!/bin/bash
+
+while getopts "l" option
+do
+  case $option in
+    l) local=true;;
+  esac
+done
+
+[ -z "$local" ] && cd $PHP_HOME
+
+gdb $PHP_HOME/bin/php

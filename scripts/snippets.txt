@@ -1,0 +1,13 @@
+grep "<session>" /var/log/apache2/error.log | grep -v "No user session" | sed "s/Routine call.*$//" | uniq -c
+
+s-merge -w temp/analysis-watchlist.tab -o temp/analysis.set -l runs/wordpress_analysis/ -r sets/wordpress_analysis.set &> temp/analysis-watch.log
+
+rm wordpress_analysis.log; for f in $(find src -name "*.php"); do sphp -a wordpress_analysis $f >> wordpress_analysis.log; done;
+
+grep -h "Unresolved" /hd/script-safe/datasets/runs/wordpress_analysis/*.log | cut -d ' ' -f 8- | less
+
+grep -h "Unresolved.*op 0x70" runs/wordpress_analysis/*.log | cut -d ' ' -f 14 > temp/init-mcall.tab
+grep -h "Unresolved" runs/wordpress_analysis/*.log | cut -d ' ' -f 8- | awk -F'[()]' '{print $2}' | sort | uniq -c | sort -n > temp/wordpress.unresolved.log
+
+out=data/init-mcall.source.log; for line in $(cat data/init-mcall.tab); do echo $line >> $out; ln=$(echo $line | cut -d ':' -f 2); src=$(echo $line | cut -d ':' -f 1); sed -n "$ln p" src/$src >> $out; echo "" >> $out; done;
+
