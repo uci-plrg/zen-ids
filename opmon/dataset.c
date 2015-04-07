@@ -139,7 +139,6 @@ void dataset_match_eval(control_flow_metadata_t *cfm)
 {
   uint i;
   dataset_routine_t *routine;
-  bool match;
 
   if (dataset_mapping == 0)
     return;
@@ -186,6 +185,7 @@ void dataset_routine_verify_opcode(dataset_routine_t *dataset, uint index,
 bool dataset_verify_opcode_edge(dataset_routine_t *dataset, uint from_index,
                                 uint to_index)
 {
+  return true;
 }
 
 bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,

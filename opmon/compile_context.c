@@ -225,7 +225,7 @@ void function_compiled(zend_op_array *op_array)
     cfg_opcode_t *cfg_opcode;
     bool recompile = false;
     //cfg_opcode_edge_t *cfg_edge; // skipping edges for now
-    compiled_edge_target_t target;
+    //compiled_edge_target_t target;
     for (i = 0; i < op_array->last; i++) {
       op = &op_array->opcodes[i];
       if (zend_get_opcode_name(op->opcode) == NULL)
@@ -277,7 +277,7 @@ void function_compiled(zend_op_array *op_array)
   for (i = 0; i < op_array->last; i++) {
     compiled_edge_target_t target;
     zend_op *op = &op_array->opcodes[i];
-    cfg_node_t from_node = { op->opcode, i };
+    //cfg_node_t from_node = { op->opcode, i };
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
 

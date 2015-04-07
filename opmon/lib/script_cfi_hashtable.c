@@ -22,7 +22,7 @@ sctable_insert(sctable_t *t, sctable_entry_t *e)
 static void
 sctable_resize(sctable_t *t)
 {
-    sctable_entry_t *e, *prev_e, *next_e;
+    sctable_entry_t *e, *next_e;
     sctable_entry_t **old_data = t->data;
     uint old_capacity = t->capacity;
     uint i;
@@ -31,7 +31,7 @@ sctable_resize(sctable_t *t)
     sctable_init(t);
 
     for (i = 0; i < old_capacity; i++) {
-        for (e = old_data[i], prev_e = NULL; e != NULL; e = next_e) {
+        for (e = old_data[i]; e != NULL; e = next_e) {
             next_e = e->next;
             sctable_insert(t, e);
         }

@@ -6,6 +6,7 @@
 
 #include "lib/script_cfi_utils.h"
 #include "event_handler.h"
+#include "dataset.h"
 #include "cfg_handler.h"
 
 static cfg_files_t cfg_files;
@@ -73,7 +74,6 @@ static void open_output_files_in_dir(char *cfg_file_path, const char *mode)
 static void open_output_files(const char *script_path)
 {
   char cfg_file_path[256] = {0}, run_id[24] = {0};
-  char *cfg_file_truncate;
   struct stat dirinfo;
   time_t timestamp;
   struct tm *calendar;
@@ -197,7 +197,6 @@ void worker_startup()
 {
   char cfg_file_path[256] = {0}, session_id[24] = {0};
   struct stat dirinfo;
-  FILE *session_dir;
 
   strcpy(cfg_file_path, session_file_path);
   if (stat(cfg_file_path, &dirinfo) != 0) {

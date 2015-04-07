@@ -117,7 +117,7 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 uint hash_string(const char *string);
 uint hash_addr(void *addr);
 void opmon_activate_printer();
-void opmon_setup_base_path(char *path, const char *category, const char *app_path);
+void setup_base_path(char *path, const char *category, const char *app_path);
 
 bool is_php_session_active();
 // unused

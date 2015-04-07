@@ -5,6 +5,7 @@
 #include "cfg.h"
 
 void initialize_interp_context();
+void load_entry_point_dataset();
 void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm);
 void pop_interp_context();
 void opcode_executing(const zend_op *op);

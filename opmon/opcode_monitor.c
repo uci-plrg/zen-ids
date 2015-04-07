@@ -4,16 +4,15 @@
 #include "php.h"
 #include "zend_types.h"
 #include "event_handler.h"
+#include "interp_context.h"
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_hashtable.h"
 #include "lib/script_cfi_utils.h"
 
 #define EC(f) opcode_monitor_globals.execution_context.f
 
-static uint pid;
-
 PHP_INI_BEGIN()
-  STD_PHP_INI_ENTRY("opmon_dataset_dir", ".", PHP_INI_PERDIR, OnUpdateString, 
+  STD_PHP_INI_ENTRY("opmon_dataset_dir", ".", PHP_INI_PERDIR, OnUpdateString,
                     dataset_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_verbose", ".", PHP_INI_PERDIR, OnUpdateLong,
                     verbose, zend_opcode_monitor_globals, opcode_monitor_globals)
@@ -48,8 +47,8 @@ PHP_FUNCTION(set_user_level)
   } else {
     ERROR("<session> User level assigned with no active PHP session!\n");
   }
-  
-  PRINT("<session> ScriptCFI receives a call to set_user_level to %ld on blog %ld on pid 0x%x\n", 
+
+  PRINT("<session> ScriptCFI receives a call to set_user_level to %ld on blog %ld on pid 0x%x\n",
        user_level, blog_id, getpid());
 }
 
@@ -65,7 +64,7 @@ static zend_function_entry php_opcode_monitor_functions[] = {
 
 zend_module_entry opcode_monitor_module_entry = {
   STANDARD_MODULE_HEADER,        /* 6 members */
-  PHP_OPCODE_MONITOR_EXTNAME,    
+  PHP_OPCODE_MONITOR_EXTNAME,
   php_opcode_monitor_functions,
   PHP_MINIT(opcode_monitor),     /* module startup */
   PHP_MSHUTDOWN(opcode_monitor), /* module shutdown */
@@ -89,23 +88,27 @@ static zend_opcode_monitor_t monitor_functions;
 PHP_MINIT_FUNCTION(opcode_monitor)
 {
   REGISTER_INI_ENTRIES();
-  
+
   //PRINT("INI example: dataset dir is %s\n", INI_STR("opmon_dataset_dir"));
   //PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
-  
+
   if (strlen(OPMON_G(dataset_dir)) > 200)
     ERROR("dataset dirname is too long. Please rebuild with a larger buffer.\n");
 
   init_event_handler(&monitor_functions);
   register_opcode_monitor(&monitor_functions);
   initialize_interp_context();
+
+  return SUCCESS;
 }
 
 PHP_MSHUTDOWN_FUNCTION(opcode_monitor)
 {
   UNREGISTER_INI_ENTRIES();
-  
+
   destroy_event_handler();
+
+  return SUCCESS;
 }
 
 PHP_MINFO_FUNCTION(opcode_monitor)

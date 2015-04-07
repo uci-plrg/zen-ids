@@ -39,14 +39,13 @@ static void expand(scarray_t *a)
 {
   uint level1_index = (a->capacity >> LEVEL1_SHIFT) & LEVEL_MASK;
   uint level2_index = (a->capacity >> LEVEL2_SHIFT) & LEVEL_MASK;
-  uint level3_index = (a->capacity >> LEVEL3_SHIFT) & LEVEL_MASK;
   scarray_data_t *level1 = &a->data[level1_index];
-  
+
   if (a->capacity >= MAX_CAPACITY) {
     PRINT("Error: maximum indexing capacity 0x%x exceeded!\n", MAX_CAPACITY);
     return;
   }
-    
+
   if (level2_index >= level1->item_count) {
     scarray_data_t *new_level_2 = malloc(sizeof(scarray_data_t));
     memset(new_level_2, 0, sizeof(scarray_data_t));
@@ -57,7 +56,7 @@ static void expand(scarray_t *a)
     scarray_data_t *level2 = (scarray_data_t *)level1->blocks[level2_index];
     expand_level2(level2);
   }
-  
+
   a->capacity += BLOCK_SIZE;
 }
 
@@ -87,7 +86,7 @@ void scarray_destroy(scarray_t *a)
 {
   uint i, j, k, l;
   uint level1_count = a->capacity >> 0x18;
-  
+
   for (i = 0; i < level1_count; i++) {
     scarray_data_t *level1 = &a->data[i];
     for (j = 0; j < level1->item_count; j++) {
@@ -119,7 +118,7 @@ void *scarray_get(scarray_t *a, uint index)
     fprintf(stderr, "Error: scarray_t.get() index out of bounds!\n");
     return NULL;
   }
-  
+
   return get_block(a, index)->blocks[index & LEVEL_MASK];
 }
 
@@ -127,13 +126,13 @@ void scarray_unit_test()
 {
   uint i, j;
   char *buffer;
-  
+
   PRINT("Script-CFI array test starting...\n");
-  
+
   scarray_t a;
-  
+
   scarray_init(&a);
-  
+
   for (j = 0; j < 0x100; j++) {
     for (i = 0; i < 0x100; i++) {
       buffer = malloc(32);
@@ -146,12 +145,12 @@ void scarray_unit_test()
       scarray_append(&a, buffer);
     }
   }
-  
+
   for (i = 0x40; i < 0x10000; i++) {
     PRINT("Array has %s in position %d\n", (const char *) scarray_get(&a, i), i);
   }
-  
+
   scarray_destroy(&a);
-  
+
   PRINT("Script-CFI array test successful!\n");
 }

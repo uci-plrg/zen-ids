@@ -12,8 +12,6 @@ typedef struct _control_flow_metadata_t {
   dataset_routine_t *dataset;
 } control_flow_metadata_t;
 
-static control_flow_metadata_t null_cfm = { NULL, NULL };
-
 void init_metadata_handler();
 void destroy_metadata_handler();
 

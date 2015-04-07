@@ -86,7 +86,7 @@ zval *php_session_set_var(zend_string *key, zval *value)
   zval *cell;
 
   if (!IS_SESSION(PS(http_session_vars)))
-    return;
+    return NULL;
 
   HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
   cell = zend_hash_add_new(session_table, key, &EG(uninitialized_zval));

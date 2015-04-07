@@ -1,5 +1,9 @@
 #!/bin/bash
 
+function usage() {
+  echo "monitor-php [ -a <static-analysis-name> ] [ -d (debug) ]"
+}
+
 [ -z "$PHP_HOME" ] && \
   echo "This script requires the environment variable PHP_HOME." \
        "Exiting now." && \
@@ -9,6 +13,8 @@
   echo "This script requires the environment variable PHP_DATASET_DIR." \
        "Exiting now." && \
   exit
+
+[ "$1" == "--help" ] && usage && exit
 
 while getopts "a:d" option
 do
