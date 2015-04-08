@@ -174,6 +174,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   control_flow_metadata_t to_cfm;
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
+  uint64 activated_frame_hash = hash_addrs(execute_data, op_array->opcodes);
   stack_frame_t *activated_frame;
 
   if (op_array == NULL || op_array->opcodes == NULL)
@@ -189,11 +190,17 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     return false; // nothing to do
   }
 
-  activated_frame = sctable_lookup(&frame_table, hash_addr(execute_data));
+  activated_frame = sctable_lookup(&frame_table, activated_frame_hash);
   if (activated_frame != NULL) {
-    sctable_remove(&frame_table, hash_addr(live_frame->execute_data));
+    sctable_remove(&frame_table, hash_addrs(live_frame->execute_data, live_frame->opcodes));
     free(live_frame);
     live_frame = activated_frame;
+
+    SPOT("<session> <%d|0x%x> Routine return to %s with opcodes at "PX"|"PX" and cfg "PX".\n",
+          current_session.user_level, getpid(),
+          live_frame->cfm.routine_name, p2int(execute_data),
+          p2int(op_array->opcodes), p2int(to_cfm.cfg));
+
     return true;
   }
 
@@ -272,7 +279,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   //SPOT("<0x%x> Call %s -> %s (%d)\n", getpid(), live_frame->cfm.routine_name, to_cfm.routine_name,
   //     (int)(live_frame - shadow_stack) + 1);
 
-  PRINT("<session> <%d|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+  SPOT("<session> <%d|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
         current_session.user_level, getpid(),
         to_cfm.routine_name, p2int(execute_data),
         p2int(op_array->opcodes), p2int(to_cfm.cfg));
@@ -282,7 +289,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   live_frame->opcodes = op_array->opcodes;
   live_frame->last_index = CONTEXT_ENTRY;
   live_frame->cfm = to_cfm;
-  sctable_add_or_replace(&frame_table, hash_addr(execute_data), live_frame);
+  sctable_add_or_replace(&frame_table, activated_frame_hash, live_frame);
 
   return true;
 }

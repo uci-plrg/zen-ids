@@ -26,10 +26,12 @@ uint hash_string(const char *string)
   return hash;
 }
 
-uint hash_addr(void *addr)
+uint64 hash_addrs(void *first, void *second)
 {
-  uint64 addr_bits = p2int(addr);
-  uint hash = ((uint)(addr_bits >> 0x20)) ^ ((uint)(addr_bits & 0xffffffffU));
+  uint64 first_bits = p2int(first);
+  uint64 second_bits = p2int(second);
+  second_bits = (second_bits << 0x20) & (second_bits >> 0x20);
+  uint64 hash = (first_bits ^ second_bits);
   return hash;
 }
 

@@ -115,7 +115,7 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 #endif
 
 uint hash_string(const char *string);
-uint hash_addr(void *addr);
+uint64 hash_addrs(void *first, void *second);
 void opmon_activate_printer();
 void setup_base_path(char *path, const char *category, const char *app_path);
 
@@ -123,6 +123,11 @@ bool is_php_session_active();
 // unused
 zval *php_session_lookup_var(zend_string *key);
 zval *php_session_set_var(zend_string *key, zval *value);
+
+static inline uint64 hash_addr(void *addr)
+{
+  return p2int(addr);
+}
 
 static inline uint hash_routine(const char *routine_name)
 {

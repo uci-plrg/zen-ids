@@ -1,7 +1,8 @@
 #include "script_cfi_hashtable.h"
 
-#define HASH_TAG_BITS (sizeof(uint))
-#define UINT_0 ((uint) 0U)
+#define KEY_TYPE uint64
+#define HASH_TAG_BITS ((sizeof(KEY_TYPE)) * 8)
+#define UINT_0 ((KEY_TYPE) 0U)
 
 #define HASH_FUNC(key, table) key & table->hash_mask
 #define HASH_MASK(num_bits) ((~UINT_0) >> (HASH_TAG_BITS-(num_bits)))
@@ -41,7 +42,7 @@ sctable_resize(sctable_t *t)
 }
 
 static sctable_entry_t *
-sctable_lookup_entry(sctable_t *t, uint key)
+sctable_lookup_entry(sctable_t *t, KEY_TYPE key)
 {
     sctable_entry_t *e;
     uint hindex = HASH_FUNC(key, t);
@@ -67,7 +68,7 @@ sctable_init(sctable_t *t)
 }
 
 void *
-sctable_lookup(sctable_t *t, uint key)
+sctable_lookup(sctable_t *t, KEY_TYPE key)
 {
     sctable_entry_t *e;
     uint hindex = HASH_FUNC(key, t);
@@ -79,7 +80,7 @@ sctable_lookup(sctable_t *t, uint key)
 }
 
 void
-sctable_add(sctable_t *t, uint key, void *value)
+sctable_add(sctable_t *t, KEY_TYPE key, void *value)
 {
   sctable_entry_t *e = TABLE_ALLOC(sizeof(sctable_entry_t));
   e->key = key;
@@ -90,7 +91,7 @@ sctable_add(sctable_t *t, uint key, void *value)
 }
 
 void
-sctable_add_or_replace(sctable_t *t, uint key, void *value)
+sctable_add_or_replace(sctable_t *t, KEY_TYPE key, void *value)
 {
   sctable_entry_t *e = sctable_lookup_entry(t, key);
   if (e != NULL)
@@ -100,7 +101,7 @@ sctable_add_or_replace(sctable_t *t, uint key, void *value)
 }
 
 void
-sctable_remove(sctable_t *t, uint key)
+sctable_remove(sctable_t *t, KEY_TYPE key)
 {
     sctable_entry_t *e, *prev_e = NULL;
     uint hindex = HASH_FUNC(key, t);
@@ -122,3 +123,5 @@ sctable_destroy(sctable_t *t)
 {
   TABLE_FREE(t->data);
 }
+
+#undef KEY_TYPE

@@ -2,9 +2,12 @@
 #define _SCRIPT_CFI_HASHTABLE_H_ 1
 
 #include "php.h"
+#include "script_cfi_utils.h"
+
+#define KEY_TYPE uint64
 
 typedef struct _sctable_entry_t {
-  uint key;
+  KEY_TYPE key;
   void *payload;
   struct _sctable_entry_t *next;
 } sctable_entry_t;
@@ -25,18 +28,20 @@ void
 sctable_init(sctable_t *t);
 
 void *
-sctable_lookup(sctable_t *t, uint key);
+sctable_lookup(sctable_t *t, KEY_TYPE key);
 
 void
-sctable_add(sctable_t *t, uint key, void *value);
+sctable_add(sctable_t *t, KEY_TYPE key, void *value);
 
 void
-sctable_add_or_replace(sctable_t *t, uint key, void *value);
+sctable_add_or_replace(sctable_t *t, KEY_TYPE key, void *value);
 
 void
-sctable_remove(sctable_t *t, uint key);
+sctable_remove(sctable_t *t, KEY_TYPE key);
 
 void
 sctable_destroy(sctable_t *t);
+
+#undef KEY_TYPE
 
 #endif
