@@ -68,9 +68,9 @@ static void init_top_level_script(const char *script_path)
   load_entry_point_dataset();
 }
 
-static void init_server()
+static void init_worker()
 {
-  server_startup();
+  worker_startup();
   load_entry_point_dataset();
 }
 
@@ -107,12 +107,12 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
-  monitor->notify_worker_startup = worker_startup;
+  monitor->notify_worker_startup = init_worker;
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
 
   if (strcmp(EG(sapi_type), "apache2handler") == 0)
-    init_server();
+    server_startup();
 }
 
 void destroy_event_handler()

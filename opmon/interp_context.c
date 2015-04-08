@@ -61,7 +61,7 @@ static user_session_t current_session;
 
 static uint op_execution_count = 0;
 
-static uint first_thread_id;
+static pthread_t first_thread_id;
 
 static zend_op entry_op;
 
@@ -103,6 +103,8 @@ void initialize_interp_context()
 void load_entry_point_dataset()
 {
   base_frame.cfm.dataset = dataset_routine_lookup(ENTRY_POINT_HASH);
+  if (base_frame.cfm.dataset == NULL)
+    write_node(ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame.cfm.cfg, 0), 0);
 }
 
 static void push_exception_frame()
@@ -362,8 +364,11 @@ void opcode_executing(const zend_op *op)
   if ((op_execution_count & FLUSH_MASK) == 0)
     flush_all_outputs();
 
-  if (pthread_self() != first_thread_id)
-    ERROR("Multiple threads are not supported!\n");
+  if (pthread_self() != first_thread_id) {
+    ERROR("Multiple threads are not supported (started on 0x%x, current is 0x%x)\n",
+          (uint) first_thread_id, (uint) pthread_self());
+    exit(1);
+  }
 
   if (op->opcode == ZEND_HANDLE_EXCEPTION) {
     PRINT("@ Processing ZEND_HANDLE_EXCEPTION in stack state %u of "PX"|"PX"\n",

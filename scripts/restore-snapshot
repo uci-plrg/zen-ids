@@ -1,47 +1,81 @@
 #!/bin/bash
 
 function usage() {
-  echo "Usage: restore-snapshot -s <src> -d <db-name> -w <web-path>"
+  echo "Usage: restore-snapshot -s <src> -d <db-name> -w <web-path> [ -x dry ] [ -v verbose ]"
 }
 
-function ping_database() {
-  mysql -u root -e "use $1" 2> /dev/null
-  [ $? -eq 0 ] && echo "ok"
+function database_exists() {
+  db="$1"
+  mysql -u root -e "use $db" 2> /dev/null
+  [ $? -eq 0 ] && echo "exists"
 }
 
-while getopts "d:w:s:" option
+function require_apache_stopped() {
+  status=$(service apache2 status | grep -v "apache2 is not running$")
+  [ ! -z "$status" ] && echo "Cannot restore a website with apache status \"$status\"" && exit
+}
+
+function report() {
+  [ ! -z "$verbose" ] && echo "$1"
+}
+
+function execute() {
+  cmd="$1"
+  [ ! -z "$verbose" ] && echo "$cmd"
+  [ -z "$dry_run" ] && eval "$cmd"
+}
+  
+###############################
+
+while getopts "d:w:s:xv" option
 do
   case $option in
     d) db=$OPTARG;;
     s) src=$OPTARG;;
     w) web=$OPTARG;;
+    x) verbose=true; dry_run=true;;
+    v) verbose=true;
   esac
 done
 
+web_base=$(dirname $web)
+
 [ -z "$src" ] || [ -z "$db" ] || [ -z "$web" ] && usage && exit
 [ ! -e "$src" ] && echo "Cannot find source directory \"$src\". Exiting now." && exit
-[ ! -e "$web" ] && echo "Cannot find web directory \"$web\". Exiting now." && exit
-[ -z "$(ping_database $db)" ] && echo "No such database \"$db\". Exiting now." && exit
-
+[ ! -e "$web_base" ] && echo "Cannot find web directory \"$web_base\". Exiting now." && exit
+[ -z "$(which mysql)" ] && echo "Cannot find mysql. Exiting now." && exit
+require_apache_stopped
 site_files="$src/site-files.tar.gz"
 db_data="$src/$db.sql"
+config="$src/wp-config.php"
 
 [ ! -e "$site_files" ] && echo "Cannot find website tarball \"$site_files\". Exiting now." && exit
 [ ! -e "$db_data" ] && echo "Cannot find db data \"$db_data\". Exiting now." && exit
 
+echo -e "Restoring:\n\tsource:   $src\n\tweb path: $web\n\tdatabase: $db"
+
 while (true)
 do
-  read -d $'\n' -p "Restoring site $src to web path $web and db $db. Continue? [Y/n] " ok
+  read -d $'\n' -p "Continue? [Y/n] " ok
   if [ -z "$ok" ]
   then
     break
   else
     case $ok in
       [yY]) break;;
-      [nN]) echo "aborted"; exit;;
+      [nN]) echo "ok, exiting"; exit;;
       *) echo "What's that?";;
     esac
   fi
 done
 
-echo "Restoring..."
+echo "Restoring database..."
+[ ! -z "$(database_exists $db)" ] && execute "mysql -u root -e \"drop database $db;\""
+execute "mysql -u root -e \"create database $db;\""
+execute "mysql $db < $db_data"
+
+echo "Restoring website sources..."
+execute "cd $(dirname $web)"
+execute "rm -rf $(basename $web)"
+execute "tar -xzf $site_files"
+execute "cp $config $(basename $web)"
