@@ -196,7 +196,13 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     free(live_frame);
     live_frame = activated_frame;
 
-    SPOT("<session> <%d|0x%x> Routine return to %s with opcodes at "PX"|"PX" and cfg "PX".\n",
+    if (live_frame->execute_data != execute_data || live_frame->opcodes != op_array->opcodes) {
+      ERROR("Hash collision: "PX"|"PX" vs. "PX"|"PX"\n",
+            p2int(live_frame->execute_data), p2int(execute_data),
+            p2int(live_frame->opcodes), p2int(op_array->opcodes));
+    }
+
+    PRINT("<session> <%d|0x%x> Routine return to %s with opcodes at "PX"|"PX" and cfg "PX".\n",
           current_session.user_level, getpid(),
           live_frame->cfm.routine_name, p2int(execute_data),
           p2int(op_array->opcodes), p2int(to_cfm.cfg));
@@ -279,7 +285,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   //SPOT("<0x%x> Call %s -> %s (%d)\n", getpid(), live_frame->cfm.routine_name, to_cfm.routine_name,
   //     (int)(live_frame - shadow_stack) + 1);
 
-  SPOT("<session> <%d|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+  PRINT("<session> <%d|0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
         current_session.user_level, getpid(),
         to_cfm.routine_name, p2int(execute_data),
         p2int(op_array->opcodes), p2int(to_cfm.cfg));

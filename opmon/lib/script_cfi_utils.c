@@ -28,10 +28,11 @@ uint hash_string(const char *string)
 
 uint64 hash_addrs(void *first, void *second)
 {
+  uint64 hash;
   uint64 first_bits = p2int(first);
   uint64 second_bits = p2int(second);
-  second_bits = (second_bits << 0x20) & (second_bits >> 0x20);
-  uint64 hash = (first_bits ^ second_bits);
+  second_bits = (second_bits << 0x20) | (second_bits >> 0x20); // flip dwords for distribution
+  hash = (first_bits ^ second_bits);
   return hash;
 }
 
