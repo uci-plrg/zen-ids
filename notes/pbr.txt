@@ -1,0 +1,394 @@
+
+src/wp-includes/update.php
+
+535   if ( ( $core = current_user_can( 'update_core' ) ) && function_exists( 'get_core_updates' ) ) {
+536     $update_wordpress = get_core_updates( array('dismissed' => false) );
+537     if ( ! empty( $update_wordpress ) && ! in_array( $update_wordpress[0]->response, array('development', 'latest') ) && current_user_ca    n('update_core') )
+538       $counts['wordpress'] = 1;
+539   }
+540
+541   if ( ( $core || $plugins || $themes ) && wp_get_translation_updates() )
+542     $counts['translations'] = 1;
+
+
+src/wp-includes/functions.php
+
+2290   if ( function_exists( 'current_user_can' ) )
+2291     $unfiltered = $user ? user_can( $user, 'unfiltered_html' ) : current_user_can( 'unfiltered_html' );
+2292
+2293   if ( empty( $unfiltered ) )
+2294     unset( $t['htm|html'] );
+
+
+src/wp-includes/class-wp-xmlrpc-server.php
+
+3930     $is_admin = current_user_can('manage_options');
+3931
+3932     $struct = array(
+3933       'isAdmin'  => $is_admin,
+3934       'url'      => get_option('home') . '/',
+3935       'blogid'   => '1',
+3936       'blogName' => get_option('blogname'),
+3937       'xmlrpc'   => site_url( 'xmlrpc.php', 'rpc' ),
+3938     );
+3939
+3940     return array($struct);
+
+3456   public function _getOptions($options) {
+3457     $data = array();
+3458     $can_manage = current_user_can( 'manage_options' );
+3459     foreach ( $options as $option ) {
+3460       if ( array_key_exists( $option, $this->blog_options ) ) {
+3461         $data[$option] = $this->blog_options[$option];
+3462         //Is the value static or dynamic?
+3463         if ( isset( $data[$option]['option'] ) ) {
+3464           $data[$option]['value'] = get_option( $data[$option]['option'] );
+3465           unset($data[$option]['option']);
+3466         }
+3467
+3468         if ( ! $can_manage )
+3469           $data[$option]['readonly'] = true;
+3470       }
+3471     }
+3472
+3473     return $data;
+3474   }
+
+ 567       $is_admin = current_user_can( 'manage_options' );
+ 568
+ 569       $struct[] = array(
+ 570         'isAdmin'   => $is_admin,
+ 571         'url'     => home_url( '/' ),
+ 572         'blogid'    => (string) $blog_id,
+ 573         'blogName'    => get_option( 'blogname' ),
+ 574         'xmlrpc'    => site_url( 'xmlrpc.php', 'rpc' ),
+ 575       );
+ 576
+ 577       restore_current_blog();
+ 578     }
+ 579
+ 580     return $struct;
+
+
+src/wp-admin/menu.php
+
+148 $appearance_cap = current_user_can( 'switch_themes') ? 'switch_themes' : 'edit_theme_options';
+149
+150 $menu[60] = array( __( 'Appearance' ), $appearance_cap, 'themes.php', '', 'menu-top menu-icon-appearance', 'menu-appearance', 'dashicons    -admin-appearance' );
+151   $submenu['themes.php'][5] = array( __( 'Themes' ), $appearance_cap, 'themes.php' );
+152
+153   $customize_url = add_query_arg( 'return', urlencode( wp_unslash( $_SERVER['REQUEST_URI'] ) ), 'customize.php' );
+154   $submenu['themes.php'][6] = array( __( 'Customize' ), 'customize', esc_url( $customize_url ), '', 'hide-if-no-customize' );
+155
+156   if ( current_theme_supports( 'menus' ) || current_theme_supports( 'widgets' ) ) {
+157     $submenu['themes.php'][10] = array( __( 'Menus' ), 'edit_theme_options', 'nav-menus.php' );
+158   }
+159
+160   if ( current_theme_supports( 'custom-header' ) && current_user_can( 'customize') ) {
+161     $customize_header_url = add_query_arg( array( 'autofocus' => array( 'control' => 'header_image' ) ), $customize_url );
+162     $submenu['themes.php'][15] = array( __( 'Header' ), $appearance_cap, esc_url( $customize_header_url ), '', 'hide-if-no-customize' );
+163   }
+164
+165   if ( current_theme_supports( 'custom-background' ) && current_user_can( 'customize') ) {
+166     $customize_background_url = add_query_arg( array( 'autofocus' => array( 'control' => 'background_image' ) ), $customize_url );
+167     $submenu['themes.php'][20] = array( __( 'Background' ), $appearance_cap, esc_url( $customize_background_url ), '', 'hide-if-no-custo    mize' );
+168   }
+169
+170   unset( $customize_url );
+171
+172 unset( $appearance_cap );
+
+
+src/wp-admin/themes.php
+
+101 wp_localize_script( 'theme', '_wpThemeSettings', array(
+102   'themes'   => $themes,
+103   'settings' => array(
+104     'canInstall'    => ( ! is_multisite() && current_user_can( 'install_themes' ) ),
+105     'installURI'    => ( ! is_multisite() && current_user_can( 'install_themes' ) ) ? admin_url( 'theme-install.php' ) : null,
+106     'confirmDelete' => __( "Are you sure you want to delete this theme?\n\nClick 'Cancel' to go back, 'OK' to confirm the delete." ),
+107     'adminUrl'      => parse_url( admin_url(), PHP_URL_PATH ),
+108   ),
+109   'l10n' => array(
+110     'addNew' => __( 'Add New Theme' ),
+111     'search'  => __( 'Search Installed Themes' ),
+112     'searchPlaceholder' => __( 'Search installed themes...' ), // placeholder (no ellipsis)
+113     ),
+114 ) );
+
+257 <?php
+258 // List broken themes, if any.
+259 if ( ! is_multisite() && current_user_can('edit_themes') && $broken_themes = wp_get_themes( array( 'errors' => true ) ) ) {
+260 ?>
+261
+262 <div class="broken-themes"> ....
+
+
+src/wp-admin/includes/class-wp-ms-themes-list-table.php
+
+ 89     $maybe_update = current_user_can( 'update_themes' ) && ! $this->is_site_themes && $current = get_site_transient( 'update_themes' );
+ 90
+ 91     foreach ( (array) $themes['all'] as $key => $theme ) {
+ 92       if ( $this->is_site_themes && $theme->is_allowed( 'network' ) ) {
+ 93         unset( $themes['all'][ $key ] );
+ 94         continue;
+ 95       }
+ 96
+ 97       if ( $maybe_update && isset( $current->response[ $key ] ) ) {
+ 98         $themes['all'][ $key ]->update = true;
+ 99         $themes['upgrade'][ $key ] = $themes['all'][ $key ];
+100       }
+
+
+src/wp-admin/includes/meta-boxes.php
+
+  17   $can_publish = current_user_can($post_type_object->cap->publish_posts);
+  --> enables content blocks throughout generated html body
+
+ 410   $user_can_assign_terms = current_user_can( $taxonomy->cap->assign_terms );
+  --> enables content blocks throughout generated html body
+
+
+src/wp-admin/includes/media.php
+
+1559   $user_can_edit = current_user_can( 'edit_post', $attachment_id );
+...
+1641     $readonly      = ! $user_can_edit && ! empty( $field['taxonomy'] ) ? " readonly='readonly' " : '';
+...
+1660       $item .= "<input type='text' class='text' id='$id_attr' name='$name' value='" . esc_attr( $field['value'] ) . "' $readonly $aria_     required />";
+
+
+src/wp-admin/includes/bookmark.php
+
+295   $really_can_manage_links = current_user_can( 'manage_links' );
+296   remove_filter( 'pre_option_link_manager_enabled', '__return_true', 100 );
+297
+298   if ( $really_can_manage_links && current_user_can( 'install_plugins' ) ) {
+299     $link = network_admin_url( 'plugin-install.php?tab=search&amp;s=Link+Manager' );
+300     wp_die( sprintf( __( 'If you are looking to use the link manager, please install the <a href="%s">Link Manager</a> plugin.' ), $link     ) );
+301   }
+
+
+src/wp-admin/includes/template.php
+
+ 204   $args['disabled'] = ! current_user_can( $tax->cap->assign_terms );
+Later, in an html generator function:
+  94       disabled( empty( $args['disabled'] ), false, false ) . ' /> ' .
+
+ 294         <input id="in-<?php echo $id; ?>" type="checkbox" <?php echo $checked; ?> value="<?php echo (int) $term->term_id; ?>" <?php dis     abled( ! current_user_can( $tax->cap->assign_terms ) ); ?> />
+
+
+src/wp-admin/includes/revision.php
+
+163   $can_restore = current_user_can( 'edit_post', $post->ID );
+164   $current_id = false;
+165
+166   foreach ( $revisions as $revision ) {
+167     $modified = strtotime( $revision->post_modified );
+168     $modified_gmt = strtotime( $revision->post_modified_gmt );
+169     if ( $can_restore ) {
+170       $restore_link = str_replace( '&amp;', '&', wp_nonce_url(
+171         add_query_arg(
+172           array( 'revision' => $revision->ID,
+173             'action' => 'restore' ),
+174             admin_url( 'revision.php' )
+175         ),
+176         "restore-post_{$revision->ID}"
+177       ) );
+178     }
+...
+202     $revisions[ $revision->ID ] = array(
+203       'id'         => $revision->ID,
+204       'title'      => get_the_title( $post->ID ),
+205       'author'     => $authors[ $revision->post_author ],
+206       'date'       => date_i18n( __( 'M j, Y @ G:i' ), $modified ),
+207       'dateShort'  => date_i18n( _x( 'j M @ G:i', 'revision date short format' ), $modified ),
+208       'timeAgo'    => sprintf( __( '%s ago' ), human_time_diff( $modified_gmt, $now_gmt ) ),
+209       'autosave'   => $autosave,
+210       'current'    => $current,
+211       'restoreUrl' => $can_restore ? $restore_link : false,
+212     );
+
+
+src/wp-admin/includes/class-wp-posts-list-table.php
+
+ 588     $can_edit_post = current_user_can( 'edit_post', $post->ID );
+ ...
+ 623       <th scope="row" class="check-column">
+ 624         <?php
+ 625         if ( $can_edit_post ) {
+ 626
+ 627         ?>
+ 628         <label class="screen-reader-text" for="cb-select-<?php the_ID(); ?>"><?php printf( __( 'Select %s' ), $title ); ?></label>
+ 629         <input id="cb-select-<?php the_ID(); ?>" type="checkbox" name="post[]" value="<?php the_ID(); ?>" />
+ 630         <div class="locked-indicator"></div>
+ 631         <?php
+ 632         }
+ 633         ?>
+ 634       </th>
+ ... and so on
+
+ 972     $can_publish = current_user_can( $post_type_object->cap->publish_posts );
+....
+1047   if ( !$bulk && $can_publish ) :
+1048   ?>
+1049
+1050       <div class="inline-edit-group">
+1051         <label class="alignleft">
+1052           <span class="title"><?php _e( 'Password' ); ?></span>
+1053           <span class="input-text-wrap"><input type="text" name="post_password" class="inline-edit-password-input" value="" /></span>
+1054         </label>
+1055
+1056         <em style="margin:5px 10px 0 0" class="alignleft">
+1057           <?php
+1058           /* translators: Between password field and private checkbox on post quick edit interface */
+1059           echo __( '&ndash;OR&ndash;' );
+1060           ?>
+1061         </em>
+1062         <label class="alignleft inline-edit-private">
+1063           <input type="checkbox" name="keep_private" value="private" />
+1064           <span class="checkbox-title"><?php echo __( 'Private' ); ?></span>
+1065         </label>
+1066       </div>
+1067
+1068   <?php endif; ?>
+
+
+src/wp-admin/includes/class-wp-comments-list-table.php
+
+368     $this->user_can = current_user_can( 'edit_comment', $comment->comment_ID );
+...
+376     if ( $this->user_can ) { ?>
+377     <label class="screen-reader-text" for="cb-select-<?php echo $comment->comment_ID; ?>"><?php _e( 'Select comment' ); ?></label>
+378     <input id="cb-select-<?php echo $comment->comment_ID; ?>" type="checkbox" name="delete_comments[]" value="<?php echo $comment->comme    nt_ID; ?>" />
+... etc
+
+
+src/wp-admin/includes/class-wp-media-list-table.php
+
+275     while ( have_posts() ) : the_post();
+276       $user_can_edit = current_user_can( 'edit_post', $post->ID );
+...
+302     <th scope="row" class="check-column">
+303       <?php if ( $user_can_edit ) { ?>
+304         <label class="screen-reader-text" for="cb-select-<?php the_ID(); ?>"><?php echo sprintf( __( 'Select %s' ), $att_title );?></lab    el>
+305         <input type="checkbox" name="media[]" id="cb-select-<?php the_ID(); ?>" value="<?php the_ID(); ?>" />
+306       <?php } ?>
+307     </th>
+
+
+src/wp-admin/includes/theme.php
+
+444     $prepared_themes[ $slug ] = array(
+445       'id'           => $slug,
+446       'name'         => $theme->display( 'Name' ),
+447       'screenshot'   => array( $theme->get_screenshot() ), // @todo multiple
+448       'description'  => $theme->display( 'Description' ),
+449       'author'       => $theme->display( 'Author', false, true ),
+450       'authorAndUri' => $theme->display( 'Author' ),
+451       'version'      => $theme->display( 'Version' ),
+452       'tags'         => $theme->display( 'Tags' ),
+453       'parent'       => $parent,
+454       'active'       => $slug === $current_theme,
+455       'hasUpdate'    => isset( $updates[ $slug ] ),
+456       'update'       => get_theme_update_available( $theme ),
+457       'actions'      => array(
+458         'activate' => current_user_can( 'switch_themes' ) ? wp_nonce_url( admin_url( 'themes.php?action=activate&amp;stylesheet=' . $enc    oded_slug ), 'switch-theme_' . $slug ) : null,
+459         'customize' => ( current_user_can( 'edit_theme_options' ) && current_user_can( 'customize' ) ) ? wp_customize_url( $slug ) : nul    l,
+460         'preview'   => add_query_arg( array(
+461           'preview'        => 1,
+462           'template'       => urlencode( $theme->get_template() ),
+463           'stylesheet'     => urlencode( $slug ),
+464           'preview_iframe' => true,
+465           'TB_iframe'      => true,
+466         ), home_url( '/' ) ),
+467         'delete'   => current_user_can( 'delete_themes' ) ? wp_nonce_url( admin_url( 'themes.php?action=delete&amp;stylesheet=' . $encod    ed_slug ), 'delete-theme_' . $slug ) : null,
+468       ),
+469     );
+470   }
+
+
+src/wp-admin/includes/dashboard.php
+
+ 730       $recent_post_link = current_user_can( 'edit_post', get_the_ID() ) ? get_edit_post_link() : get_permalink();
+ 731
+ 732       /* translators: 1: relative date, 2: time, 3: post edit link or permalink, 4: post title */
+ 733       $format = __( '<span>%1$s, %2$s</span> <a href="%3$s">%4$s</a>' );
+ 734       printf( "<li>$format</li>", $relative, get_the_time(), $recent_post_link, _draft_or_post_title() );
+
+
+src/wp-admin/includes/class-wp-press-this.php
+
+ 817     $user_can_assign_terms = current_user_can( $taxonomy->cap->assign_terms );
+ ...
+ 829       if ( $user_can_assign_terms ) {
+ 830         ?>
+ 831         <div class="ajaxtag hide-if-no-js">
+ 832           <label class="screen-reader-text" for="new-tag-post_tag"><?php _e( 'Tags' ); ?></label>
+ 833           <p>
+ 834             <input type="text" id="new-tag-post_tag" name="newtag[post_tag]" class="newtag form-input-tip" size="16" autocomplete="off"      value="" />
+ 835             <button type="button" class="tagadd"><?php _e( 'Add' ); ?></button>
+ 836           </p>
+ 837         </div>
+ 838         <p class="howto">
+ 839           <?php echo $taxonomy->labels->separate_items_with_commas; ?>
+ 840         </p>
+ 841       <?php } ?>
+
+
+src/wp-admin/freedoms.php
+
+ 49 $plugins_url = current_user_can( 'activate_plugins' ) ? admin_url( 'plugins.php' ) : 'https://wordpress.org/plugins/';
+ 50 $themes_url = current_user_can( 'switch_themes' ) ? admin_url( 'themes.php' ) : 'https://wordpress.org/themes/';
+ 51
+ 52 printf( __( 'Every plugin and theme in WordPress.org&#8217;s directory is 100%% GPL or a similarly free and compatible license, so you c    an feel safe finding <a href="%1$s">plugins</a> and <a href="%2$s">themes</a> there. If you get a plugin or theme from another source, m    ake sure to <a href="%3$s">ask them if it&#8217;s GPL</a> first. If they don&#8217;t respect the WordPress license, we don&#8217;t recom    mend them.' ), $plugins_url, $themes_url, 'https://wordpress.org/about/license/' ); ?></p>
+
+
+src/wp-admin/theme-install.php
+
+ 37 wp_localize_script( 'theme', '_wpThemeSettings', array(
+ 38   'themes'   => false,
+ 39   'settings' => array(
+ 40     'isInstall'     => true,
+ 41     'canInstall'    => current_user_can( 'install_themes' ),
+ 42     'installURI'    => current_user_can( 'install_themes' ) ? self_admin_url( 'theme-install.php' ) : null,
+ 43     'adminUrl'      => parse_url( self_admin_url(), PHP_URL_PATH )
+ 44   ),
+ 45   'l10n' => array(
+ 46     'addNew' => __( 'Add New Theme' ),
+ 47     'search'  => __( 'Search Themes' ),
+ 48     'searchPlaceholder' => __( 'Search themes...' ), // placeholder (no ellipsis)
+ 49     'upload' => __( 'Upload Theme' ),
+ 50     'back'   => __( 'Back' ),
+ 51     'error'  => __( 'An unexpected error occurred. Something may be wrong with WordPress.org or this server&#8217;s configuration. If yo    u continue to have problems, please try the <a href="https://wordpress.org/support/">support forums</a>.' )
+ 52   ),
+ 53   'installedThemes' => array_keys( $installed_themes ),
+ 54 ) );
+
+
+src/wp-admin/user-edit.php
+
+ 60 $user_can_edit = current_user_can( 'edit_posts' ) || current_user_can( 'edit_pages' );
+...
+236 <?php if ( ! ( IS_PROFILE_PAGE && ! $user_can_edit ) ) : ?>
+237   <tr class="user-rich-editing-wrap">
+238     <th scope="row"><?php _e( 'Visual Editor' ); ?></th>
+239     <td><label for="rich_editing"><input name="rich_editing" type="checkbox" id="rich_editing" value="false" <?php if ( ! empty( $profil    euser->rich_editing ) ) checked( 'false', $profileuser->rich_editing ); ?> /> <?php _e( 'Disable the visual editor when writing' ); ?></    label></td>
+240   </tr>
+241 <?php endif; ?>
+
+
+src/wp-admin/update-core.php
+
+530   if ( $core = current_user_can( 'update_core' ) )
+531     core_upgrade_preamble();
+532   if ( $plugins = current_user_can( 'update_plugins' ) )
+533     list_plugin_updates();
+534   if ( $themes = current_user_can( 'update_themes' ) )
+535     list_theme_updates();
+536   if ( $core || $plugins || $themes )
+537     list_translation_updates();
+
+
+
+

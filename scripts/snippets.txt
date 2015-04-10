@@ -11,3 +11,11 @@ grep -h "Unresolved" runs/wordpress_analysis/*.log | cut -d ' ' -f 8- | awk -F'[
 
 out=data/init-mcall.source.log; for line in $(cat data/init-mcall.tab); do echo $line >> $out; ln=$(echo $line | cut -d ':' -f 2); src=$(echo $line | cut -d ':' -f 1); sed -n "$ln p" src/$src >> $out; echo "" >> $out; done;
 
+# capture http traffic on port 80:
+tcpdump -Uw new-page.pcap "tcp port 80 and (((ip[2:2] - ((ip[0]&0xf)<<2)) - ((tcp[12]&0xf0)>>2)) != 0)"
+# split the traffic into request/response pairs:
+tcptrace --csv -xHTTP -f'port=80' -lten new-page.pcap > tcptrace.log
+
+restore-snapshot -w /hd/www/html/wordpress -d wordpress -s /hd/script-safe/snapshots/wordpress/train/empty-install.2014-04-04/ -v
+
+
