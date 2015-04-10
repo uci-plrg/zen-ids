@@ -39,7 +39,7 @@ function execute() {
   [ ! -z "$verbose" ] && echo -n "$cmd"
   if [ -z "$dry_run" ]
   then
-    echo -n " ... "
+    [ ! -z "$verbose" ] && echo -n " ... "
     eval "$cmd"
     result=$?
     if [ $result -eq 0 ]
@@ -147,7 +147,7 @@ then
   execute "rm -rf $web_base/$web_name"
   if [ ! -z "$web_use_tree" ]
   then
-    execute "cp -R $web_repo $web_base"
+    execute "rsync -a --exclude='.git' ${web_repo%/} $web_base"
   else
     execute "cd $web_repo &> /dev/null"
     execute "git archive --format=tar $branch | tar -x -C $web_base/$web_name"

@@ -261,17 +261,40 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
       to_cfm = *monitored_cfm;
   }
 
+  // TODO: may need to clear the frame table on return to base frame
+  if (execute_data->prev_execute_data == NULL) {
+    live_frame = &base_frame;
+  } else {
+    zend_execute_data *prev_execute_data = execute_data->prev_execute_data;
+    zend_op_array *prev_op_array;
+    if (prev_execute_data->func == NULL) { // multi-call
+      prev_execute_data = prev_execute_data->prev_execute_data;
+      if (prev_execute_data == NULL)
+        live_frame = &base_frame;
+    }
+    if (prev_execute_data != NULL) {
+      prev_op_array = &prev_execute_data->func->op_array;
+      if (prev_execute_data != live_frame->execute_data ||
+          prev_op_array->opcodes != live_frame->opcodes) { // TODO: fails!
+        ERROR("Stack frame mismatch: live frame is "PX"|"PX" vs. prev frame "PX"|"PX"\n",
+              p2int(live_frame->execute_data), p2int(live_frame->opcodes),
+              p2int(prev_execute_data), p2int(prev_op_array->opcodes));
+      }
+    }
+  }
+
   // TODO: skip builtins like
   //   op->op2.zv != NULL &&
   //   zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) == NULL
-  if (to_cfm.cfg != NULL) {
-    zend_op *op = &live_frame->opcodes[live_frame->last_index];
-    compiled_edge_target_t compiled_target = get_compiled_edge_target(op, live_frame->last_index);
+  if (to_cfm.cfg != NULL && execute_data->prev_execute_data  != NULL) {
+    zend_op *last_op = &live_frame->opcodes[live_frame->last_index];
+    compiled_edge_target_t compiled_target = get_compiled_edge_target(last_op,
+                                                                      live_frame->last_index);
 
     if (!cfg_has_routine_edge(live_frame->cfm.cfg, live_frame->last_index, to_cfm.cfg, 0)) {
-      if (compiled_target.type != COMPILED_EDGE_CALL && op->opcode != ZEND_NEW)
+      if (compiled_target.type != COMPILED_EDGE_CALL && last_op->opcode != ZEND_NEW)
         WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n",
-             compiled_target.type, op->opcode);
+             compiled_target.type, last_op->opcode);
       if (live_frame == NULL)
         SPOT("Entry edge to %s (0x%x)\n", to_cfm.routine_name, to_cfm.cfg->routine_hash);
 
