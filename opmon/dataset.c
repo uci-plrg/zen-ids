@@ -78,6 +78,7 @@ static dataset_eval_list_t *eval_list;
 #define RESOLVE_PTR(ptr, type) ((type *)(dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
 #define IS_CHAIN_TERMINUS(chain) (*(uint *)chain == 0)
 #define MASK_TARGET_INDEX(to_index) ((to_index) & 0x3ffffff)
+#define MASK_USER_LEVEL(to_index) ((to_index) >> 0x1b)
 
 static bool is_fall_through(zend_uchar opcode, uint from_index, uint to_index) {
   switch (opcode) {
@@ -189,7 +190,7 @@ bool dataset_verify_opcode_edge(dataset_routine_t *dataset, uint from_index,
 }
 
 bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
-                                 uint to_index, uint to_routine_hash)
+                                 uint to_index, uint to_routine_hash, uint user_level)
 {
   uint i;
   dataset_node_t *node = &dataset->nodes[from_index];
@@ -198,17 +199,19 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
     dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
     for (i = 0; i < targets->target_count; i++) {
       if (targets->targets[i].routine_hash == to_routine_hash &&
-          MASK_TARGET_INDEX(targets->targets[i].index) == to_index)
+          MASK_TARGET_INDEX(targets->targets[i].index) == to_index &&
+          MASK_USER_LEVEL(targets->targets[i].index) <= user_level)
         return true;
     }
-    return false; // debug stop
+    return false; // for debug stopping
   } else if (node->type == DATASET_NODE_TYPE_EVAL) {
     dataset_eval_targets_t *targets = RESOLVE_PTR(node->eval_targets, dataset_eval_targets_t);
     for (i = 0; i < targets->target_count; i++) {
-      if (MASK_TARGET_INDEX(targets->targets[i].index) == to_index)
+      if (MASK_TARGET_INDEX(targets->targets[i].index) == to_index &&
+          MASK_USER_LEVEL(targets->targets[i].index) <= user_level)
         return true;
     }
-    return false; // debug stop
+    return false; // for debug stopping
   }
 
   return false;
