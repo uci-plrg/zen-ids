@@ -57,6 +57,8 @@ function execute() {
   
 ###############################
 
+[ "$1" == "--help" ] && usage && exit
+
 while getopts "d:w:xv" option
 do
   case $option in
@@ -150,6 +152,7 @@ then
     execute "rsync -a --exclude='.git' ${web_repo%/} $web_base"
   else
     execute "cd $web_repo &> /dev/null"
+    execute "mkdir -p $web_base/$web_name"
     execute "git archive --format=tar $branch | tar -x -C $web_base/$web_name"
   fi
 fi

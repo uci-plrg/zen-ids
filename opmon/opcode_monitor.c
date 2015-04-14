@@ -24,31 +24,15 @@ PHP_FUNCTION(set_user_level)
 {
   int argc = ZEND_NUM_ARGS();
   long user_level;
-  long blog_id;
+  long blog_id = 0;
   if (zend_parse_parameters(argc TSRMLS_CC, "ll", &user_level, &blog_id) == FAILURE) {
     ERROR("Failed to parse parameters in a call to set_user_level()\n");
     return;
   }
 
-  if (is_php_session_active()) {
-    zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
-    zval *session_zval = php_get_session_var(key);
-    if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
-      session_zval = malloc(sizeof(zval));
-      ZVAL_LONG(session_zval, user_level);
-      session_zval = php_session_set_var(key, session_zval);
-      PRINT("<session> No user session during set_user_level--created new session user with level %ld\n", user_level);
-    } else {
-      PRINT("<session> Found session user level %ld during set_user_level\n", Z_LVAL_P(session_zval));
-      Z_LVAL_P(session_zval) = user_level;
-      zend_string_release(key);
-    }
-    PRINT("<session> Set session user with level %ld on pid 0x%x\n", Z_LVAL_P(session_zval), getpid());
-  } else {
-    ERROR("<session> User level assigned with no active PHP session!\n");
-  }
+  set_opmon_user_level(user_level);
 
-  PRINT("<session> ScriptCFI receives a call to set_user_level to %ld on blog %ld on pid 0x%x\n",
+  SPOT("<session> ScriptCFI receives a call to set_user_level to %ld on blog %ld on pid 0x%x\n",
        user_level, blog_id, getpid());
 }
 

@@ -96,3 +96,24 @@ zval *php_session_set_var(zend_string *key, zval *value)
   ZVAL_COPY_VALUE(cell, value);
   return cell;
 }
+
+void set_opmon_user_level(long user_level)
+{
+  if (is_php_session_active()) {
+    zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
+    zval *session_zval = php_get_session_var(key);
+    if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
+      session_zval = malloc(sizeof(zval)); // TODO: seems to leak
+      ZVAL_LONG(session_zval, user_level);
+      session_zval = php_session_set_var(key, session_zval);
+      PRINT("<session> No user session during set_user_level--created new session user with level %ld\n", user_level);
+    } else {
+      PRINT("<session> Found session user level %ld during set_user_level\n", Z_LVAL_P(session_zval));
+      Z_LVAL_P(session_zval) = user_level;
+      zend_string_release(key);
+    }
+    PRINT("<session> Set session user with level %ld on pid 0x%x\n", Z_LVAL_P(session_zval), getpid());
+  } else {
+    ERROR("<session> User level assigned with no active PHP session!\n");
+  }
+}

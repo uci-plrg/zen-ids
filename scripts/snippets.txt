@@ -18,4 +18,5 @@ tcptrace --csv -xHTTP -f'port=80' -lten new-page.pcap > tcptrace.log
 
 restore-snapshot -w /hd/www/html/wordpress -d wordpress -s /hd/script-safe/snapshots/wordpress/train/empty-install.2014-04-04/ -v
 
+mysqldump -u root -p wordpress > wordpress.sql
 

@@ -41,11 +41,14 @@ typedef struct _lambda_frame_t {
 typedef enum _stack_state_t {
   STACK_STATE_NONE,
   STACK_STATE_UNWINDING,
-  STACK_STATE_RETURNING
+  STACK_STATE_RETURNING,
+  STACK_STATE_RETURNED
 } stack_state_t;
 
 typedef struct _stack_event_t {
   stack_state_t state;
+  zend_execute_data *return_target;
+  const char *return_target_name;
 } stack_event_t;
 
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
@@ -232,9 +235,25 @@ static void lookup_cfm(zend_execute_data *execute_data, zend_op_array *op_array,
     *cfm = *monitored_cfm;
 }
 
+static inline zend_execute_data *find_return_target(zend_execute_data *execute_data)
+{
+  zend_execute_data *return_target = execute_data->prev_execute_data;
+  while (return_target != NULL &&
+         (return_target->func == NULL ||
+          return_target->func->op_array.type == ZEND_INTERNAL_FUNCTION))
+    return_target = return_target->prev_execute_data;
+  return return_target;
+}
+
+static bool validate_return(zend_execute_data *execute_data)
+{
+  zend_execute_data *return_target = find_return_target(execute_data);
+  return (stack_event.return_target == execute_data || stack_event.return_target == return_target);
+}
+
 static bool update_stack_frame(const zend_op *op) // true if the stack pointer changed
 {
-  zend_execute_data *execute_data = EG(current_execute_data);
+  zend_execute_data *execute_data = EG(current_execute_data), *prev_execute_data;
   zend_op_array *op_array = &execute_data->func->op_array;
   stack_frame_t new_cur_frame, new_prev_frame;
 
@@ -249,8 +268,13 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     prev_frame = cur_frame;
     cur_frame.op_index = (execute_data->opline - op_array->opcodes);
     cur_frame.opcode = op->opcode;
-    if (stack_event.state == STACK_STATE_RETURNING)
-      stack_event.state = STACK_STATE_NONE; // don't clear `unwinding` state
+    if (stack_event.state == STACK_STATE_RETURNED) { // don't clear `unwinding` state
+      stack_event.state = STACK_STATE_NONE;
+    } else if (stack_event.state == STACK_STATE_RETURNING) {
+      if (!validate_return(execute_data))
+        ERROR("Failed to clear STACK_STATE_RETURNING. Now in %s\n", cur_frame.cfm.routine_name);
+      stack_event.state = STACK_STATE_NONE;
+    }
     return false; // nothing to do
   }
 
@@ -264,7 +288,16 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
   }
 
-  zend_execute_data *prev_execute_data = execute_data->prev_execute_data;
+  if (stack_event.state == STACK_STATE_RETURNING) {
+    if (validate_return(execute_data)) {
+      stack_event.state = STACK_STATE_RETURNED;
+    } else {
+      ERROR("Expected return to %s but returned to %s\n", stack_event.return_target_name,
+            new_cur_frame.cfm.routine_name);
+    }
+  }
+
+  prev_execute_data = execute_data->prev_execute_data;
   while (prev_execute_data != NULL &&
          (prev_execute_data->func == NULL ||
           prev_execute_data->func->op_array.type == ZEND_INTERNAL_FUNCTION))
@@ -280,9 +313,9 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
   }
 
-  if (IS_SAME_FRAME(new_cur_frame, prev_frame)) {
-    PRINT("<0x%x> Routine return to %s with opcodes at "PX"|"PX" and cfg "PX".\n",
-          getpid(), cur_frame.cfm.routine_name, p2int(execute_data),
+  if (stack_event.state == STACK_STATE_RETURNED) {
+    PRINT("<0x%x> Routine return from %s to %s with opcodes at "PX"|"PX" and cfg "PX".\n",
+          getpid(), cur_frame.cfm.routine_name, new_cur_frame.cfm.routine_name, p2int(execute_data),
           p2int(op_array->opcodes), p2int(cur_frame.cfm.cfg));
   } else {
     // TODO: skip builtins like
@@ -309,9 +342,9 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
         PRINT("(skipping existing routine edge)\n");
       }
 
-      PRINT("<0x%x> Routine call to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
-            getpid(), new_cur_frame.cfm.routine_name, p2int(execute_data),
-            p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
+      PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+            getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
+            p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
     }
   }
 
@@ -326,7 +359,7 @@ static void update_user_session()
     zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
     zval *session_zval = php_get_session_var(key);
     if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
-      current_session.user_level = USER_LEVEL_BOTTOM;
+      set_opmon_user_level(USER_LEVEL_BOTTOM);
       PRINT("<session> Session has no user level for key %s during update on pid 0x%x"
             "--assigning level -1\n", key->val, getpid());
     } else {
@@ -344,7 +377,7 @@ static void update_user_session()
 static uint get_next_executable_index(uint from_index)
 {
   zend_uchar opcode;
-  uint i = from_index;
+  uint i = from_index + 1;
   while (true) {
     opcode = cur_frame.opcodes[i].opcode;
     if (zend_get_opcode_name(opcode) != NULL)
@@ -356,6 +389,7 @@ static uint get_next_executable_index(uint from_index)
 
 static bool is_fallthrough()
 {
+  uint from_index;
   if (prev_frame.execute_data == NULL)
     return true;
 
@@ -366,7 +400,8 @@ static bool is_fallthrough()
     case ZEND_CONT:
       return false;
   }
-  return cur_frame.op_index == get_next_executable_index(prev_frame.op_index + 1);
+  from_index = (IS_SAME_FRAME(cur_frame, prev_frame) ? prev_frame.op_index  : 0);
+  return cur_frame.op_index == get_next_executable_index(from_index);
 }
 
 /*
@@ -417,7 +452,18 @@ void opcode_executing(const zend_op *op)
 
   // todo: check remaining state/opcode mismatches
   if (op->opcode == ZEND_RETURN) {
-    //SPOT("Preparing return from %s\n", cur_frame.cfm.routine_name);
+    control_flow_metadata_t return_target_cfm;
+    zend_execute_data *return_target = find_return_target(execute_data);
+    if (return_target == NULL) {
+      stack_event.return_target = NULL;
+      stack_event.return_target_name = "<base-frame>";
+    } else {
+      lookup_cfm(return_target, &return_target->func->op_array, &return_target_cfm);
+      stack_event.return_target = return_target;
+      stack_event.return_target_name = return_target_cfm.routine_name;
+    }
+    PRINT("Preparing return at op %d of %s to %s\n", cur_frame.op_index, cur_frame.cfm.routine_name,
+          stack_event.return_target_name);
     stack_event.state = STACK_STATE_RETURNING;
   } else if (stack_event.state == STACK_STATE_UNWINDING && op->opcode != ZEND_FAST_RET &&
              op->opcode != ZEND_CATCH) {
@@ -487,8 +533,8 @@ void opcode_executing(const zend_op *op)
             p2int(op_array->opcodes), cur_frame.cfm.cfg->routine_hash);
     }
 
-    // todo: verify call continuations here too (seems to be missing)
-    if (is_fallthrough()) {
+    // slightly weak for returns: not checking continuation pc
+    if (stack_event.state == STACK_STATE_RETURNED || is_fallthrough()) {
       PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
             prev_frame.op_index, cur_frame.op_index,
             cur_frame.cfm.cfg->routine_hash);
