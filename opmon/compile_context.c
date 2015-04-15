@@ -191,14 +191,10 @@ void function_compiled(zend_op_array *op_array)
       efree(filename);
     filename = site_filename = NULL;
 
-    if (is_script_body) {
+    if (is_script_body || op_array->scope == NULL)
       classname = fqn->unit.path;
-    } else {
-      if (op_array->scope == NULL)
-        classname = "<default>";
-      else
-        classname = op_array->scope->name->val;
-    }
+    else
+      classname = op_array->scope->name->val;
     sprintf(routine_name, "%s:%s", classname, function_name);
     has_routine_name = true;
   }

@@ -131,7 +131,7 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
 
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->dataset, from_index, to_index,
-                                    to_cfg->routine_hash)) {
+                                    to_cfg->routine_hash, current_session.user_level)) {
       write_edge = false;
       PRINT("<MON> Verified routine edge [0x%x|%u -> 0x%x]\n",
             from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
