@@ -42,11 +42,13 @@ typedef enum _stack_state_t {
   STACK_STATE_NONE,
   STACK_STATE_UNWINDING,
   STACK_STATE_RETURNING,
-  STACK_STATE_RETURNED
+  STACK_STATE_RETURNED,
+  STACK_STATE_CALL
 } stack_state_t;
 
 typedef struct _stack_event_t {
   stack_state_t state;
+  zend_uchar last_opcode;
   zend_execute_data *return_target;
   const char *return_target_name;
 } stack_event_t;
@@ -104,6 +106,7 @@ void initialize_interp_context()
   lambda_frame = lambda_stack + 1;
 
   stack_event.state = STACK_STATE_NONE;
+  stack_event.last_opcode = 0;
 
   first_thread_id = pthread_self();
 
@@ -268,12 +271,19 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     prev_frame = cur_frame;
     cur_frame.op_index = (execute_data->opline - op_array->opcodes);
     cur_frame.opcode = op->opcode;
-    if (stack_event.state == STACK_STATE_RETURNED) { // don't clear `unwinding` state
-      stack_event.state = STACK_STATE_NONE;
-    } else if (stack_event.state == STACK_STATE_RETURNING) {
-      if (!validate_return(execute_data))
-        ERROR("Failed to clear STACK_STATE_RETURNING. Now in %s\n", cur_frame.cfm.routine_name);
-      stack_event.state = STACK_STATE_NONE;
+    switch (stack_event.state) {
+      case STACK_STATE_CALL:
+        ERROR("Stack frame did not change after STACK_STATE_CALL at opcode 0x%x. Still in %s\n",
+              stack_event.last_opcode, cur_frame.cfm.routine_name);
+        stack_event.state = STACK_STATE_NONE;
+        break;
+      case STACK_STATE_RETURNING:
+        if (!validate_return(execute_data))
+          ERROR("Failed to clear STACK_STATE_RETURNING. Now in %s\n", cur_frame.cfm.routine_name);
+      case STACK_STATE_RETURNED:
+        stack_event.state = STACK_STATE_NONE;
+        break;
+      default: ;
     }
     return false; // nothing to do
   }
@@ -288,13 +298,24 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
   }
 
-  if (stack_event.state == STACK_STATE_RETURNING) {
-    if (validate_return(execute_data)) {
-      stack_event.state = STACK_STATE_RETURNED;
-    } else {
-      ERROR("Expected return to %s but returned to %s\n", stack_event.return_target_name,
-            new_cur_frame.cfm.routine_name);
-    }
+  if (new_cur_frame.cfm.cfg->routine_hash == 0x884723b) {
+    SPOT("Entering %s at user level %d\n", new_cur_frame.cfm.routine_name,
+         current_session.user_level);
+  }
+
+  switch (stack_event.state) {
+    case STACK_STATE_CALL:
+      stack_event.state = STACK_STATE_NONE;
+      break;
+    case STACK_STATE_RETURNING:
+      if (validate_return(execute_data)) {
+        stack_event.state = STACK_STATE_RETURNED;
+      } else {
+        ERROR("Expected return to %s but returned to %s\n", stack_event.return_target_name,
+              new_cur_frame.cfm.routine_name);
+      }
+      break;
+    default: ;
   }
 
   prev_execute_data = execute_data->prev_execute_data;
@@ -361,7 +382,7 @@ static void update_user_session()
     if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
       set_opmon_user_level(USER_LEVEL_BOTTOM);
       PRINT("<session> Session has no user level for key %s during update on pid 0x%x"
-            "--assigning level -1\n", key->val, getpid());
+            "--assigning bottom level\n", key->val, getpid());
     } else {
       PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
       current_session.user_level = (uint) Z_LVAL_P(session_zval);
@@ -450,28 +471,54 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
-  // todo: check remaining state/opcode mismatches
-  if (op->opcode == ZEND_RETURN) {
-    control_flow_metadata_t return_target_cfm;
-    zend_execute_data *return_target = find_return_target(execute_data);
-    if (return_target == NULL) {
-      stack_event.return_target = NULL;
-      stack_event.return_target_name = "<base-frame>";
-    } else {
-      lookup_cfm(return_target, &return_target->func->op_array, &return_target_cfm);
-      stack_event.return_target = return_target;
-      stack_event.return_target_name = return_target_cfm.routine_name;
-    }
-    PRINT("Preparing return at op %d of %s to %s\n", cur_frame.op_index, cur_frame.cfm.routine_name,
-          stack_event.return_target_name);
-    stack_event.state = STACK_STATE_RETURNING;
-  } else if (stack_event.state == STACK_STATE_UNWINDING && op->opcode != ZEND_FAST_RET &&
-             op->opcode != ZEND_CATCH) {
-    //exception_frame->suspended = true;
-    stack_event.state = STACK_STATE_NONE;
-  } else if (op->opcode == ZEND_FAST_RET) {
-    //exception_frame->suspended = false;
-    stack_event.state = STACK_STATE_UNWINDING;
+  switch (op->opcode) {
+    case ZEND_DO_FCALL:
+      if (EX(call)->func->type != ZEND_INTERNAL_FUNCTION) {
+        stack_event.state = STACK_STATE_CALL;
+        stack_event.last_opcode = op->opcode;
+      }
+      break;
+    case ZEND_INCLUDE_OR_EVAL:
+      if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
+        stack_event.state = STACK_STATE_CALL;
+        stack_event.last_opcode = op->opcode;
+      }
+      break;
+    /*
+    case ZEND_FETCH_OBJ_R:
+    case ZEND_FETCH_OBJ_W:
+    case ZEND_FETCH_OBJ_RW:
+    case ZEND_FETCH_OBJ_IS:
+    case ZEND_FETCH_OBJ_UNSET:
+    case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+    case ZEND_ASSIGN_OBJ:
+    case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+    */
+    case ZEND_RETURN: {
+      control_flow_metadata_t return_target_cfm;
+      zend_execute_data *return_target = find_return_target(execute_data);
+      if (return_target == NULL) {
+        stack_event.return_target = NULL;
+        stack_event.return_target_name = "<base-frame>";
+      } else {
+        lookup_cfm(return_target, &return_target->func->op_array, &return_target_cfm);
+        stack_event.return_target = return_target;
+        stack_event.return_target_name = return_target_cfm.routine_name;
+      }
+      PRINT("Preparing return at op %d of %s to %s\n", cur_frame.op_index, cur_frame.cfm.routine_name,
+            stack_event.return_target_name);
+      stack_event.state = STACK_STATE_RETURNING;
+    } break;
+    case ZEND_FAST_RET:
+      //exception_frame->suspended = false;
+      stack_event.state = STACK_STATE_UNWINDING;
+      break;
+    case ZEND_CATCH:
+      break;
+    default:
+      if (stack_event.state == STACK_STATE_UNWINDING)
+        stack_event.state = STACK_STATE_NONE;
+      break;
   }
 
   if (op->opcode == ZEND_CATCH) {
