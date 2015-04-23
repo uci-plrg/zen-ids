@@ -298,11 +298,6 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
   }
 
-  if (new_cur_frame.cfm.cfg->routine_hash == 0x884723b) {
-    SPOT("Entering %s at user level %d\n", new_cur_frame.cfm.routine_name,
-         current_session.user_level);
-  }
-
   switch (stack_event.state) {
     case STACK_STATE_CALL:
       stack_event.state = STACK_STATE_NONE;
@@ -470,6 +465,9 @@ void opcode_executing(const zend_op *op)
   }
 
   stack_pointer_moved = update_stack_frame(op);
+
+  if (cur_frame.cfm.cfg->routine_hash == 0x35b71951)
+    SPOT("\twp-admin/admin.php: %d\n", op->lineno);
 
   switch (op->opcode) {
     case ZEND_DO_FCALL:
