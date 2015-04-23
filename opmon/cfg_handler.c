@@ -21,12 +21,11 @@ static inline void fnull(size_t size, FILE *file)
 static inline void fopcode(cfg_opcode_t *opcode, FILE *file)
 {
   fwrite(&opcode->opcode, sizeof(zend_uchar), 1, file);
-  if (opcode->opcode == ZEND_INCLUDE_OR_EVAL) {
+  if (opcode->opcode == ZEND_INCLUDE_OR_EVAL)
     fwrite(&opcode->extended_value, sizeof(zend_uchar), 1, file);
-    fnull(2, file);
-  } else {
-    fnull(3, file);
-  }
+  else
+    fnull(1, file);
+  fwrite(&opcode->line_number, sizeof(ushort), 1, file);
 }
 
 void init_cfg_handler()

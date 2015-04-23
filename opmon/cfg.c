@@ -27,8 +27,8 @@ routine_cfg_t *routine_cfg_new(uint routine_hash)
   return cfg;
 }
 
-void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode,
-                               zend_uchar extended_value, uint index)
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_uchar extended_value,
+                               ushort line_number, uint index)
 {
   cfg_opcode_t *cfg_opcode;
 
@@ -41,6 +41,7 @@ void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode,
   cfg_opcode = routine_cfg_get_opcode(cfg, index);
   cfg_opcode->opcode = opcode;
   cfg_opcode->extended_value = extended_value;
+  cfg_opcode->line_number = line_number;
 }
 
 bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)

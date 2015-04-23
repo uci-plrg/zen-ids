@@ -96,7 +96,7 @@ void initialize_interp_context()
   base_frame.cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
   cur_frame = base_frame;
   routine_cfg_assign_opcode(cur_frame.cfm.cfg, ENTRY_POINT_OPCODE,
-                            ENTRY_POINT_EXTENDED_VALUE, 0);
+                            ENTRY_POINT_EXTENDED_VALUE, 0, 0);
 
 
   memset(exception_stack, 0, 2 * sizeof(exception_frame_t));

@@ -61,8 +61,9 @@ do { \
 #define p2int(p) ((uint_ptr_t) (p))
 #define int2p(p) ((byte *) (p))
 
-typedef unsigned long long uint64;
 typedef unsigned char bool;
+typedef unsigned long long uint64;
+typedef unsigned short ushort;
 typedef char byte;
 typedef uint64 uint_ptr_t;
 

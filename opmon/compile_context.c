@@ -426,7 +426,7 @@ void function_compiled(zend_op_array *op_array)
       }
     }
 
-    routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, i);
+    routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, op->lineno, i);
     target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
       if (target.index >= op_array->last) {
