@@ -76,9 +76,6 @@ static zend_op entry_op;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
-extern cfg_files_t cfg_files;
-extern cfg_t *app_cfg;
-
 void initialize_interp_context()
 {
   frame_table.hash_bits = 7;
@@ -113,11 +110,11 @@ void initialize_interp_context()
   current_session.user_level = USER_LEVEL_BOTTOM;
 }
 
-void load_entry_point_dataset()
+void load_entry_point_dataset(application_t *app)
 {
-  base_frame.cfm.dataset = dataset_routine_lookup(ENTRY_POINT_HASH);
+  base_frame.cfm.dataset = dataset_routine_lookup(app, ENTRY_POINT_HASH);
   if (base_frame.cfm.dataset == NULL)
-    write_node(ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame.cfm.cfg, 0), 0);
+    write_node(app, ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame.cfm.cfg, 0), 0);
 }
 
 static void push_exception_frame()
@@ -145,7 +142,7 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
     zend_uchar opcode = routine_cfg_get_opcode(from_cfm->cfg, from_index)->opcode;
     WARN("<MON> New routine edge from op 0x%x [0x%x %u -> 0x%x]\n",
           opcode, from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
-    write_routine_edge(from_cfm->cfg->routine_hash, from_index,
+    write_routine_edge(from_cfm->app, from_cfm->cfg->routine_hash, from_index,
                        to_cfg->routine_hash, to_index, current_session.user_level);
   }
 }
@@ -166,7 +163,7 @@ static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, 
   if (write_edge) {
     WARN("<MON> New opcode edge [0x%x %u -> %u]\n",
           cfm->cfg->routine_hash, from_index, to_index);
-    write_op_edge(cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
+    write_op_edge(cfm->app, cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
   }
 }
 
@@ -442,7 +439,7 @@ void opcode_executing(const zend_op *op)
 
   op_execution_count++;
   if ((op_execution_count & FLUSH_MASK) == 0)
-    flush_all_outputs();
+    flush_all_outputs(cur_frame.cfm.app);
 
   if (pthread_self() != first_thread_id) {
     ERROR("Multiple threads are not supported (started on 0x%x, current is 0x%x)\n",

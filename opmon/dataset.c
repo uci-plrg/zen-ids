@@ -69,13 +69,15 @@ typedef struct _dataset_eval_list_t {
   uint list[1];
 } dataset_eval_list_t;
 
+typedef struct _dataset_app_t {
+  uint_ptr_t dataset_mapping;
+  dataset_hashtable_t *hashtable;
+  dataset_eval_list_t *eval_list;
+} dataset_app_t;
+
 #pragma pack(pop)
 
-static uint_ptr_t dataset_mapping = 0;
-static dataset_hashtable_t *hashtable;
-static dataset_eval_list_t *eval_list;
-
-#define RESOLVE_PTR(ptr, type) ((type *)(dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
+#define RESOLVE_PTR(app, ptr, type) ((type *)((app)->dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
 #define IS_CHAIN_TERMINUS(chain) (*(uint *)chain == 0)
 #define MASK_TARGET_INDEX(to_index) ((to_index) & 0x3ffffff)
 #define MASK_USER_LEVEL(to_index) ((to_index) >> 0x1b)
@@ -90,31 +92,36 @@ static bool is_fall_through(zend_uchar opcode, uint from_index, uint to_index) {
   }
 }
 
-void install_dataset(void *dataset)
+void *install_dataset(void *dataset)
 {
-  dataset_mapping = (uint_ptr_t) dataset;
-  hashtable = RESOLVE_PTR(*(uint *) dataset_mapping, dataset_hashtable_t);
-  eval_list = (dataset_eval_list_t *)(hashtable->table + (hashtable->mask + 1));
+  dataset_app_t *dataset_app = malloc(sizeof(dataset_app_t));
+  dataset_app->dataset_mapping = (uint_ptr_t) dataset;
+  dataset_app->hashtable = RESOLVE_PTR(dataset_app, *(uint *) dataset_app->dataset_mapping,
+                                       dataset_hashtable_t);
+  dataset_app->eval_list = (dataset_eval_list_t *)(dataset_app->hashtable->table +
+                                                   (dataset_app->hashtable->mask + 1));
+  return dataset_app;
 }
 
-uint dataset_get_eval_count()
+uint dataset_get_eval_count(void *dataset)
 {
-  return eval_list->count;
+  return ((dataset_app_t *) dataset)->eval_list->count;
 }
 
-dataset_routine_t *dataset_routine_lookup(uint routine_hash)
+dataset_routine_t *dataset_routine_lookup(application_t *app, uint routine_hash)
 {
-  if (dataset_mapping != 0 && !is_eval_routine(routine_hash)) {
-    uint index = routine_hash & hashtable->mask;
+  dataset_app_t *dataset_app = (dataset_app_t *) app->dataset;
+  if (dataset_app->dataset_mapping != 0 && !is_eval_routine(routine_hash)) {
+    uint index = routine_hash & dataset_app->hashtable->mask;
     dataset_routine_t *routine;
     dataset_chain_t *chain;
 
-    if (hashtable->table[index] == 0)
+    if (dataset_app->hashtable->table[index] == 0)
       return NULL;
 
-    chain = RESOLVE_PTR(hashtable->table[index], dataset_chain_t);
+    chain = RESOLVE_PTR(dataset_app, dataset_app->hashtable->table[index], dataset_chain_t);
     while (!IS_CHAIN_TERMINUS(chain)) {
-      routine = RESOLVE_PTR(chain->routine, dataset_routine_t);
+      routine = RESOLVE_PTR(dataset_app, chain->routine, dataset_routine_t);
       if (routine->routine_hash == routine_hash)
         return routine;
       chain++;
@@ -140,12 +147,13 @@ void dataset_match_eval(control_flow_metadata_t *cfm)
 {
   uint i;
   dataset_routine_t *routine;
+  dataset_app_t *dataset = (dataset_app_t *) cfm->app->dataset;
 
-  if (dataset_mapping == 0)
+  if (dataset->dataset_mapping == 0)
     return;
 
-  for (i = 0; i < eval_list->count; i++) {
-    routine = RESOLVE_PTR(eval_list->list[i], dataset_routine_t);
+  for (i = 0; i < dataset->eval_list->count; i++) {
+    routine = RESOLVE_PTR(dataset, dataset->eval_list->list[i], dataset_routine_t);
     if (match_eval_routines(routine, cfm->cfg)) {
       MON("Matched eval %d to dataset eval %d\n", get_eval_id(cfm->cfg->routine_hash), i);
 
@@ -189,14 +197,16 @@ bool dataset_verify_opcode_edge(dataset_routine_t *dataset, uint from_index,
   return true;
 }
 
-bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
+bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine, uint from_index,
                                  uint to_index, uint to_routine_hash, uint user_level)
 {
   uint i;
-  dataset_node_t *node = &dataset->nodes[from_index];
+  dataset_node_t *node = &routine->nodes[from_index];
+  dataset_app_t *dataset = (dataset_app_t *) app->dataset;
 
   if (node->type == DATASET_NODE_TYPE_CALL) {
-    dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
+    dataset_call_targets_t *targets = RESOLVE_PTR(dataset, node->call_targets,
+                                                  dataset_call_targets_t);
     for (i = 0; i < targets->target_count; i++) {
       if (targets->targets[i].routine_hash == to_routine_hash &&
           MASK_TARGET_INDEX(targets->targets[i].index) == to_index &&
@@ -205,7 +215,8 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
     }
     return false; // for debug stopping
   } else if (node->type == DATASET_NODE_TYPE_EVAL) {
-    dataset_eval_targets_t *targets = RESOLVE_PTR(node->eval_targets, dataset_eval_targets_t);
+    dataset_eval_targets_t *targets = RESOLVE_PTR(dataset, node->eval_targets,
+                                                  dataset_eval_targets_t);
     for (i = 0; i < targets->target_count; i++) {
       if (MASK_TARGET_INDEX(targets->targets[i].index) == to_index &&
           MASK_USER_LEVEL(targets->targets[i].index) <= user_level)
@@ -217,11 +228,13 @@ bool dataset_verify_routine_edge(dataset_routine_t *dataset, uint from_index,
   return false;
 }
 
-uint dataset_get_call_target_count(dataset_routine_t *dataset, uint from_index)
+uint dataset_get_call_target_count(application_t *app, dataset_routine_t *routine, uint from_index)
 {
-  dataset_node_t *node = &dataset->nodes[from_index];
+  dataset_node_t *node = &routine->nodes[from_index];
+  dataset_app_t *dataset = (dataset_app_t *) app->dataset;
   if (node->type == DATASET_NODE_TYPE_CALL) {
-    dataset_call_targets_t *targets = RESOLVE_PTR(node->call_targets, dataset_call_targets_t);
+    dataset_call_targets_t *targets = RESOLVE_PTR(dataset, node->call_targets,
+                                                  dataset_call_targets_t);
     return targets->target_count;
   }
   return 0;

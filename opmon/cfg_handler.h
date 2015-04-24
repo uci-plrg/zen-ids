@@ -3,29 +3,22 @@
 
 #include "cfg.h"
 
-typedef struct _cfg_files_t {
-  FILE *node;
-  FILE *op_edge;
-  FILE *routine_edge;
-  FILE *routine_catalog;
-} cfg_files_t;
-
 void init_cfg_handler();
 void destroy_cfg_handler();
 
 void starting_script(const char *script_path);
 void worker_startup();
 void server_startup();
+void cfg_initialize_application(application_t *app);
 
-void write_node(uint routine_hash, cfg_opcode_t *opcode, uint index);
-void write_op_edge(uint routine_hash, uint from_index, uint to_index,
+void write_node(application_t *app, uint routine_hash, cfg_opcode_t *opcode, uint index);
+void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint to_index,
                    user_level_t user_level);
-void write_routine_edge(uint from_routine_hash, uint from_index,
-                        uint to_routine_hash, uint to_index,
-                        user_level_t user_level);
-void write_routine_catalog_entry(uint routine_hash, const char *unit_path,
+void write_routine_edge(application_t *app, uint from_routine_hash, uint from_index,
+                        uint to_routine_hash, uint to_index, user_level_t user_level);
+void write_routine_catalog_entry(application_t *app, uint routine_hash, const char *unit_path,
                                  const char *routine_name);
 
-void flush_all_outputs();
+void flush_all_outputs(application_t *app);
 
 #endif

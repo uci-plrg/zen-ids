@@ -5,12 +5,22 @@
 #include <fcntl.h>
 
 #include "lib/script_cfi_utils.h"
+#include "interp_context.h"
 #include "event_handler.h"
 #include "dataset.h"
 #include "cfg_handler.h"
 
-static cfg_files_t cfg_files;
-static char session_file_path[256] = {0};
+typedef struct _cfg_files_t {
+  FILE *node;
+  FILE *op_edge;
+  FILE *routine_edge;
+  FILE *routine_catalog;
+} cfg_files_t;
+
+static char session_file_path[256] = {0}, cfg_file_path[256] = {0};
+static bool is_standalone_app = false;
+static cfg_files_t standalone_cfg_files;
+static void *standalone_dataset;
 
 static inline void fnull(size_t size, FILE *file)
 {
@@ -30,22 +40,24 @@ static inline void fopcode(cfg_opcode_t *opcode, FILE *file)
 
 void init_cfg_handler()
 {
-  cfg_files.node = NULL;
 }
 
 void destroy_cfg_handler()
 {
   PRINT("  === Close cfg files\n");
 
+  // TODO: dunno how to close up the files
+  /*
   if (cfg_files.node != NULL)  {
     fclose(cfg_files.node);
     fclose(cfg_files.op_edge);
     fclose(cfg_files.routine_edge);
     fclose(cfg_files.routine_catalog);
   }
+  */
 }
 
-static void open_output_files_in_dir(char *cfg_file_path, const char *mode)
+static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path, const char *mode)
 {
   char *cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
 
@@ -55,8 +67,8 @@ static void open_output_files_in_dir(char *cfg_file_path, const char *mode)
   do { \
     *cfg_file_truncate = '\0'; \
     strcat(cfg_file_path, (filename)); \
-    cfg_files.file_field = fopen(cfg_file_path, mode); \
-    if (cfg_files.file_field == NULL) \
+    cfg_files->file_field = fopen(cfg_file_path, mode); \
+    if (cfg_files->file_field == NULL) \
       ERROR("Failed to open cfg file cfg_files."#file_field"\n"); \
     else \
       SPOT("Successfully opened cfg_files."#file_field"\n"); \
@@ -98,7 +110,7 @@ static void open_output_files(const char *script_path)
     return;
   }
 
-  open_output_files_in_dir(cfg_file_path, "w");
+  open_output_files_in_dir(&standalone_cfg_files, cfg_file_path, "w");
 }
 
 void starting_script(const char *script_path)
@@ -106,9 +118,11 @@ void starting_script(const char *script_path)
   struct stat dirinfo;
   char *resolved_path = zend_resolve_path(script_path, strlen(script_path));
 
+  is_standalone_app = true;
+
   if (is_static_analysis()) {
     const char *analysis = get_static_analysis();
-    char cfg_file_path[256] = {0};
+    //char cfg_file_path[256] = {0};
 
     SPOT("Starting static analysis '%s' of file %s on pid %d\n",
          analysis, resolved_path, getpid());
@@ -123,13 +137,13 @@ void starting_script(const char *script_path)
       }
     }
 
-    open_output_files_in_dir(cfg_file_path, "a");
-    load_dataset(analysis);
+    open_output_files_in_dir(&standalone_cfg_files, cfg_file_path, "a");
+    standalone_dataset = load_dataset(analysis);
   } else {
     SPOT("starting_script %s on pid %d\n", resolved_path, getpid());
 
     open_output_files(resolved_path);
-    load_dataset(resolved_path);
+    standalone_dataset = load_dataset(resolved_path);
   }
 
   efree(resolved_path);
@@ -188,13 +202,11 @@ void server_startup()
   chmod(session_file_path, 0777); // running as root here, but child runs as www-data
 
   SPOT("Successfully created webserver session directory %s\n", session_file_path);
-
-  load_dataset("webserver");
 }
 
 void worker_startup()
 {
-  char cfg_file_path[256] = {0}, session_id[24] = {0};
+  char session_id[24] = {0};
   struct stat dirinfo;
 
   strcpy(cfg_file_path, session_file_path);
@@ -219,63 +231,89 @@ void worker_startup()
     }
     SPOT("Successfully created worker directory %s\n", cfg_file_path);
   }
+}
 
-  open_output_files_in_dir(cfg_file_path, "w");
+void cfg_initialize_application(application_t *app)
+{
+  if (is_standalone_app) {
+    app->cfg_files = &standalone_cfg_files;
+    app->dataset = standalone_dataset;
+  } else {
+    char app_cfg_file_path[256] = {0};
+    strcpy(app_cfg_file_path, cfg_file_path);
+    strcat(app_cfg_file_path, "/");
+    strcat(app_cfg_file_path, app->name);
+    app->cfg_files = malloc(sizeof(cfg_files_t));
+    open_output_files_in_dir((cfg_files_t *) app->cfg_files, app_cfg_file_path, "w");
+
+    app->dataset = load_dataset(app->name);
+  }
+
+  load_entry_point_dataset(app);
 }
 
 /* 3 x 4 bytes: { routine_hash | opcode | index } */
-void write_node(uint routine_hash, cfg_opcode_t *opcode, uint index)
+void write_node(application_t *app, uint routine_hash, cfg_opcode_t *opcode, uint index)
 {
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+
   PRINT("Write node 0x%x #%d 0x%01x to cfg\n", routine_hash, index, opcode->opcode);
-  fwrite(&routine_hash, sizeof(uint), 1, cfg_files.node);
-  fopcode(opcode, cfg_files.node);
-  fwrite(&index, sizeof(uint), 1, cfg_files.node);
+  fwrite(&routine_hash, sizeof(uint), 1, cfg_files->node);
+  fopcode(opcode, cfg_files->node);
+  fwrite(&index, sizeof(uint), 1, cfg_files->node);
 }
 
 /* 3 x 4 bytes: { routine_hash | user_level (6) from_index (26) | to_index } */
-void write_op_edge(uint routine_hash, uint from_index, uint to_index,
+void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint to_index,
                    user_level_t user_level)
 {
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+
   PRINT("Write op-edge 0x%x #%d -> #%d to cfg\n", routine_hash, from_index, to_index);
 
   from_index |= (user_level << 26);
 
-  fwrite(&routine_hash, sizeof(uint), 1, cfg_files.op_edge);
-  fwrite(&from_index, sizeof(uint), 1, cfg_files.op_edge);
-  fwrite(&to_index, sizeof(uint), 1, cfg_files.op_edge);
+  fwrite(&routine_hash, sizeof(uint), 1, cfg_files->op_edge);
+  fwrite(&from_index, sizeof(uint), 1, cfg_files->op_edge);
+  fwrite(&to_index, sizeof(uint), 1, cfg_files->op_edge);
 }
 
 /* 4 x 4 bytes: { from_routine_hash | user_level (6) from_index (26) |
  *                to_routine_hash | to_index }
  */
-void write_routine_edge(uint from_routine_hash, uint from_index,
-                        uint to_routine_hash, uint to_index,
-                        user_level_t user_level)
+void write_routine_edge(application_t *app, uint from_routine_hash, uint from_index,
+                        uint to_routine_hash, uint to_index, user_level_t user_level)
 {
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+
   PRINT("Write routine-edge {0x%x #%d} -> {0x%x #%d} to cfg\n",
         from_routine_hash, from_index, to_routine_hash, to_index);
 
   from_index |= (user_level << 26);
 
-  fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files.routine_edge);
-  fwrite(&from_index, sizeof(uint), 1, cfg_files.routine_edge);
-  fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files.routine_edge);
-  fwrite(&to_index, sizeof(uint), 1, cfg_files.routine_edge);
+  fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&from_index, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
 }
 
 /* text line: "<routine_hash> <unit_path>|<routine_name>" */
-void write_routine_catalog_entry(uint routine_hash,
+void write_routine_catalog_entry(application_t *app, uint routine_hash,
                                  const char *unit_path, const char *routine_name)
 {
-  fprintf(cfg_files.routine_catalog, "0x%x %s|%s\n", routine_hash,
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+
+  fprintf(cfg_files->routine_catalog, "0x%x %s|%s\n", routine_hash,
           unit_path, routine_name);
 }
 
-void flush_all_outputs()
+void flush_all_outputs(application_t *app)
 {
-  fflush(cfg_files.node);
-  fflush(cfg_files.op_edge);
-  fflush(cfg_files.routine_edge);
-  fflush(cfg_files.routine_catalog);
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+
+  fflush(cfg_files->node);
+  fflush(cfg_files->op_edge);
+  fflush(cfg_files->routine_edge);
+  fflush(cfg_files->routine_catalog);
   fflush(stderr);
 }

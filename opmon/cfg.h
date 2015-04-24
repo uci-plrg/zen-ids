@@ -42,6 +42,14 @@ typedef struct _cfg_t {
   scarray_t routines; // routine_cfg_t * // TODO: shouldn't I be a hashtable?
 } cfg_t;
 
+typedef struct _application_t {
+  const char *name;
+  const char *root; // ends in '/'
+  cfg_t *cfg;
+  void *cfg_files;
+  void *dataset;
+} application_t;
+
 static inline bool
 is_same_routine_cfg(routine_cfg_t *first, routine_cfg_t *second)
 {

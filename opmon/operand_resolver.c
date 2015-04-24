@@ -1,26 +1,29 @@
 #include "php.h"
+#include "cfg.h"
+#include "cfg_handler.h"
 #include "lib/script_cfi_utils.h"
 #include "operand_resolver.h"
 
-typedef struct _site_root_list_t {
-  const char *site_root;
-  uint length;
-  struct _site_root_list_t *next;
-} site_root_list_t;
+typedef struct _application_list_t {
+  application_t app;
+  uint root_length;
+  struct _application_list_t *next;
+} application_list_t;
 
-static site_root_list_t *site_root_list = NULL;
+static application_list_t *application_list = NULL;
 
 #define SITE_ROOT_FILENAME "opmon.site.root"
 #define SITE_ROOT_FILENAME_LEN 16
 
 void destroy_operand_resolver()
 {
-  site_root_list_t *next_root, *root = site_root_list;
-  while (root != NULL) {
-    next_root = root->next;
-    free((char *) root->site_root);
-    free(root);
-    root = next_root;
+  application_list_t *next_app, *app = application_list;
+  while (app != NULL) {
+    next_app = app->next;
+    free((char *) app->app.root);
+    free((char *) app->app.name);
+    free(app);
+    app = next_app;
   }
 }
 
@@ -85,33 +88,49 @@ char *resolve_eval_body(zend_op *op)
   return eval_body;
 }
 
-static const char *new_site_root(const char *buffer)
+static application_t *new_site_app(const char *buffer)
 {
-  site_root_list_t *new_root;
+  application_list_t *new_app;
+  const char *app_name;
+  char *new_app_name;
 
-  SPOT("Found site root %s\n", buffer);
+  SPOT("Found application %s\n", buffer);
 
-  new_root = malloc(sizeof(site_root_list_t));
-  new_root->site_root = buffer;
-  new_root->length = strlen(buffer);
-  new_root->next = site_root_list;
-  site_root_list = new_root;
-  return new_root->site_root;
+  new_app = malloc(sizeof(application_list_t));
+  new_app->app.root = buffer;
+  new_app->root_length = strlen(buffer);
+
+  app_name = strrchr(buffer, '/');
+  if (app_name == NULL)
+    app_name = buffer;
+  else
+    app_name++;
+  new_app_name = malloc(strlen(app_name) + 1);
+  strcpy(new_app_name, app_name);
+  new_app->app.name = new_app_name;
+
+  new_app->app.cfg = cfg_new();
+  cfg_initialize_application(&new_app->app);
+  new_app->app.cfg_files = NULL;
+
+  new_app->next = application_list;
+  application_list = new_app;
+  return &new_app->app;
 }
 
-const char *locate_site_root(const char *filename /*absolute path*/)
+application_t *locate_application(const char *filename /*absolute path*/)
 {
   char *buffer, *parent_dir;
   uint length = strlen(filename);
-  site_root_list_t *next_root = site_root_list;
+  application_list_t *next_app = application_list;
   struct stat file_info;
 
-  // return existing root if there is one
-  while (next_root != NULL) {
-    if (length > next_root->length &&
-        strncmp(next_root->site_root, filename, next_root->length) == 0)
-      return next_root->site_root;
-    next_root = next_root->next;
+  // return existing app if there is one
+  while (next_app != NULL) {
+    if (length > next_app->root_length &&
+        strncmp(next_app->app.root, filename, next_app->root_length) == 0)
+      return &next_app->app;
+    next_app = next_app->next;
   }
 
   buffer = malloc(length + SITE_ROOT_FILENAME_LEN + 1);
@@ -122,7 +141,7 @@ const char *locate_site_root(const char *filename /*absolute path*/)
     strcat(buffer, filename);
     if (buffer[strlen(buffer) - 1] != '/')
       strcat(buffer, "/");
-    return new_site_root(buffer);
+    return new_site_app(buffer);
   }
 
   while ((parent_dir = strrchr(buffer, '/')) != NULL) {
@@ -130,7 +149,7 @@ const char *locate_site_root(const char *filename /*absolute path*/)
     strcat(buffer, SITE_ROOT_FILENAME);
     if (stat(buffer, &file_info) == 0) {
       parent_dir[1] = '\0'; // remove filename
-      return new_site_root(buffer);
+      return new_site_app(buffer);
     }
     parent_dir[0] = '\0'; // truncate at last slash
   }

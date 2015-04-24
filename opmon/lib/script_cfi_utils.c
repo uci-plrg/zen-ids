@@ -52,7 +52,7 @@ void setup_base_path(char *path, const char *category, const char *app_path)
   strcat(path, "/");
 
   if (stat(path, &dirinfo) != 0)
-    mkdir(path, 0700);
+    mkdir(path, 0777);
 
   script_filename = strrchr(app_path, '/');
   if (script_filename == NULL)

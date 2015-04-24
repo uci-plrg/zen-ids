@@ -10,12 +10,13 @@ typedef struct _control_flow_metadata_t {
   const char *routine_name;
   routine_cfg_t *cfg;
   dataset_routine_t *dataset;
+  application_t *app;
 } control_flow_metadata_t;
 
 void init_metadata_handler();
 void destroy_metadata_handler();
 
-void load_dataset(const char *script_path);
+void *load_dataset(const char *script_path);
 uint get_next_eval_id();
 
 #endif

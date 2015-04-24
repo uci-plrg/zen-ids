@@ -18,7 +18,7 @@
 // #define SPOT_DEBUG 1
 
 typedef struct _compilation_unit_t {
-  const char *site_root; // ends in '/'
+  application_t *application; // `application.path` ends in '/'
   const char *path;
 } compilation_unit_t;
 
@@ -41,13 +41,13 @@ typedef struct _fcall_init_t {
 fcall_init_t fcall_stack[MAX_STACK_FRAME_fcall_stack];
 fcall_init_t *fcall_frame;
 
+static application_t unknown_application = { "<unknown>", "/" };
+
 static sctable_t routines_by_hash;
 static sctable_t routines_by_opcode_address;
 static uint closure_count = 0; // must be per compilation unit!
 
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
-
-extern cfg_t *app_cfg;
 
 static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_hash,
                                    const char *routine_name)
@@ -115,7 +115,7 @@ void function_compiled(zend_op_array *op_array)
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
   function_fqn_t *fqn;
-  control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL };
+  control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename, routine_name[ROUTINE_NAME_LENGTH];
 #ifdef SPOT_DEBUG
@@ -156,10 +156,10 @@ void function_compiled(zend_op_array *op_array)
     fqn = malloc(sizeof(function_fqn_t));
     fqn->unit.path = "<eval>";
 
-    fqn->unit.site_root = locate_site_root(op_array->filename->val);
-    if (fqn->unit.site_root == NULL) {
+    fqn->unit.application = locate_application(op_array->filename->val);
+    if (fqn->unit.application == NULL) {
       WARN("Cannot find site root for eval %s. Defaulting to '/'\n", op_array->filename->val);
-      fqn->unit.site_root = "/";
+      fqn->unit.application = &unknown_application;
     }
   } else {
     const char *classname;
@@ -177,12 +177,12 @@ void function_compiled(zend_op_array *op_array)
       free_filename = true;
     }
     fqn = malloc(sizeof(function_fqn_t));
-    fqn->unit.site_root = locate_site_root(filename);
-    if (fqn->unit.site_root == NULL) {
+    fqn->unit.application = locate_application(filename);
+    if (fqn->unit.application == NULL) {
       WARN("Cannot find site root for filename %s. Defaulting to '/'\n", filename);
-      fqn->unit.site_root = "/";
+      fqn->unit.application = &unknown_application;
     }
-    site_filename = filename + strlen(fqn->unit.site_root);
+    site_filename = filename + strlen(fqn->unit.application->root);
     buffer = malloc(strlen(site_filename) + 1);
     strcpy(buffer, site_filename);
     fqn->unit.path = buffer;
@@ -202,6 +202,7 @@ void function_compiled(zend_op_array *op_array)
   buffer = malloc(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
+  cfm.app = fqn->unit.application;
   buffer = NULL;
   if (is_eval)
     fqn->function.hash = hash_eval(eval_id);
@@ -209,13 +210,13 @@ void function_compiled(zend_op_array *op_array)
     fqn->function.hash = hash_routine(cfm.routine_name);
 
   if (!is_eval) {
-    cfm.dataset = dataset_routine_lookup(fqn->function.hash);
-    cfm.cfg = cfg_routine_lookup(app_cfg, fqn->function.hash);
+    cfm.dataset = dataset_routine_lookup(cfm.app, fqn->function.hash);
+    cfm.cfg = cfg_routine_lookup(cfm.app->cfg, fqn->function.hash);
   }
   if (cfm.cfg == NULL) {
     cfm.cfg = routine_cfg_new(fqn->function.hash); // crash in eval-function-test.php
-    cfg_add_routine(app_cfg, cfm.cfg);
-    write_routine_catalog_entry(fqn->function.hash, fqn->unit.path, routine_name);
+    cfg_add_routine(cfm.app->cfg, cfm.cfg);
+    write_routine_catalog_entry(cfm.app, fqn->function.hash, fqn->unit.path, routine_name);
   } else {
     zend_op *op;
     cfg_opcode_t *cfg_opcode;
@@ -302,7 +303,7 @@ void function_compiled(zend_op_array *op_array)
                   strcpy(to_unit_path, internal_to_path);
                 } else { // `internal_to_path` is just the to filename
                   char *to_unit_filename;
-                  strcpy(to_unit_path, fqn->unit.site_root);
+                  strcpy(to_unit_path, fqn->unit.application->root);
                   strcat(to_unit_path, fqn->unit.path);
                   to_unit_filename = strrchr(to_unit_path, '/');
                   if (to_unit_filename == NULL) {
@@ -321,7 +322,7 @@ void function_compiled(zend_op_array *op_array)
                 } else {
                   free_internal_to_path = true;
                 }
-                site_to_path = internal_to_path + strlen(fqn->unit.site_root);
+                site_to_path = internal_to_path + strlen(fqn->unit.application->root);
                 sprintf(to_routine_name, "%s:<script-body>", site_to_path);
 
                 if (free_internal_to_path)
@@ -332,7 +333,7 @@ void function_compiled(zend_op_array *op_array)
 
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
 
-                write_routine_edge(fqn->function.hash, i,
+                write_routine_edge(cfm.app, fqn->function.hash, i,
                                    to_routine_hash, 0, USER_LEVEL_BOTTOM);
               } break;
               case ZEND_EVAL: {
@@ -351,7 +352,7 @@ void function_compiled(zend_op_array *op_array)
           fcall_init_t *fcall = pop_fcall_init();
           if (fcall->routine_hash > 0) {
             SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
-            write_routine_edge(fqn->function.hash, i,
+            write_routine_edge(cfm.app, fqn->function.hash, i,
                                fcall->routine_hash, 0, USER_LEVEL_BOTTOM);
           } else if (fcall->opcode > 0) {
             SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
@@ -470,11 +471,11 @@ void function_compiled(zend_op_array *op_array)
               fqn->function.hash);
       }
 #endif
-      write_node(fqn->function.hash, cfg_opcode, i);
+      write_node(cfm.app, fqn->function.hash, cfg_opcode, i);
     }
     for (i = 0; i < cfm.cfg->opcode_edges.size; i++) {
       cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
-      write_op_edge(fqn->function.hash, cfg_edge->from_index,
+      write_op_edge(cfm.app, fqn->function.hash, cfg_edge->from_index,
                     cfg_edge->to_index, USER_LEVEL_COMPILER);
 #ifdef SPOT_DEBUG
       if (spot) {
@@ -497,7 +498,7 @@ void function_compiled(zend_op_array *op_array)
     WARN("Found dataset for routine 0x%x\n", fqn->function.hash);
   }
 
-  flush_all_outputs();
+  flush_all_outputs(cfm.app);
 }
 
 // (can never find an eval this way)

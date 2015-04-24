@@ -40,7 +40,7 @@ static pending_load_t pending_load;
 
 static const char *static_analysis;
 
-cfg_t *app_cfg;
+//cfg_t *app_cfg;
 
 static inline void pend_cfm(control_flow_metadata_t *cfm)
 {
@@ -65,13 +65,13 @@ static inline control_flow_metadata_t *peek_cfm()
 static void init_top_level_script(const char *script_path)
 {
   starting_script(script_path);
-  load_entry_point_dataset();
+  //load_entry_point_dataset();
 }
 
 static void init_worker()
 {
   worker_startup();
-  load_entry_point_dataset();
+  //load_entry_point_dataset();
 }
 
 const char *get_static_analysis()
@@ -91,7 +91,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 
   static_analysis = getenv(ENV_STATIC_ANALYSIS);
 
-  app_cfg = cfg_new();
+  //app_cfg = cfg_new();
 
   pending_cfm_stack[0] = NULL;
   pending_cfm_stack[1] = NULL;
