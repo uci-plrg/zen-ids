@@ -1,0 +1,10 @@
+#!/bin/bash
+
+[ -z "$PHP_CFI" ] && echo "This build script requires environment variable 'PHP_CFI' to be set."
+
+cd $PHP_CFI/opmon
+[ ! -e "./configure" ] && $PHP_HOME/scripts/phpize
+[ ! -e "./Makefile" ] && ./current-config
+make install
+cp -u /hd/lib/imagick/imagick/modules/imagick.so modules
+

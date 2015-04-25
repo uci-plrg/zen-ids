@@ -20,6 +20,7 @@ void destroy_operand_resolver()
   application_list_t *next_app, *app = application_list;
   while (app != NULL) {
     next_app = app->next;
+    close_cfg_files(&next_app->app);
     free((char *) app->app.root);
     free((char *) app->app.name);
     free(app);

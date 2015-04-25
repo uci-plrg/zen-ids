@@ -65,13 +65,11 @@ static inline control_flow_metadata_t *peek_cfm()
 static void init_top_level_script(const char *script_path)
 {
   starting_script(script_path);
-  //load_entry_point_dataset();
 }
 
 static void init_worker()
 {
   worker_startup();
-  //load_entry_point_dataset();
 }
 
 const char *get_static_analysis()
@@ -107,6 +105,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
+  monitor->notify_request = cfg_request;
   monitor->notify_worker_startup = init_worker;
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
@@ -117,7 +116,6 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 
 void destroy_event_handler()
 {
-  destroy_cfg_handler();
   destroy_metadata_handler();
   destroy_operand_resolver();
 }

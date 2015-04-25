@@ -14,13 +14,17 @@ typedef struct _cfg_files_t {
   FILE *node;
   FILE *op_edge;
   FILE *routine_edge;
+  FILE *request;
   FILE *routine_catalog;
 } cfg_files_t;
 
 static char session_file_path[256] = {0}, cfg_file_path[256] = {0};
+
 static bool is_standalone_app = false;
 static cfg_files_t standalone_cfg_files;
 static void *standalone_dataset;
+
+static bool is_in_request = false;
 
 static inline void fnull(size_t size, FILE *file)
 {
@@ -42,19 +46,20 @@ void init_cfg_handler()
 {
 }
 
-void destroy_cfg_handler()
+void close_cfg_files(application_t *app)
 {
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+
   PRINT("  === Close cfg files\n");
 
-  // TODO: dunno how to close up the files
-  /*
-  if (cfg_files.node != NULL)  {
-    fclose(cfg_files.node);
-    fclose(cfg_files.op_edge);
-    fclose(cfg_files.routine_edge);
-    fclose(cfg_files.routine_catalog);
+  if (cfg_files != NULL)  {
+    fclose(cfg_files->node);
+    fclose(cfg_files->op_edge);
+    fclose(cfg_files->routine_edge);
+    fclose(cfg_files->routine_catalog);
+    if (!is_standalone_app)
+      fclose(cfg_files->request);
   }
-  */
 }
 
 static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path, const char *mode)
@@ -78,6 +83,8 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
   OPEN_CFG_FILE("op-edge.run", op_edge);
   OPEN_CFG_FILE("routine-edge.run", routine_edge);
   OPEN_CFG_FILE("routine-catalog.tab", routine_catalog);
+  if (!is_standalone_app)
+    OPEN_CFG_FILE("request.run", request);
 
 #undef OPEN_CFG_FILE
 }
@@ -259,7 +266,12 @@ void cfg_initialize_application(application_t *app)
     app->dataset = load_dataset(app->name);
   }
 
-  load_entry_point_dataset(app);
+  initialize_interp_app_context(app);
+}
+
+void cfg_request(bool start)
+{
+  is_in_request = start;
 }
 
 /* 3 x 4 bytes: { routine_hash | opcode | index } */
@@ -291,8 +303,9 @@ void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint 
 /* 4 x 4 bytes: { from_routine_hash | user_level (6) from_index (26) |
  *                to_routine_hash | to_index }
  */
-void write_routine_edge(application_t *app, uint from_routine_hash, uint from_index,
-                        uint to_routine_hash, uint to_index, user_level_t user_level)
+void write_routine_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
+                        uint from_index, uint to_routine_hash, uint to_index,
+                        user_level_t user_level)
 {
   cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
 
@@ -301,10 +314,21 @@ void write_routine_edge(application_t *app, uint from_routine_hash, uint from_in
 
   from_index |= (user_level << 26);
 
-  fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
-  fwrite(&from_index, sizeof(uint), 1, cfg_files->routine_edge);
-  fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
-  fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
+  if (is_new_in_process) {
+    fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+    fwrite(&from_index, sizeof(uint), 1, cfg_files->routine_edge);
+    fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+    fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
+  }
+  if (!is_standalone_app) {
+    if (!is_in_request)
+      ERROR("Routine edge occurred outside of a request!\n");
+
+    fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request);
+    fwrite(&from_index, sizeof(uint), 1, cfg_files->request);
+    fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->request);
+    fwrite(&to_index, sizeof(uint), 1, cfg_files->request);
+  }
 }
 
 /* text line: "<routine_hash> <unit_path>|<routine_name>" */
@@ -324,6 +348,7 @@ void flush_all_outputs(application_t *app)
   fflush(cfg_files->node);
   fflush(cfg_files->op_edge);
   fflush(cfg_files->routine_edge);
+  fflush(cfg_files->request);
   fflush(cfg_files->routine_catalog);
   fflush(stderr);
 }

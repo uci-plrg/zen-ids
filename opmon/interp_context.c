@@ -110,8 +110,9 @@ void initialize_interp_context()
   current_session.user_level = USER_LEVEL_BOTTOM;
 }
 
-void load_entry_point_dataset(application_t *app)
+void initialize_interp_app_context(application_t *app)
 {
+  base_frame.cfm.app = app;
   base_frame.cfm.dataset = dataset_routine_lookup(app, ENTRY_POINT_HASH);
   if (base_frame.cfm.dataset == NULL)
     write_node(app, ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame.cfm.cfg, 0), 0);
@@ -123,28 +124,28 @@ static void push_exception_frame()
   *exception_frame = cur_frame;
 }
 
-static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_index,
-                                  routine_cfg_t *to_cfg, uint to_index)
+static void generate_routine_edge(bool is_new_in_process, control_flow_metadata_t *from_cfm,
+                                  uint from_index, routine_cfg_t *to_cfg, uint to_index)
 {
-  bool write_edge = true;
-  cfg_add_routine_edge(from_cfm->cfg, from_index, to_cfg, to_index, current_session.user_level);
+  if (is_new_in_process)
+    cfg_add_routine_edge(from_cfm->cfg, from_index, to_cfg, to_index, current_session.user_level);
 
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_index, to_index,
                                     to_cfg->routine_hash, current_session.user_level)) {
-      write_edge = false;
+      is_new_in_process = false;
       PRINT("<MON> Verified routine edge [0x%x|%u -> 0x%x]\n",
             from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
     }
   }
 
-  if (write_edge) {
+  if (is_new_in_process) {
     zend_uchar opcode = routine_cfg_get_opcode(from_cfm->cfg, from_index)->opcode;
     WARN("<MON> New routine edge from op 0x%x [0x%x %u -> 0x%x]\n",
           opcode, from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
-    write_routine_edge(from_cfm->app, from_cfm->cfg->routine_hash, from_index,
-                       to_cfg->routine_hash, to_index, current_session.user_level);
   }
+  write_routine_edge(is_new_in_process, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+                     to_cfg->routine_hash, to_index, current_session.user_level);
 }
 
 static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, uint to_index)
@@ -338,26 +339,28 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
       zend_op *new_prev_op = &new_prev_frame.opcodes[new_prev_frame.op_index];
       compiled_edge_target_t compiled_target = get_compiled_edge_target(new_prev_op,
                                                                         new_prev_frame.op_index);
-
-      if (!cfg_has_routine_edge(new_prev_frame.cfm.cfg, new_prev_frame.op_index,
-                                new_cur_frame.cfm.cfg, 0)) {
-        if (compiled_target.type != COMPILED_EDGE_CALL && new_prev_op->opcode != ZEND_NEW)
+      bool is_new_in_process = !cfg_has_routine_edge(new_prev_frame.cfm.cfg,
+                                                     new_prev_frame.op_index,
+                                                     new_cur_frame.cfm.cfg, 0);
+      if (is_new_in_process) {
+        if (compiled_target.type != COMPILED_EDGE_CALL && new_prev_op->opcode != ZEND_NEW) {
           WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n",
                compiled_target.type, new_prev_op->opcode);
+        }
         if (IS_SAME_FRAME(new_prev_frame, base_frame)) {
           SPOT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
                new_cur_frame.cfm.cfg->routine_hash);
         }
-
-        generate_routine_edge(&new_prev_frame.cfm, new_prev_frame.op_index,
-                              new_cur_frame.cfm.cfg, 0); // 0 means entry, even if that opcode is not executable
-      } else {
-        PRINT("(skipping existing routine edge)\n");
       }
 
-      PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
-            getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
-            p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
+      generate_routine_edge(is_new_in_process, &new_prev_frame.cfm, new_prev_frame.op_index,
+                            new_cur_frame.cfm.cfg, 0); // op index 0 just means entry
+
+      if (is_new_in_process) {
+        PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+              getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
+              p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
+      }
     }
   }
 
@@ -463,8 +466,10 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
+#ifdef SPOT_DEBUG
   if (cur_frame.cfm.cfg->routine_hash == 0x35b71951)
     SPOT("\twp-admin/admin.php: %d\n", op->lineno);
+#endif
 
   switch (op->opcode) {
     case ZEND_DO_FCALL:
@@ -534,12 +539,14 @@ void opcode_executing(const zend_op *op)
         } else {
           PRINT("(skipping existing exception edge)\n");
         }
-      } else if (!cfg_has_routine_edge(exception_frame->cfm.cfg, exception_frame->throw_index,
-                                       cur_frame.cfm.cfg, cur_frame.op_index)) {
-        generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,
-                              cur_frame.cfm.cfg, cur_frame.op_index);
       } else {
-        PRINT("(skipping existing exception edge)\n");
+        bool is_new_in_process = !cfg_has_routine_edge(exception_frame->cfm.cfg,
+                                                       exception_frame->throw_index,
+                                                       cur_frame.cfm.cfg, cur_frame.op_index);
+        generate_routine_edge(is_new_in_process, &exception_frame->cfm,
+                              exception_frame->throw_index, cur_frame.cfm.cfg, cur_frame.op_index);
+        if (!is_new_in_process)
+          PRINT("(skipping existing exception edge)\n");
       }
       DECREMENT_STACK(exception_stack, exception_frame);
       caught_exception = true;

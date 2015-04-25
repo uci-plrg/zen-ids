@@ -333,7 +333,7 @@ void function_compiled(zend_op_array *op_array)
 
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
 
-                write_routine_edge(cfm.app, fqn->function.hash, i,
+                write_routine_edge(true, cfm.app, fqn->function.hash, i,
                                    to_routine_hash, 0, USER_LEVEL_BOTTOM);
               } break;
               case ZEND_EVAL: {
@@ -352,7 +352,7 @@ void function_compiled(zend_op_array *op_array)
           fcall_init_t *fcall = pop_fcall_init();
           if (fcall->routine_hash > 0) {
             SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
-            write_routine_edge(cfm.app, fqn->function.hash, i,
+            write_routine_edge(true, cfm.app, fqn->function.hash, i,
                                fcall->routine_hash, 0, USER_LEVEL_BOTTOM);
           } else if (fcall->opcode > 0) {
             SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
