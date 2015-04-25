@@ -240,9 +240,19 @@ void cfg_initialize_application(application_t *app)
     app->dataset = standalone_dataset;
   } else {
     char app_cfg_file_path[256] = {0};
+    struct stat dirinfo;
+
     strcpy(app_cfg_file_path, cfg_file_path);
-    strcat(app_cfg_file_path, "/");
     strcat(app_cfg_file_path, app->name);
+    strcat(app_cfg_file_path, "/");
+
+    if (stat(app_cfg_file_path, &dirinfo) != 0) {
+      if (mkdir(app_cfg_file_path, 0700) != 0) {
+        ERROR("Failed to create the app cfg file directory %s\n", app_cfg_file_path);
+        return;
+      }
+    }
+
     app->cfg_files = malloc(sizeof(cfg_files_t));
     open_output_files_in_dir((cfg_files_t *) app->cfg_files, app_cfg_file_path, "w");
 

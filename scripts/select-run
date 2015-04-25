@@ -19,6 +19,9 @@ shift $(( $OPTIND - 1 ))
 index=$1
 filter=$2
 
+[ -z "$directory" ] && [ -z "$log" ] && usage && exit
+[ -z "$index" ] && usage && exit
+
 run_catalog=$PHP_DATASET_DIR/runs.tab
 
 if [ -z "$filter" ]

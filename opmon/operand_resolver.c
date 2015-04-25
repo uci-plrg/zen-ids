@@ -88,7 +88,7 @@ char *resolve_eval_body(zend_op *op)
   return eval_body;
 }
 
-static application_t *new_site_app(const char *buffer)
+static application_t *new_site_app(char *buffer)
 {
   application_list_t *new_app;
   const char *app_name;
@@ -97,8 +97,6 @@ static application_t *new_site_app(const char *buffer)
   SPOT("Found application %s\n", buffer);
 
   new_app = malloc(sizeof(application_list_t));
-  new_app->app.root = buffer;
-  new_app->root_length = strlen(buffer);
 
   app_name = strrchr(buffer, '/');
   if (app_name == NULL)
@@ -109,9 +107,13 @@ static application_t *new_site_app(const char *buffer)
   strcpy(new_app_name, app_name);
   new_app->app.name = new_app_name;
 
+  if (buffer[strlen(buffer) - 1] != '/')
+    strcat(buffer, "/");
+  new_app->app.root = buffer;
+  new_app->root_length = strlen(buffer);
+
   new_app->app.cfg = cfg_new();
   cfg_initialize_application(&new_app->app);
-  new_app->app.cfg_files = NULL;
 
   new_app->next = application_list;
   application_list = new_app;
@@ -139,19 +141,16 @@ application_t *locate_application(const char *filename /*absolute path*/)
   if (strcmp(buffer + length - 5, ".phar") == 0) {
     strcpy(buffer, "phar://");
     strcat(buffer, filename);
-    if (buffer[strlen(buffer) - 1] != '/')
-      strcat(buffer, "/");
     return new_site_app(buffer);
   }
 
   while ((parent_dir = strrchr(buffer, '/')) != NULL) {
-    parent_dir[1] = '\0'; // truncate after last slash
+    parent_dir[1] = '\0'; // truncate after trailing slash
     strcat(buffer, SITE_ROOT_FILENAME);
+    parent_dir[0] = '\0'; // remove filename and trailing slash
     if (stat(buffer, &file_info) == 0) {
-      parent_dir[1] = '\0'; // remove filename
       return new_site_app(buffer);
     }
-    parent_dir[0] = '\0'; // truncate at last slash
   }
 
   free(buffer);

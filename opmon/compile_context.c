@@ -358,7 +358,7 @@ void function_compiled(zend_op_array *op_array)
             SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
                  "Dataset: %s. edges: %d.\n", i, fcall->opcode, cfm.routine_name, fqn->unit.path,
                  op->lineno, fqn->function.hash, cfm.dataset == NULL ? "missing" : "found",
-                 cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.dataset, i));
+                 cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.app, cfm.dataset, i));
           }
         } break;
         case ZEND_INIT_FCALL:
