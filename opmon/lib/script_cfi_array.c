@@ -1,14 +1,5 @@
 #include "script_cfi_array.h"
 
-/*
-#define BLOCK_SIZE 0x100
-#define LEVEL1_SHIFT 0x18
-#define LEVEL2_SHIFT 0x10
-#define LEVEL3_SHIFT 8
-#define LEVEL_MASK 0xff
-#define MAX_CAPACITY 0x100000000
-*/
-
 #define LEVEL1_SHIFT 0x12
 #define LEVEL2_SHIFT 0xc
 #define LEVEL3_SHIFT 6
@@ -120,6 +111,11 @@ void *scarray_get(scarray_t *a, uint index)
   }
 
   return get_block(a, index)->blocks[index & LEVEL_MASK];
+}
+
+void scarray_clear(scarray_t *a)
+{
+  a->size = 0;
 }
 
 void scarray_unit_test()

@@ -22,6 +22,7 @@ void scarray_init(scarray_t *a);
 void scarray_destroy(scarray_t *a);
 void scarray_append(scarray_t *a, void *e);
 void *scarray_get(scarray_t *a, uint index);
+void scarray_clear(scarray_t *a);
 
 void scarray_unit_test();
 

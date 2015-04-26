@@ -1,4 +1,5 @@
 #include "php.h"
+#include "httpd.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -15,6 +16,7 @@ typedef struct _cfg_files_t {
   FILE *op_edge;
   FILE *routine_edge;
   FILE *request;
+  FILE *request_edge;
   FILE *routine_catalog;
 } cfg_files_t;
 
@@ -24,7 +26,30 @@ static bool is_standalone_app = false;
 static cfg_files_t standalone_cfg_files;
 static void *standalone_dataset;
 
-static bool is_in_request = false;
+typedef struct _session_t {
+  char id[256];
+  uint hash;
+} session_t;
+
+typedef struct _request_edge_t {
+  uint from_index;
+  uint from_routine_hash;
+  uint to_index;
+  uint to_routine_hash;
+  uint user_level;
+} request_edge_t;
+
+typedef struct _request_state_t {
+  bool is_in_request;
+  bool is_new_request;
+  uint request_id;
+  request_rec *r;
+  scarray_t *request_edges; // of `request_edge_t`
+} request_state_t;
+
+static request_state_t request_state;
+static const uint request_tag = 1;
+static session_t session = { {0}, 0 };
 
 static inline void fnull(size_t size, FILE *file)
 {
@@ -42,8 +67,23 @@ static inline void fopcode(cfg_opcode_t *opcode, FILE *file)
   fwrite(&opcode->line_number, sizeof(ushort), 1, file);
 }
 
+static uint get_timestamp(void)
+{
+  uint lo, hi;
+  __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
+
+  return (hi << 0xc) | (lo >> 0x14);
+}
+
+static void write_request_entry(cfg_files_t *cfg_files, request_rec *r)
+{
+  fprintf(cfg_files->request, "<request-id> %08d\n", request_state.request_id);
+  fprintf(cfg_files->request, "<request-ip> %s\n", r->useragent_ip);
+}
+
 void init_cfg_handler()
 {
+  memset(&request_state, 0, sizeof(request_state_t));
 }
 
 void close_cfg_files(application_t *app)
@@ -59,6 +99,12 @@ void close_cfg_files(application_t *app)
     fclose(cfg_files->routine_catalog);
     if (!is_standalone_app)
       fclose(cfg_files->request);
+      fclose(cfg_files->request_edge);
+  }
+
+  if (request_state.request_edges != NULL) {
+    scarray_destroy(request_state.request_edges);
+    free(request_state.request_edges);
   }
 }
 
@@ -83,8 +129,10 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
   OPEN_CFG_FILE("op-edge.run", op_edge);
   OPEN_CFG_FILE("routine-edge.run", routine_edge);
   OPEN_CFG_FILE("routine-catalog.tab", routine_catalog);
-  if (!is_standalone_app)
-    OPEN_CFG_FILE("request.run", request);
+  if (!is_standalone_app) {
+    OPEN_CFG_FILE("request.tab", request);
+    OPEN_CFG_FILE("request-edge.run", request_edge);
+  }
 
 #undef OPEN_CFG_FILE
 }
@@ -269,9 +317,28 @@ void cfg_initialize_application(application_t *app)
   initialize_interp_app_context(app);
 }
 
-void cfg_request(bool start)
+void cfg_request(request_rec *r)
 {
-  is_in_request = start;
+  request_state.is_in_request = (r != NULL);
+
+  if (request_state.is_in_request) {
+    request_state.is_new_request = true;
+    request_state.request_id++;
+    request_state.r = r;
+
+    if (request_state.request_edges == NULL) { // lazy construct b/c standalone mode doesn't need it
+      request_state.request_edges = malloc(sizeof(scarray_t));
+      scarray_init(request_state.request_edges);
+    } else {
+      scarray_clear(request_state.request_edges);
+    }
+
+    if (PS(id) != NULL && strcmp(PS(id)->val, session.id) != 0) {
+      strcpy(session.id, PS(id)->val);
+      session.hash = hash_string(session.id);
+      SPOT("New session id %s (0x%x)\n", session.id, session.hash);
+    }
+  }
 }
 
 /* 3 x 4 bytes: { routine_hash | opcode | index } */
@@ -308,26 +375,66 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
                         user_level_t user_level)
 {
   cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+  request_edge_t *new_edge = NULL;
+  uint packed_from_index;
+
+  if (!is_new_in_process) {
+    uint i;
+    for (i = 0; i < request_state.request_edges->size; i++) {
+      request_edge_t *next = (request_edge_t *) scarray_get(request_state.request_edges, i);
+      if (from_routine_hash == next->from_routine_hash && from_index == next->from_index &&
+          to_routine_hash == next->to_routine_hash && to_index == next->to_index) {
+        new_edge = next;
+        if (new_edge->user_level <= user_level)
+          return; // nothing new about this edge
+        else
+          new_edge->user_level = user_level;
+      }
+    }
+  }
 
   PRINT("Write routine-edge {0x%x #%d} -> {0x%x #%d} to cfg\n",
         from_routine_hash, from_index, to_routine_hash, to_index);
 
-  from_index |= (user_level << 26);
+  packed_from_index = from_index | (user_level << 26);
 
+  if (request_state.is_new_request) {
+    uint timestamp = get_timestamp();
+
+    fwrite(&request_tag, sizeof(uint), 1, cfg_files->request_edge);
+    fwrite(&request_state.request_id, sizeof(uint), 1, cfg_files->request_edge);
+    fwrite(&session.hash, sizeof(uint), 1, cfg_files->request_edge);
+    fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);
+
+    write_request_entry(cfg_files, request_state.r);
+
+    request_state.is_new_request = false;
+  }
   if (is_new_in_process) {
     fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
-    fwrite(&from_index, sizeof(uint), 1, cfg_files->routine_edge);
+    fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->routine_edge);
     fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
     fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
   }
   if (!is_standalone_app) {
-    if (!is_in_request)
+    if (!request_state.is_in_request)
       ERROR("Routine edge occurred outside of a request!\n");
 
-    fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request);
-    fwrite(&from_index, sizeof(uint), 1, cfg_files->request);
-    fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->request);
-    fwrite(&to_index, sizeof(uint), 1, cfg_files->request);
+    if (new_edge == NULL) {
+      new_edge = malloc(sizeof(request_edge_t));
+      memset(new_edge, 0, sizeof(request_edge_t));
+      new_edge->from_index = from_index;
+      new_edge->from_routine_hash = from_routine_hash;
+      new_edge->to_index = to_index;
+      new_edge->to_routine_hash = to_routine_hash;
+      new_edge->user_level = user_level;
+      scarray_append(request_state.request_edges, new_edge);
+    }
+
+    fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
+    fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->request_edge);
+    fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
+    fwrite(&to_index, sizeof(uint), 1, cfg_files->request_edge);
   }
 }
 
@@ -348,7 +455,10 @@ void flush_all_outputs(application_t *app)
   fflush(cfg_files->node);
   fflush(cfg_files->op_edge);
   fflush(cfg_files->routine_edge);
-  fflush(cfg_files->request);
   fflush(cfg_files->routine_catalog);
+  if (!is_standalone_app) {
+    fflush(cfg_files->request);
+    fflush(cfg_files->request_edge);
+  }
   fflush(stderr);
 }
