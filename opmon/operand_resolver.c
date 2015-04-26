@@ -148,10 +148,11 @@ application_t *locate_application(const char *filename /*absolute path*/)
   while ((parent_dir = strrchr(buffer, '/')) != NULL) {
     parent_dir[1] = '\0'; // truncate after trailing slash
     strcat(buffer, SITE_ROOT_FILENAME);
-    parent_dir[0] = '\0'; // remove filename and trailing slash
     if (stat(buffer, &file_info) == 0) {
+      parent_dir[0] = '\0'; // remove filename and trailing slash
       return new_site_app(buffer);
     }
+    parent_dir[0] = '\0'; // remove filename and trailing slash
   }
 
   free(buffer);

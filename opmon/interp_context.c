@@ -128,7 +128,8 @@ static void generate_routine_edge(bool is_new_in_process, control_flow_metadata_
                                   uint from_index, routine_cfg_t *to_cfg, uint to_index)
 {
   if (is_new_in_process)
-    cfg_add_routine_edge(from_cfm->cfg, from_index, to_cfg, to_index, current_session.user_level);
+    cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index, to_cfg, to_index,
+                         current_session.user_level);
 
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_index, to_index,
@@ -339,7 +340,8 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
       zend_op *new_prev_op = &new_prev_frame.opcodes[new_prev_frame.op_index];
       compiled_edge_target_t compiled_target = get_compiled_edge_target(new_prev_op,
                                                                         new_prev_frame.op_index);
-      bool is_new_in_process = !cfg_has_routine_edge(new_prev_frame.cfm.cfg,
+      bool is_new_in_process = !cfg_has_routine_edge(new_prev_frame.cfm.app->cfg,
+                                                     new_prev_frame.cfm.cfg,
                                                      new_prev_frame.op_index,
                                                      new_cur_frame.cfm.cfg, 0);
       if (is_new_in_process) {
@@ -540,7 +542,8 @@ void opcode_executing(const zend_op *op)
           PRINT("(skipping existing exception edge)\n");
         }
       } else {
-        bool is_new_in_process = !cfg_has_routine_edge(exception_frame->cfm.cfg,
+        bool is_new_in_process = !cfg_has_routine_edge(exception_frame->cfm.app->cfg,
+                                                       exception_frame->cfm.cfg,
                                                        exception_frame->throw_index,
                                                        cur_frame.cfm.cfg, cur_frame.op_index);
         generate_routine_edge(is_new_in_process, &exception_frame->cfm,

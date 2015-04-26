@@ -40,6 +40,9 @@ void
 sctable_remove(sctable_t *t, KEY_TYPE key);
 
 void
+sctable_clear(sctable_t *t);
+
+void
 sctable_destroy(sctable_t *t);
 
 #undef KEY_TYPE

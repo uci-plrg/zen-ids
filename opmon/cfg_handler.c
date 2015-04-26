@@ -1,5 +1,6 @@
 #include "php.h"
 #include "httpd.h"
+#include "util_script.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -31,12 +32,15 @@ typedef struct _session_t {
   uint hash;
 } session_t;
 
+#define HASH_ROUTINE_EDGE(from, to) ((((uint64)from) << 0x20) | ((uint64)to))
+
 typedef struct _request_edge_t {
   uint from_index;
   uint from_routine_hash;
   uint to_index;
   uint to_routine_hash;
   uint user_level;
+  struct _request_edge_t *next;
 } request_edge_t;
 
 typedef struct _request_state_t {
@@ -44,11 +48,13 @@ typedef struct _request_state_t {
   bool is_new_request;
   uint request_id;
   request_rec *r;
-  scarray_t *request_edges; // of `request_edge_t`
+  sctable_t *edges; // of `request_edge_t`
+  uint pool_index;
+  scarray_t *edge_pool;
 } request_state_t;
 
 static request_state_t request_state;
-static const uint request_tag = 1;
+static const uint request_tag = 2; // N.B.: avoid collision with app entry point hash
 static session_t session = { {0}, 0 };
 
 static inline void fnull(size_t size, FILE *file)
@@ -77,8 +83,53 @@ static uint get_timestamp(void)
 
 static void write_request_entry(cfg_files_t *cfg_files, request_rec *r)
 {
+  int i, result;
+  apr_off_t length;
+  apr_size_t size;
+  char buffer[512];
+  apr_table_entry_t *entry;
+
   fprintf(cfg_files->request, "<request-id> %08d\n", request_state.request_id);
-  fprintf(cfg_files->request, "<request-ip> %s\n", r->useragent_ip);
+  fprintf(cfg_files->request, "<client-ip> %s\n", r->useragent_ip);
+  fprintf(cfg_files->request, "<requested-file> %s\n", r->filename);
+  fprintf(cfg_files->request, "<method> %s\n", r->method);
+  fprintf(cfg_files->request, "<arguments> %s\n", r->args);
+
+  {
+    const apr_array_header_t *entries = NULL;
+    entries = apr_table_elts(r->headers_in);
+    entry = (apr_table_entry_t *) entries->elts;
+    for (i = 0; i < entries->nelts; i++)
+      fprintf(cfg_files->request, "<header> %s=%s\n", entry[i].key, entry[i].val);
+  }
+
+  if (strcmp(r->method, "GET") == 0) {
+    apr_table_t *table;
+    apr_array_header_t *entries;
+    ap_args_to_table(r, &table);
+    entries = (apr_array_header_t *) table;
+    entry = (apr_table_entry_t *) entries->elts;
+    for (i = 0; i < entries->nelts; i++)
+      fprintf(cfg_files->request, "<get-variable> %s=%s\n", entry[i].key, entry[i].val);
+  } else if (strcmp(r->method, "POST") == 0) {
+    apr_array_header_t *entries = NULL;
+    result = ap_parse_form_data(r, NULL, &entries, -1, 8192);
+    if (result == OK) {
+      entry = (apr_table_entry_t *) entries->elts;
+      for (i = 0; i < entries->nelts; i++)
+        fprintf(cfg_files->request, "<post-variable> %s=%s\n", entry[i].key, entry[i].val);
+      if (false) {
+        while (entries != NULL && !apr_is_empty_array(entries)) {
+          ap_form_pair_t *entry = (ap_form_pair_t *) apr_array_pop(entries);
+          apr_brigade_length(entry->value, 1, &length);
+          size = (apr_size_t) length;
+          apr_brigade_flatten(entry->value, buffer, &size);
+          buffer[length] = '\0';
+          fprintf(cfg_files->request, "<post-variable> %s=%s\n", entry->name, buffer);
+        }
+      }
+    }
+  }
 }
 
 void init_cfg_handler()
@@ -102,9 +153,18 @@ void close_cfg_files(application_t *app)
       fclose(cfg_files->request_edge);
   }
 
-  if (request_state.request_edges != NULL) {
-    scarray_destroy(request_state.request_edges);
-    free(request_state.request_edges);
+  if (request_state.edges != NULL) {
+    request_edge_t *edge;
+    for (edge = (request_edge_t *) scarray_iterator_start(request_state.edge_pool);
+         edge != NULL; edge = (request_edge_t *) scarray_iterator_next()) {
+      free(edge);
+    }
+    scarray_destroy(request_state.edge_pool);
+    free(request_state.edge_pool);
+    request_state.edge_pool = NULL;
+    sctable_destroy(request_state.edges);
+    free(request_state.edges);
+    request_state.edges = NULL;
   }
 }
 
@@ -326,11 +386,15 @@ void cfg_request(request_rec *r)
     request_state.request_id++;
     request_state.r = r;
 
-    if (request_state.request_edges == NULL) { // lazy construct b/c standalone mode doesn't need it
-      request_state.request_edges = malloc(sizeof(scarray_t));
-      scarray_init(request_state.request_edges);
-    } else {
-      scarray_clear(request_state.request_edges);
+    if (request_state.edges == NULL) { // lazy construct b/c standalone mode doesn't need it
+      request_state.edge_pool = malloc(sizeof(scarray_t));
+      scarray_init(request_state.edge_pool);
+      request_state.edges = malloc(sizeof(sctable_t));
+      request_state.edges->hash_bits = 10;
+      sctable_init(request_state.edges);
+    } else { // clear the request edges
+      sctable_clear(request_state.edges);
+      request_state.pool_index = 0;
     }
 
     if (PS(id) != NULL && strcmp(PS(id)->val, session.id) != 0) {
@@ -375,21 +439,23 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
                         user_level_t user_level)
 {
   cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
-  request_edge_t *new_edge = NULL;
+  request_edge_t *edge_entry = NULL, *new_edge = NULL;
+  uint64 key = HASH_ROUTINE_EDGE(from_routine_hash, to_routine_hash);
   uint packed_from_index;
 
   if (!is_new_in_process) {
-    uint i;
-    for (i = 0; i < request_state.request_edges->size; i++) {
-      request_edge_t *next = (request_edge_t *) scarray_get(request_state.request_edges, i);
+    request_edge_t *next = (request_edge_t *) sctable_lookup(request_state.edges, key);
+    edge_entry = next;
+    while (next != NULL) {
       if (from_routine_hash == next->from_routine_hash && from_index == next->from_index &&
           to_routine_hash == next->to_routine_hash && to_index == next->to_index) {
         new_edge = next;
         if (new_edge->user_level <= user_level)
           return; // nothing new about this edge
-        else
-          new_edge->user_level = user_level;
+        new_edge->user_level = user_level;
+        break;
       }
+      next = next->next;
     }
   }
 
@@ -421,14 +487,23 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
       ERROR("Routine edge occurred outside of a request!\n");
 
     if (new_edge == NULL) {
-      new_edge = malloc(sizeof(request_edge_t));
-      memset(new_edge, 0, sizeof(request_edge_t));
+      if (request_state.pool_index < request_state.edge_pool->size) {
+        new_edge = scarray_get(request_state.edge_pool, request_state.pool_index++);
+        if (new_edge == edge_entry)
+          ERROR("Fail!\n");
+      } else {
+        new_edge = malloc(sizeof(request_edge_t));
+        memset(new_edge, 0, sizeof(request_edge_t));
+        scarray_append(request_state.edge_pool, new_edge);
+        request_state.pool_index++;
+      }
       new_edge->from_index = from_index;
       new_edge->from_routine_hash = from_routine_hash;
       new_edge->to_index = to_index;
       new_edge->to_routine_hash = to_routine_hash;
       new_edge->user_level = user_level;
-      scarray_append(request_state.request_edges, new_edge);
+      new_edge->next = edge_entry;
+      sctable_add_or_replace(request_state.edges, key, new_edge);
     }
 
     fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);

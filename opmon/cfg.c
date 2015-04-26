@@ -17,13 +17,20 @@ typedef struct _cfg_t {
 } cfg_t;
 */
 
+#define HASH_ROUTINE_EDGE(from, to) \
+  ((((uint64)(from)->routine_hash) << 0x20) | ((uint64)(to)->routine_hash))
+
+typedef struct _cfg_routine_edge_entry_t {
+  cfg_routine_edge_t edge;
+  struct _cfg_routine_edge_entry_t *next;
+} cfg_routine_edge_entry_t;
+
 routine_cfg_t *routine_cfg_new(uint routine_hash)
 {
   routine_cfg_t *cfg = malloc(sizeof(routine_cfg_t));
   cfg->routine_hash = routine_hash;
   scarray_init(&cfg->opcodes);
   scarray_init(&cfg->opcode_edges);
-  scarray_init(&cfg->routine_edges);
   return cfg;
 }
 
@@ -76,42 +83,49 @@ void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_in
 cfg_t *cfg_new()
 {
   cfg_t *cfg = malloc(sizeof(cfg_t));
-  scarray_init(&cfg->routines);
+  cfg->routines.hash_bits = 9;
+  sctable_init(&cfg->routines);
+  cfg->routine_edges.hash_bits = 10;
+  sctable_init(&cfg->routine_edges);
   return cfg;
 }
 
 void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine)
 {
-  scarray_append(&cfg->routines, routine);
+  sctable_add(&cfg->routines, routine->routine_hash, routine);
 }
 
-bool cfg_has_routine_edge(routine_cfg_t *from_routine, uint from_index,
+bool cfg_has_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_index,
                           routine_cfg_t *to_routine, uint to_index)
 {
-  uint i;
-  cfg_routine_edge_t *existing_edge;
-  for (i = 0; i < from_routine->routine_edges.size; i++) {
-    existing_edge = routine_cfg_get_routine_edge(from_routine, i);
-    if (existing_edge->from_index == from_index &&
-        is_same_routine_cfg(existing_edge->to_routine, to_routine) &&
-        existing_edge->to_index == to_index) {
+  uint64 key = HASH_ROUTINE_EDGE(from_routine, to_routine);
+  cfg_routine_edge_entry_t *entry = sctable_lookup(&cfg->routine_edges, key);
+  while (entry != NULL) {
+    if (is_same_routine_cfg(entry->edge.from_routine, from_routine) &&
+        entry->edge.from_index == from_index &&
+        is_same_routine_cfg(entry->edge.to_routine, to_routine) &&
+        entry->edge.to_index == to_index) {
       return true;
     }
+    entry = entry->next;
   }
   return false;
 }
 
-void cfg_add_routine_edge(routine_cfg_t *from_routine, uint from_index,
+void cfg_add_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_index,
                           routine_cfg_t *to_routine, uint to_index,
                           user_level_t user_level)
 {
-  cfg_routine_edge_t *cfg_edge = malloc(sizeof(cfg_routine_edge_t));
-  memset(cfg_edge, 0, sizeof(cfg_routine_edge_t));
-  scarray_append(&from_routine->routine_edges, cfg_edge);
+  uint64 key = HASH_ROUTINE_EDGE(from_routine, to_routine);
+  cfg_routine_edge_entry_t *key_entry = sctable_lookup(&cfg->routine_edges, key);
+  cfg_routine_edge_entry_t *cfg_entry = malloc(sizeof(cfg_routine_edge_entry_t));
+  memset(cfg_entry, 0, sizeof(cfg_routine_edge_entry_t));
+  cfg_entry->next = key_entry;
+  sctable_add_or_replace(&cfg->routine_edges, key, cfg_entry);
 
-  cfg_edge->from_index = from_index;
-  cfg_edge->to_index = to_index;
-  cfg_edge->from_routine = from_routine;
-  cfg_edge->to_routine = to_routine;
-  cfg_edge->user_level = user_level;
+  cfg_entry->edge.from_index = from_index;
+  cfg_entry->edge.to_index = to_index;
+  cfg_entry->edge.from_routine = from_routine;
+  cfg_entry->edge.to_routine = to_routine;
+  cfg_entry->edge.user_level = user_level;
 }

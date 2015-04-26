@@ -103,19 +103,37 @@ sctable_add_or_replace(sctable_t *t, KEY_TYPE key, void *value)
 void
 sctable_remove(sctable_t *t, KEY_TYPE key)
 {
-    sctable_entry_t *e, *prev_e = NULL;
-    uint hindex = HASH_FUNC(key, t);
-    for (e = t->data[hindex]; e; prev_e = e, e = e->next) {
-        if (e->key == key) {
-            if (prev_e)
-                prev_e->next = e->next;
-            else
-                t->data[hindex] = e->next;
-            t->entries--;
-            TABLE_FREE(e);
-            break;
-        }
+  sctable_entry_t *e, *prev_e = NULL;
+  uint hindex = HASH_FUNC(key, t);
+  for (e = t->data[hindex]; e; prev_e = e, e = e->next) {
+    if (e->key == key) {
+      if (prev_e)
+        prev_e->next = e->next;
+      else
+        t->data[hindex] = e->next;
+      t->entries--;
+      TABLE_FREE(e);
+      break;
     }
+  }
+}
+
+void
+sctable_clear(sctable_t *t)
+{
+  uint i;
+  sctable_entry_t *e, *next;
+  for (i = 0; i < t->capacity; i++) {
+    for (e = t->data[i]; e; e = next) {
+      next = e->next;
+      t->entries--;
+      TABLE_FREE(e);
+    }
+    t->data[i] = NULL;
+  }
+
+  if (t->entries != 0)
+    ERROR("Failed to clear the hashtable!\n");
 }
 
 void

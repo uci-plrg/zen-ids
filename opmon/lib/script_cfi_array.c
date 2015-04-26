@@ -6,6 +6,15 @@
 #define LEVEL_MASK 0x3f
 #define MAX_CAPACITY 0x1000000
 
+typedef struct _scarray_iterator_t {
+  scarray_t *array;
+  scarray_data_t *block;
+  void **item;
+  uint index;
+} scarray_iterator_t;
+
+static scarray_iterator_t iterator; // not threadsafe!
+
 static void expand_level(scarray_data_t *level)
 {
   uint i;
@@ -113,9 +122,26 @@ void *scarray_get(scarray_t *a, uint index)
   return get_block(a, index)->blocks[index & LEVEL_MASK];
 }
 
-void scarray_clear(scarray_t *a)
+void *scarray_iterator_start(scarray_t *a)
 {
-  a->size = 0;
+  iterator.array = a;
+  iterator.block = get_block(a, 0);
+  iterator.item = &iterator.block->blocks[0];
+  iterator.index = 1;
+  return *iterator.item;
+}
+
+void *scarray_iterator_next()
+{
+  if (iterator.index == iterator.array->size)
+    return NULL;
+
+  if (iterator.item - iterator.block->blocks == BLOCK_SIZE) {
+    iterator.block = get_block(iterator.array, iterator.index);
+    iterator.item = &iterator.block->blocks[0];
+  }
+  iterator.index++;
+  return *iterator.item;
 }
 
 void scarray_unit_test()
