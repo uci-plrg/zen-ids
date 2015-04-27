@@ -94,7 +94,6 @@ static uint get_timestamp(void)
 
 static void write_request_entry(cfg_files_t *cfg_files)
 {
-  fprintf(cfg_files->request, "<request-id> %08d\n", request_state.request_id);
   fprintf(cfg_files->request, "<client-ip> %s\n", request_state.r->useragent_ip);
   fprintf(cfg_files->request, "<request> %s\n", request_state.r->the_request);
   fprintf(cfg_files->request, "<requested-file> %s\n", request_state.r->filename);
@@ -187,6 +186,8 @@ static void write_request_entry(cfg_files_t *cfg_files)
     default:
       ERROR("Unknown request type %s\n", request_state.r->method);
   }
+
+  fprintf(cfg_files->request, "<request-id> |%08d\n", request_state.request_id);
 }
 
 void init_cfg_handler()
@@ -268,7 +269,7 @@ static void open_output_files(const char *script_path)
   setup_base_path(cfg_file_path, "runs", script_path);
 
   if (stat(cfg_file_path, &dirinfo) != 0) {
-    if (mkdir(cfg_file_path, 0700) != 0) {
+    if (mkdir(cfg_file_path, 0777) != 0) {
       ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
       return;
     }
@@ -278,7 +279,7 @@ static void open_output_files(const char *script_path)
           calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
   strcat(cfg_file_path, run_id);
 
-  if (mkdir(cfg_file_path, 0700) != 0) {
+  if (mkdir(cfg_file_path, 0777) != 0) {
     ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
     return;
   }
@@ -304,7 +305,7 @@ void starting_script(const char *script_path)
     strcat(cfg_file_path, "/");
 
     if (stat(cfg_file_path, &dirinfo) != 0) {
-      if (mkdir(cfg_file_path, 0700) != 0) {
+      if (mkdir(cfg_file_path, 0777) != 0) {
         ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
         return;
       }
@@ -420,7 +421,7 @@ void cfg_initialize_application(application_t *app)
     strcat(app_cfg_file_path, "/");
 
     if (stat(app_cfg_file_path, &dirinfo) != 0) {
-      if (mkdir(app_cfg_file_path, 0700) != 0) {
+      if (mkdir(app_cfg_file_path, 0777) != 0) {
         ERROR("Failed to create the app cfg file directory %s\n", app_cfg_file_path);
         return;
       }
