@@ -128,10 +128,10 @@ static void write_request_entry(cfg_files_t *cfg_files)
         fprintf(cfg_files->request, "<get-variable> %s=%s\n", entry[i].key, entry[i].val);
     } break;
     case M_POST: {
-      char buffer[SAPI_POST_BLOCK_SIZE];
+      char buffer[SAPI_POST_BLOCK_SIZE], *set, *mark;
       apr_size_t size;
 #ifdef URL_DECODE
-      char decode_buffer[SAPI_POST_BLOCK_SIZE], *set, *mark;
+      char decode_buffer[SAPI_POST_BLOCK_SIZE];
       apr_size_t decode_size, decode_fragment_size = 0;
 
       decode_buffer[0] = '\0';
@@ -144,12 +144,12 @@ static void write_request_entry(cfg_files_t *cfg_files)
                                                         SAPI_POST_BLOCK_SIZE);
         if (size == 0)
           break;
-#ifdef URL_DECODE
         set = buffer;
         do {
           mark = strchr(set, '&');
           if (mark == NULL)
             break;
+#ifdef URL_DECODE
           decode_size = mark - set;
           decode_fragment_size = 0;
           if (size == SAPI_POST_BLOCK_SIZE) {
@@ -168,17 +168,21 @@ static void write_request_entry(cfg_files_t *cfg_files)
             strncpy(decode_buffer, set, decode_fragment_size);
           else
             decode_buffer[0] = '\0';
+#else
+          fwrite(set, sizeof(char), mark - set, cfg_files->request);
+          fprintf(cfg_files->request, "\n<post-variable> ");
+#endif
           set = mark + 1;
         } while (set < (buffer + SAPI_POST_BLOCK_SIZE));
+#ifdef URL_DECODE
         strncat(decode_buffer, set, size - (set - buffer));
         decode_size = php_url_decode(decode_buffer, size - (set - buffer));
         fwrite(decode_buffer, sizeof(char), decode_size, cfg_files->request);
+#else
+        fwrite(set, sizeof(char), size - (set - buffer), cfg_files->request);
+#endif
       }
       fprintf(cfg_files->request, "\n");
-#else
-      }
-      fwrite(buffer, sizeof(char), size, cfg_files->request);
-#endif
     } break;
     default:
       ERROR("Unknown request type %s\n", request_state.r->method);
