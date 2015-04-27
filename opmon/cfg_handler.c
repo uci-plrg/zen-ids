@@ -1,6 +1,7 @@
 #include "php.h"
 #include "SAPI.h"
 #include "httpd.h"
+#include "standard/url.h"
 #include "util_script.h"
 #include "util_filter.h"
 
@@ -13,6 +14,8 @@
 #include "event_handler.h"
 #include "dataset.h"
 #include "cfg_handler.h"
+
+// #define URL_DECODE 1
 
 typedef struct _cfg_files_t {
   FILE *node;
@@ -127,18 +130,55 @@ static void write_request_entry(cfg_files_t *cfg_files)
     case M_POST: {
       char buffer[SAPI_POST_BLOCK_SIZE];
       apr_size_t size;
+#ifdef URL_DECODE
+      char decode_buffer[SAPI_POST_BLOCK_SIZE], *set, *mark;
+      apr_size_t decode_size, decode_fragment_size = 0;
 
-      fprintf(cfg_files->request, "<post-data>");
+      decode_buffer[0] = '\0';
+#endif
 
+      fprintf(cfg_files->request, "<post-variable> ");
       php_stream_rewind(SG(request_info).request_body);
       while (true) {
         size = SG(request_info).request_body->ops->read(SG(request_info).request_body, buffer,
                                                         SAPI_POST_BLOCK_SIZE);
         if (size == 0)
           break;
-        fwrite(buffer, sizeof(char), size, cfg_files->request);
+#ifdef URL_DECODE
+        set = buffer;
+        do {
+          mark = strchr(set, '&');
+          if (mark == NULL)
+            break;
+          decode_size = mark - set;
+          decode_fragment_size = 0;
+          if (size == SAPI_POST_BLOCK_SIZE) {
+            if (set[decode_size-1] == '%')
+              decode_fragment_size = 1;
+            else if (set[decode_size-2] == '%')
+              decode_fragment_size = 2;
+            decode_size = decode_size - decode_fragment_size;
+          }
+          strncat(decode_buffer, set, decode_size);
+          set += decode_size;
+          decode_size = php_url_decode(decode_buffer, decode_size);
+          fwrite(decode_buffer, sizeof(char), decode_size, cfg_files->request);
+          fprintf(cfg_files->request, "\n<post-variable> ");
+          if (decode_fragment_size > 0)
+            strncpy(decode_buffer, set, decode_fragment_size);
+          else
+            decode_buffer[0] = '\0';
+          set = mark + 1;
+        } while (set < (buffer + SAPI_POST_BLOCK_SIZE));
+        strncat(decode_buffer, set, size - (set - buffer));
+        decode_size = php_url_decode(decode_buffer, size - (set - buffer));
+        fwrite(decode_buffer, sizeof(char), decode_size, cfg_files->request);
       }
       fprintf(cfg_files->request, "\n");
+#else
+      }
+      fwrite(buffer, sizeof(char), size, cfg_files->request);
+#endif
     } break;
     default:
       ERROR("Unknown request type %s\n", request_state.r->method);
