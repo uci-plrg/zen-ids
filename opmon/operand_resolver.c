@@ -11,9 +11,16 @@ typedef struct _application_list_t {
 } application_list_t;
 
 static application_list_t *application_list = NULL;
+static application_t unknown_app = { "unknown", "/", NULL, NULL, NULL };
 
 #define SITE_ROOT_FILENAME "opmon.site.root"
 #define SITE_ROOT_FILENAME_LEN 16
+
+void init_operand_resolver()
+{
+  unknown_app.cfg = cfg_new();
+  cfg_initialize_application(&unknown_app);
+}
 
 void destroy_operand_resolver()
 {
@@ -156,5 +163,5 @@ application_t *locate_application(const char *filename /*absolute path*/)
   }
 
   free(buffer);
-  return NULL;
+  return &unknown_app;
 }

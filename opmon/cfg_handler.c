@@ -13,6 +13,7 @@
 #include "interp_context.h"
 #include "event_handler.h"
 #include "dataset.h"
+#include "operand_resolver.h"
 #include "cfg_handler.h"
 
 // #define URL_DECODE 1
@@ -428,6 +429,8 @@ void worker_startup()
     }
     SPOT("Successfully created worker directory %s\n", cfg_file_path);
   }
+
+  init_operand_resolver();
 }
 
 void cfg_initialize_application(application_t *app)

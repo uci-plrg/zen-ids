@@ -41,8 +41,6 @@ typedef struct _fcall_init_t {
 fcall_init_t fcall_stack[MAX_STACK_FRAME_fcall_stack];
 fcall_init_t *fcall_frame;
 
-static application_t unknown_application = { "<unknown>", "/" };
-
 static sctable_t routines_by_hash;
 static sctable_t routines_by_opcode_address;
 static uint closure_count = 0; // must be per compilation unit!
@@ -157,10 +155,6 @@ void function_compiled(zend_op_array *op_array)
     fqn->unit.path = "<eval>";
 
     fqn->unit.application = locate_application(op_array->filename->val);
-    if (fqn->unit.application == NULL) {
-      WARN("Cannot find site root for eval %s. Defaulting to '/'\n", op_array->filename->val);
-      fqn->unit.application = &unknown_application;
-    }
   } else {
     const char *classname;
     bool free_filename = false;
@@ -178,10 +172,6 @@ void function_compiled(zend_op_array *op_array)
     }
     fqn = malloc(sizeof(function_fqn_t));
     fqn->unit.application = locate_application(filename);
-    if (fqn->unit.application == NULL) {
-      WARN("Cannot find site root for filename %s. Defaulting to '/'\n", filename);
-      fqn->unit.application = &unknown_application;
-    }
     site_filename = filename + strlen(fqn->unit.application->root);
     buffer = malloc(strlen(site_filename) + 1);
     strcpy(buffer, site_filename);
