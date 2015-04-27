@@ -65,7 +65,7 @@ typedef struct _request_state_t {
 } request_state_t;
 
 static request_state_t request_state;
-static const uint request_tag = 2; // N.B.: avoid collision with app entry point hash
+static const uint request_header_tag = 2; // N.B.: avoid collision with app entry point hash
 static session_t session = { {0}, 0 };
 
 static inline void fnull(size_t size, FILE *file)
@@ -110,8 +110,31 @@ static void write_request_entry(cfg_files_t *cfg_files)
     const apr_array_header_t *entries = NULL;
     entries = apr_table_elts(request_state.r->headers_in);
     entry = (apr_table_entry_t *) entries->elts;
-    for (i = 0; i < entries->nelts; i++)
-      fprintf(cfg_files->request, "<header> %s=%s\n", entry[i].key, entry[i].val);
+    for (i = 0; i < entries->nelts; i++) {
+      if (strcasecmp(entry[i].key, "Cookie") == 0) {
+        const char *set = entry[i].val, *mark;
+        while (true) {
+          mark = strchr(set, ';');
+          if (strncmp(set, "ucinetid_auth=", 14) == 0) { // hide ucinet auth token!
+            set += 78;
+            if (set[0] == ';')
+              set += 2;
+            continue;
+          }
+          if (mark == NULL) {
+            fprintf(cfg_files->request, "<cookie> %s\n", set);
+            break;
+          } else {
+            fprintf(cfg_files->request, "<cookie> ");
+            fwrite(set, sizeof(char), mark - set, cfg_files->request);
+            fprintf(cfg_files->request, "\n");
+            set = mark+2;
+          }
+        }
+      } else {
+        fprintf(cfg_files->request, "<header> %s=%s\n", entry[i].key, entry[i].val);
+      }
+    }
   }
 
   switch (request_state.r->method_number) {
@@ -527,7 +550,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
   if (request_state.is_new_request) {
     uint timestamp = get_timestamp();
 
-    fwrite(&request_tag, sizeof(uint), 1, cfg_files->request_edge);
+    fwrite(&request_header_tag, sizeof(uint), 1, cfg_files->request_edge);
     fwrite(&request_state.request_id, sizeof(uint), 1, cfg_files->request_edge);
     fwrite(&session.hash, sizeof(uint), 1, cfg_files->request_edge);
     fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);

@@ -1,15 +1,17 @@
 #!/bin/bash
 
 function usage() {
-  echo -n "select-run [ -d <target: directory> | -l <target: log> ] "
-  echo "<index> [ <grep-token> ]"
+  echo -n "select-run [ -d <target: directory> | -l <target: log> | -s <target: session> ]"
+  echo "[ <index> ] [ <grep-token> ]"
 }
 
-while getopts ":dl" option
+while getopts ":dlsw" option
 do
   case $option in
     d) directory=true;;
     l) log=true;;
+    s) session=true;;
+    w) session=true;;
     *) usage && exit;;
   esac
 done
@@ -19,21 +21,27 @@ shift $(( $OPTIND - 1 ))
 index=$1
 filter=$2
 
-[ -z "$directory" ] && [ -z "$log" ] && usage && exit
-[ -z "$index" ] && usage && exit
+[ -z "$index" ] && index=1
+[ -z "$directory" ] && [ -z "$log" ] && [ -z "$session" ] && usage && exit
 
-run_catalog=$PHP_DATASET_DIR/runs.tab
+if [ -z "$session" ]
+then
+  catalog=$PHP_DATASET_DIR/runs.tab
+else
+  catalog=$PHP_DATASET_DIR/runs/webserver/session_catalog.tab
+fi
 
 if [ -z "$filter" ]
 then
-  file=$(tail -$index $run_catalog | head -1)
+  file=$(tail -$index $catalog | head -1)
 else
-  file=$(egrep "$filter" $run_catalog | tail -$index | head -1)
+  file=$(egrep "$filter" $catalog | tail -$index | head -1)
 fi
 
 [ -z "$file" ] && exit
 
 [ ! -z "$directory" ] && echo $(dirname "$file") && exit
 [ ! -z "$log" ] && echo "$file" && exit
+[ ! -z "$session" ] && echo "$file" && exit
 echo "Error: please choose an option [ -d  | -l ]"
 
