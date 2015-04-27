@@ -336,7 +336,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     // TODO: skip builtins like
     //   op->op2.zv != NULL &&
     //   zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) == NULL
-    if (new_cur_frame.cfm.cfg != NULL && execute_data->prev_execute_data != NULL) {
+    if (new_cur_frame.cfm.cfg != NULL) {
       zend_op *new_prev_op = &new_prev_frame.opcodes[new_prev_frame.op_index];
       compiled_edge_target_t compiled_target = get_compiled_edge_target(new_prev_op,
                                                                         new_prev_frame.op_index);

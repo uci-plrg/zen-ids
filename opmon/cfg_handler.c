@@ -59,6 +59,7 @@ typedef struct _request_state_t {
   bool is_in_request;
   bool is_new_request;
   uint request_id;
+  application_t *app;
   request_rec *r;
   sctable_t *edges; // of `request_edge_t`
   uint pool_index;
@@ -488,6 +489,9 @@ void cfg_request(bool start)
       session.hash = hash_string(session.id);
       SPOT("New session id %s (0x%x)\n", session.id, session.hash);
     }
+  } else {
+    flush_all_outputs(request_state.app);
+    request_state.app = NULL;
   }
 }
 
@@ -561,6 +565,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     write_request_entry(cfg_files);
 
     request_state.is_new_request = false;
+    request_state.app = app;
   }
   if (is_new_in_process) {
     fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
