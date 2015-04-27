@@ -18,49 +18,7 @@ do { \
     ERROR("function_name exceeds max length 256!\n"); \
 } while (0)
 
-typedef struct _pending_load_t {
-  bool pending_execution;
-  char function_name[MAX_FUNCTION_NAME];
-} pending_load_t;
-
-/*
-static cfg_node_t last_executed_node = { ZEND_NOP, 0 };
-static zend_op *current_op_array = NULL;
-static zend_op *last_op_array = NULL;
-*/
-
-static uint pending_cfm_frame;
-//static control_flow_metadata_t *call_to_eval = (control_flow_metadata_t *)int2p(1);
-static control_flow_metadata_t *initial_context = (control_flow_metadata_t *)int2p(2);
-
-static control_flow_metadata_t *pending_cfm_stack[MAX_STACK_FRAME];
-
-//static char last_unknown_function_name[MAX_FUNCTION_NAME];
-static pending_load_t pending_load;
-
 static const char *static_analysis;
-
-//cfg_t *app_cfg;
-
-static inline void pend_cfm(control_flow_metadata_t *cfm)
-{
-  pending_cfm_stack[pending_cfm_frame++] = cfm;
-  if (pending_cfm_frame >= MAX_STACK_FRAME)
-    ERROR("pending_cfm_frame exceeds max stack frame!\n");
-}
-
-static inline control_flow_metadata_t *pop_cfm()
-{
-  pending_cfm_frame--;
-  if (pending_cfm_frame == 0)
-    ERROR("pending_cfm_frame hit stack bottom!\n");
-  return pending_cfm_stack[pending_cfm_frame];
-}
-
-static inline control_flow_metadata_t *peek_cfm()
-{
-  return pending_cfm_stack[pending_cfm_frame-1];
-}
 
 static void init_top_level_script(const char *script_path)
 {
@@ -84,19 +42,9 @@ bool is_static_analysis()
 
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
-  //extern foo *foobar;
   //scarray_unit_test();
 
   static_analysis = getenv(ENV_STATIC_ANALYSIS);
-
-  //app_cfg = cfg_new();
-
-  pending_cfm_stack[0] = NULL;
-  pending_cfm_stack[1] = NULL;
-  pending_cfm_frame = 1;
-  pend_cfm(initial_context);
-
-  pending_load.pending_execution = false;
 
   init_compile_context();
   init_cfg_handler();

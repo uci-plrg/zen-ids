@@ -12,7 +12,8 @@ void starting_script(const char *script_path);
 void worker_startup();
 void server_startup();
 void cfg_initialize_application(application_t *app);
-void cfg_request(request_rec *r);
+void cfg_request(bool start);
+void cfg_form(const char *form_data, int length);
 
 void write_node(application_t *app, uint routine_hash, cfg_opcode_t *opcode, uint index);
 void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint to_index,

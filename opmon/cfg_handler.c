@@ -1,6 +1,8 @@
 #include "php.h"
+#include "SAPI.h"
 #include "httpd.h"
 #include "util_script.h"
+#include "util_filter.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -43,6 +45,12 @@ typedef struct _request_edge_t {
   struct _request_edge_t *next;
 } request_edge_t;
 
+typedef struct _php_server_context_t { // type window
+  int opaque;
+  request_rec *r;
+  apr_bucket_brigade *bb;
+} php_server_context_t;
+
 typedef struct _request_state_t {
   bool is_in_request;
   bool is_new_request;
@@ -81,54 +89,59 @@ static uint get_timestamp(void)
   return (hi << 0xc) | (lo >> 0x14);
 }
 
-static void write_request_entry(cfg_files_t *cfg_files, request_rec *r)
+static void write_request_entry(cfg_files_t *cfg_files)
 {
-  int i, result;
-  apr_off_t length;
-  apr_size_t size;
-  char buffer[512];
-  apr_table_entry_t *entry;
-
   fprintf(cfg_files->request, "<request-id> %08d\n", request_state.request_id);
-  fprintf(cfg_files->request, "<client-ip> %s\n", r->useragent_ip);
-  fprintf(cfg_files->request, "<requested-file> %s\n", r->filename);
-  fprintf(cfg_files->request, "<method> %s\n", r->method);
-  fprintf(cfg_files->request, "<arguments> %s\n", r->args);
+  fprintf(cfg_files->request, "<client-ip> %s\n", request_state.r->useragent_ip);
+  fprintf(cfg_files->request, "<request> %s\n", request_state.r->the_request);
+  fprintf(cfg_files->request, "<requested-file> %s\n", request_state.r->filename);
+  fprintf(cfg_files->request, "<protocol> %s\n", request_state.r->protocol);
+  fprintf(cfg_files->request, "<method> %s\n", request_state.r->method);
+  fprintf(cfg_files->request, "<content-type> %s\n", request_state.r->content_type);
+  fprintf(cfg_files->request, "<content-encodings> %s\n", request_state.r->content_encoding);
+  fprintf(cfg_files->request, "<status> %s\n", request_state.r->status_line);
+  fprintf(cfg_files->request, "<arguments> %s\n", request_state.r->args);
 
   {
+    uint i;
+    apr_table_entry_t *entry;
     const apr_array_header_t *entries = NULL;
-    entries = apr_table_elts(r->headers_in);
+    entries = apr_table_elts(request_state.r->headers_in);
     entry = (apr_table_entry_t *) entries->elts;
     for (i = 0; i < entries->nelts; i++)
       fprintf(cfg_files->request, "<header> %s=%s\n", entry[i].key, entry[i].val);
   }
 
-  if (strcmp(r->method, "GET") == 0) {
-    apr_table_t *table;
-    apr_array_header_t *entries;
-    ap_args_to_table(r, &table);
-    entries = (apr_array_header_t *) table;
-    entry = (apr_table_entry_t *) entries->elts;
-    for (i = 0; i < entries->nelts; i++)
-      fprintf(cfg_files->request, "<get-variable> %s=%s\n", entry[i].key, entry[i].val);
-  } else if (strcmp(r->method, "POST") == 0) {
-    apr_array_header_t *entries = NULL;
-    result = ap_parse_form_data(r, NULL, &entries, -1, 8192);
-    if (result == OK) {
+  switch (request_state.r->method_number) {
+    case M_GET: {
+      uint i;
+      apr_table_entry_t *entry;
+      apr_table_t *table;
+      apr_array_header_t *entries;
+      ap_args_to_table(request_state.r, &table);
+      entries = (apr_array_header_t *) table;
       entry = (apr_table_entry_t *) entries->elts;
       for (i = 0; i < entries->nelts; i++)
-        fprintf(cfg_files->request, "<post-variable> %s=%s\n", entry[i].key, entry[i].val);
-      if (false) {
-        while (entries != NULL && !apr_is_empty_array(entries)) {
-          ap_form_pair_t *entry = (ap_form_pair_t *) apr_array_pop(entries);
-          apr_brigade_length(entry->value, 1, &length);
-          size = (apr_size_t) length;
-          apr_brigade_flatten(entry->value, buffer, &size);
-          buffer[length] = '\0';
-          fprintf(cfg_files->request, "<post-variable> %s=%s\n", entry->name, buffer);
-        }
+        fprintf(cfg_files->request, "<get-variable> %s=%s\n", entry[i].key, entry[i].val);
+    } break;
+    case M_POST: {
+      char buffer[SAPI_POST_BLOCK_SIZE];
+      apr_size_t size;
+
+      fprintf(cfg_files->request, "<post-data>");
+
+      php_stream_rewind(SG(request_info).request_body);
+      while (true) {
+        size = SG(request_info).request_body->ops->read(SG(request_info).request_body, buffer,
+                                                        SAPI_POST_BLOCK_SIZE);
+        if (size == 0)
+          break;
+        fwrite(buffer, sizeof(char), size, cfg_files->request);
       }
-    }
+      fprintf(cfg_files->request, "\n");
+    } break;
+    default:
+      ERROR("Unknown request type %s\n", request_state.r->method);
   }
 }
 
@@ -148,9 +161,10 @@ void close_cfg_files(application_t *app)
     fclose(cfg_files->op_edge);
     fclose(cfg_files->routine_edge);
     fclose(cfg_files->routine_catalog);
-    if (!is_standalone_app)
+    if (!is_standalone_app) {
       fclose(cfg_files->request);
       fclose(cfg_files->request_edge);
+    }
   }
 
   if (request_state.edges != NULL) {
@@ -377,14 +391,15 @@ void cfg_initialize_application(application_t *app)
   initialize_interp_app_context(app);
 }
 
-void cfg_request(request_rec *r)
+void cfg_request(bool start)
 {
-  request_state.is_in_request = (r != NULL);
+  request_state.is_in_request = start;
 
   if (request_state.is_in_request) {
+    php_server_context_t *context = (php_server_context_t *) SG(server_context);
+    request_state.r = context->r;
     request_state.is_new_request = true;
     request_state.request_id++;
-    request_state.r = r;
 
     if (request_state.edges == NULL) { // lazy construct b/c standalone mode doesn't need it
       request_state.edge_pool = malloc(sizeof(scarray_t));
@@ -472,7 +487,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     fwrite(&session.hash, sizeof(uint), 1, cfg_files->request_edge);
     fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);
 
-    write_request_entry(cfg_files, request_state.r);
+    write_request_entry(cfg_files);
 
     request_state.is_new_request = false;
   }
