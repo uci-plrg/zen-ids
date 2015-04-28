@@ -1,0 +1,35 @@
+
+A. Data files
+
+  1. node.run
+     sequential list of PHP opcodes with corresponding line number (see B)
+     https://github.com/php/php-src/blob/master/Zend/zend_vm_opcodes.h
+  2. op-edge.run
+     from/to index for each intraprocedural edge
+     index refers to the corresponding list in node.run
+  3. routine-edge.run
+     from/to hash + index for each interprocedural edge
+     index of each call/throw site refers to node.run
+     lookup routine names in routine-catalog.tab
+  4. routine-catalog.tab
+     routine name and unique identifier (hash of the name)
+     naming convention is {filename|filename:function|classname:method|eval-n|lambda-n}
+  5. request-edge.run
+     from/to hash + index for each interprocedural edge
+     (recorded per http request, merged by collection only)
+  6. request.tab
+     miscellaneous http data, including all headers, get/post variables, client ip
+  7. cfg.set
+     unification of {node.run, op-edge.run, routine-edge.run} by trivial merge
+
+B. Source code
+   file tree, as it appears on the server
+
+C. Runtime variable values
+   hypothetical... we can get this data if necessary, but only selectively
+
+File formats:
+.run: binary, recorded by the PHP interpreter during execution
+.tab: plain text in a tabular format for easy parsing
+      recorded by the interpreter, and may also be merged
+.set: unification of .run data from multiple executions
