@@ -5,6 +5,8 @@ function usage() {
   echo "[ <index> ] [ <grep-token> ]"
 }
 
+webserver_path="runs/webserver"
+
 while getopts ":dlsw" option
 do
   case $option in
@@ -28,7 +30,7 @@ if [ -z "$session" ]
 then
   catalog=$PHP_DATASET_DIR/runs.tab
 else
-  catalog=$PHP_DATASET_DIR/runs/webserver/session_catalog.tab
+  catalog=$PHP_DATASET_DIR/$webserver_path/session_catalog.tab
 fi
 
 if [ -z "$filter" ]
@@ -42,6 +44,6 @@ fi
 
 [ ! -z "$directory" ] && echo $(dirname "$file") && exit
 [ ! -z "$log" ] && echo "$file" && exit
-[ ! -z "$session" ] && echo "$file" && exit
+[ ! -z "$session" ] && echo "$webserver_path/$file" && exit
 echo "Error: please choose an option [ -d  | -l ]"
 

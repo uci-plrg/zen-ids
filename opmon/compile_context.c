@@ -12,7 +12,8 @@
 #define ROUTINE_NAME_LENGTH 256
 #define CLOSURE_NAME "{closure}"
 #define CLOSURE_NAME_LENGTH 9
-#define CLOSURE_NAME_TEMPLATE "<closure-%d>"
+#define CLOSURE_ID_TEMPLATE "<closure-%d>"
+#define CLOSURE_ID_LENGTH 256
 #define MAX_STACK_FRAME_fcall_stack 0x100
 
 // #define SPOT_DEBUG 1
@@ -43,7 +44,7 @@ fcall_init_t *fcall_frame;
 
 static sctable_t routines_by_hash;
 static sctable_t routines_by_opcode_address;
-static uint closure_count = 0; // must be per compilation unit!
+static uint closure_count = 0;
 
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
@@ -112,10 +113,11 @@ void function_compiled(zend_op_array *op_array)
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
-  function_fqn_t *fqn;
+  function_fqn_t *fqn = malloc(sizeof(function_fqn_t));
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
-  char *buffer, *filename, *site_filename, routine_name[ROUTINE_NAME_LENGTH];
+  char *buffer, *filename, *site_filename;
+  char routine_name[ROUTINE_NAME_LENGTH], closure_id[CLOSURE_ID_LENGTH];
 #ifdef SPOT_DEBUG
   bool spot = false;
 #endif
@@ -129,12 +131,13 @@ void function_compiled(zend_op_array *op_array)
     if (op_array->function_name == NULL) {
       function_name = "<script-body>";
       is_script_body = true;
+      closure_count = 0;
     } else {
       int closure_index = is_closure(op_array->function_name->val);
       if (closure_index >= 0) {
-        strncpy(routine_name, op_array->function_name->val, closure_index);
-        sprintf(routine_name + closure_index, CLOSURE_NAME_TEMPLATE, closure_count++);
-        has_routine_name = true;
+        strncpy(closure_id, op_array->function_name->val, closure_index);
+        sprintf(closure_id + closure_index, CLOSURE_ID_TEMPLATE, closure_count++);
+        function_name = closure_id;
       } else {
         function_name = op_array->function_name->val;
         if (strcmp(function_name, "__lambda_func") == 0) {
@@ -147,16 +150,14 @@ void function_compiled(zend_op_array *op_array)
     }
   } else {
     PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
+    free(fqn);
     return;
   }
 
   if (has_routine_name) {
-    fqn = malloc(sizeof(function_fqn_t));
     fqn->unit.path = "<eval>";
-
     fqn->unit.application = locate_application(op_array->filename->val);
   } else {
-    const char *classname;
     bool free_filename = false;
 
     if (strncmp(op_array->filename->val, "phar://", 7) == 0) {
@@ -170,7 +171,6 @@ void function_compiled(zend_op_array *op_array)
       }
       free_filename = true;
     }
-    fqn = malloc(sizeof(function_fqn_t));
     fqn->unit.application = locate_application(filename);
     site_filename = filename + strlen(fqn->unit.application->root);
     buffer = malloc(strlen(site_filename) + 1);
@@ -181,11 +181,12 @@ void function_compiled(zend_op_array *op_array)
       efree(filename);
     filename = site_filename = NULL;
 
-    if (is_script_body || op_array->scope == NULL)
-      classname = fqn->unit.path;
+    if (is_script_body)
+      sprintf(routine_name, "%s:%s", fqn->unit.path, function_name);
+    else if (op_array->scope == NULL)
+      sprintf(routine_name, "%s:%d:%s", fqn->unit.path, op_array->opcodes[0].lineno, function_name);
     else
-      classname = op_array->scope->name->val;
-    sprintf(routine_name, "%s:%s", classname, function_name);
+      sprintf(routine_name, "%s:%s", op_array->scope->name->val, function_name);
     has_routine_name = true;
   }
 
@@ -248,8 +249,7 @@ void function_compiled(zend_op_array *op_array)
   }
 
   sctable_add_or_replace(&routines_by_hash, fqn->function.hash, fqn);
-  sctable_add_or_replace(&routines_by_opcode_address,
-                         hash_addr(op_array->opcodes), fqn);
+  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn);
 
   if (is_already_compiled) {
     PRINT("(skipping existing routine 0x%x at "PX")\n", fqn->function.hash,
