@@ -1,0 +1,21 @@
+ · instrument PHP to grab requests only?
+   · would have to run against DB clone--sync issues?
+ · warm up php-cfi cache live
+ · production issues:
+   · write latency
+   · stability--no crashes!
+   · php5.6 (SMF 2.09), or upgrade SMF to php7 (may be compatible in latest release)
+   · caching: memcached
+ · neogaf.com on vBulletin 3.82 (php5.6 with caching)
+   · site currently overloaded (waitlisting new users!)
+ · Vechev POPL '15 on JSNice (learning on minified JS), PLDI (?)
+ · LLVM -> graph DB -> learning
+ · CFG -> titan distributed databasee over apache cassandra
+   · learning people happy to collaborate given:
+     · data
+     · interpretation of data (basis of classifiers)
+ · jumpstart LL learning people as much as possible
+   · no classifiers yet (no learning yet)
+     · team starting on infrastructure now (software framework, GPU vs. CPU, etc)
+   · high throughput hardware
+

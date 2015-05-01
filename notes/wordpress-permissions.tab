@@ -1,0 +1,68 @@
+=== Super Admin
+manage_network
+manage_sites
+manage_network_users
+manage_network_plugins
+manage_network_themes
+manage_network_options
+
+=== Admin
+activate_plugins
+edit_dashboard
+edit_theme_options
+export
+import
+list_users
+manage_options
+promote_users
+remove_users
+switch_themes
+
+=== Top Admin
+update_core
+update_plugins
+update_themes
+install_plugins
+install_themes
+delete_themes
+delete_plugins
+edit_plugins
+edit_themes
+edit_files
+edit_users
+create_users
+delete_users
+
+=== Editor
+delete_others_pages
+delete_others_posts
+delete_pages
+delete_private_pages
+delete_private_posts
+delete_published_pages
+edit_others_pages
+edit_others_posts
+edit_pages
+edit_private_pages
+edit_private_posts
+edit_published_pages
+manage_categories
+manage_links
+moderate_comments
+publish_pages
+read_private_pages
+read_private_posts
+unfiltered_html
+
+=== Author
+delete_published_posts
+edit_published_posts
+publish_posts
+upload_files
+
+=== Contributor
+delete_posts
+edit_posts
+
+=== Subscriber
+read
