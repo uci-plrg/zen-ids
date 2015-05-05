@@ -1,4 +1,12 @@
 #include "php.h"
+
+#include "zend.h"
+#include <zend_language_parser.h>
+#include "zend_compile.h"
+//#include "zend_highlight.h"
+#include "zend_ptr_stack.h"
+#include "zend_globals.h"
+
 #include "script_cfi_utils.h"
 
 #define IS_SESSION(vars) (Z_ISREF_P(&vars) && Z_TYPE_P(Z_REFVAL(vars)) == IS_ARRAY)
@@ -116,4 +124,60 @@ void set_opmon_user_level(long user_level)
   } else {
     ERROR("<session> User level assigned with no active PHP session!\n");
   }
+}
+
+void tokenize_file(void)
+{
+	zval token;
+	int token_type;
+	int prev_space = 0;
+
+	ZVAL_UNDEF(&token);
+	while ((token_type=lex_scan(&token TSRMLS_CC))) {
+		switch (token_type) {
+			case T_WHITESPACE:
+				if (!prev_space) {
+					zend_write(" ", sizeof(" ") - 1);
+					prev_space = 1;
+				}
+						/* lack of break; is intentional */
+			case T_COMMENT:
+			case T_DOC_COMMENT:
+				ZVAL_UNDEF(&token);
+				continue;
+
+			case T_END_HEREDOC:
+				zend_write((char*)LANG_SCNG(yy_text), LANG_SCNG(yy_leng));
+				/* read the following character, either newline or ; */
+				if (lex_scan(&token TSRMLS_CC) != T_WHITESPACE) {
+					zend_write((char*)LANG_SCNG(yy_text), LANG_SCNG(yy_leng));
+				}
+				zend_write("\n", sizeof("\n") - 1);
+				prev_space = 1;
+				ZVAL_UNDEF(&token);
+				continue;
+
+			default:
+				zend_write((char*)LANG_SCNG(yy_text), LANG_SCNG(yy_leng));
+				break;
+		}
+
+		if (Z_TYPE(token) == IS_STRING) {
+			switch (token_type) {
+				case T_OPEN_TAG:
+				case T_OPEN_TAG_WITH_ECHO:
+				case T_CLOSE_TAG:
+				case T_WHITESPACE:
+				case T_COMMENT:
+				case T_DOC_COMMENT:
+					break;
+
+				default:
+					zend_string_release(Z_STR(token));
+					break;
+			}
+		}
+		prev_space = 0;
+		ZVAL_UNDEF(&token);
+	}
 }

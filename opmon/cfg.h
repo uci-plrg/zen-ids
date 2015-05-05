@@ -49,6 +49,7 @@ typedef struct _application_t {
   cfg_t *cfg;
   void *cfg_files;
   void *dataset;
+  void *base_frame;
 } application_t;
 
 static inline bool

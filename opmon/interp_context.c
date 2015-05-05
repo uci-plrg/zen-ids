@@ -60,7 +60,7 @@ static lambda_frame_t lambda_stack[MAX_STACK_FRAME_lambda_stack];
 static lambda_frame_t *lambda_frame;
 
 static sctable_t frame_table;
-static stack_frame_t base_frame;
+static stack_frame_t void_frame;
 static stack_frame_t prev_frame;
 static stack_frame_t cur_frame;
 
@@ -80,7 +80,7 @@ void initialize_interp_context()
 {
   frame_table.hash_bits = 7;
   sctable_init(&frame_table);
-  memset(&base_frame, 0, sizeof(stack_frame_t));
+  memset(&void_frame, 0, sizeof(stack_frame_t));
   memset(&prev_frame, 0, sizeof(stack_frame_t));
   memset(&cur_frame, 0, sizeof(stack_frame_t));
 
@@ -88,13 +88,12 @@ void initialize_interp_context()
   memset(&entry_op, 0, sizeof(zend_op));
   entry_op.opcode = ENTRY_POINT_OPCODE;
   entry_op.extended_value = ENTRY_POINT_EXTENDED_VALUE;
-  base_frame.opcodes = &entry_op;
-  base_frame.opcode = entry_op.opcode;
-  base_frame.cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
-  cur_frame = base_frame;
+  void_frame.opcodes = &entry_op;
+  void_frame.opcode = entry_op.opcode;
+  void_frame.cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
+  cur_frame = void_frame;
   routine_cfg_assign_opcode(cur_frame.cfm.cfg, ENTRY_POINT_OPCODE,
                             ENTRY_POINT_EXTENDED_VALUE, 0, 0);
-
 
   memset(exception_stack, 0, 2 * sizeof(exception_frame_t));
   exception_frame = exception_stack + 1;
@@ -112,10 +111,19 @@ void initialize_interp_context()
 
 void initialize_interp_app_context(application_t *app)
 {
-  base_frame.cfm.app = app;
-  base_frame.cfm.dataset = dataset_routine_lookup(app, ENTRY_POINT_HASH);
-  if (base_frame.cfm.dataset == NULL)
-    write_node(app, ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame.cfm.cfg, 0), 0);
+  stack_frame_t *base_frame = malloc(sizeof(stack_frame_t));
+  memset(base_frame, 0, sizeof(stack_frame_t));
+  base_frame->opcodes = &entry_op;
+  base_frame->opcode = entry_op.opcode;
+  base_frame->cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
+  base_frame->cfm.app = app;
+  app->base_frame = (void *) base_frame;
+  routine_cfg_assign_opcode(base_frame->cfm.cfg, ENTRY_POINT_OPCODE,
+                            ENTRY_POINT_EXTENDED_VALUE, 0, 0);
+
+  base_frame->cfm.dataset = dataset_routine_lookup(app, ENTRY_POINT_HASH);
+  if (base_frame->cfm.dataset == NULL)
+    write_node(app, ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame->cfm.cfg, 0), 0);
 }
 
 static void push_exception_frame()
@@ -152,7 +160,6 @@ static void generate_routine_edge(bool is_new_in_process, control_flow_metadata_
 static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, uint to_index)
 {
   bool write_edge = true;
-  routine_cfg_add_opcode_edge(cfm->cfg, from_index, to_index, current_session.user_level);
 
   if (cfm->dataset != NULL) {
     if (dataset_verify_opcode_edge(cfm->dataset, from_index, to_index)) {
@@ -163,9 +170,10 @@ static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, 
   }
 
   if (write_edge) {
-    WARN("<MON> New opcode edge [0x%x %u -> %u]\n",
-          cfm->cfg->routine_hash, from_index, to_index);
-    write_op_edge(cfm->app, cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
+    WARN("<MON> New opcode edge [0x%x %u -> %u ul#%d]\n",
+          cfm->cfg->routine_hash, from_index, to_index, current_session.user_level);
+    write_op_edge(cfm->app, cfm->cfg->routine_hash, from_index, to_index,
+                  current_session.user_level);
   }
 }
 
@@ -297,6 +305,9 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
   }
 
+  if (IS_SAME_FRAME(cur_frame, void_frame))
+    cur_frame = *(stack_frame_t *) new_cur_frame.cfm.app->base_frame;
+
   switch (stack_event.state) {
     case STACK_STATE_CALL:
       stack_event.state = STACK_STATE_NONE;
@@ -318,7 +329,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
           prev_execute_data->func->op_array.type == ZEND_INTERNAL_FUNCTION))
     prev_execute_data = prev_execute_data->prev_execute_data;
   if (prev_execute_data == NULL) {
-    new_prev_frame = base_frame;
+    new_prev_frame = *(stack_frame_t *) new_cur_frame.cfm.app->base_frame;
   } else {
     zend_op_array *prev_op_array = &prev_execute_data->func->op_array;
     new_prev_frame.execute_data = prev_execute_data;
@@ -349,7 +360,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
           WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n",
                compiled_target.type, new_prev_op->opcode);
         }
-        if (IS_SAME_FRAME(new_prev_frame, base_frame)) {
+        if (IS_SAME_FRAME(new_prev_frame, *(stack_frame_t *) new_cur_frame.cfm.app->base_frame)) {
           SPOT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
                new_cur_frame.cfm.cfg->routine_hash);
         }
@@ -592,21 +603,24 @@ void opcode_executing(const zend_op *op)
             cur_frame.cfm.cfg->routine_hash);
     } else if (!caught_exception && !stack_pointer_moved) {
       uint i;
-      bool found = false;
+      bool edge_found = false, edge_changed = false;
       zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
 
       for (i = 0; i < cur_frame.cfm.cfg->opcode_edges.size; i++) {
         cfg_opcode_edge_t *edge = routine_cfg_get_opcode_edge(cur_frame.cfm.cfg, i);
-        if (edge->from_index == prev_frame.op_index) {
+        if (edge->from_index == prev_frame.op_index) { // TODO: check user level
           if (edge->to_index == cur_frame.op_index) {
-            found = true;
+            if (current_session.user_level < edge->user_level) {
+              edge->user_level = current_session.user_level;
+              edge_changed = true;
+            }
+            edge_found = true;
             break;
           }
         }
       }
-      if (found) {
-        PRINT("@ Verified opcode edge %u -> %u\n",
-              prev_frame.op_index, cur_frame.op_index);
+      if (edge_found && !edge_changed) {
+        PRINT("@ Verified opcode edge %u -> %u\n", prev_frame.op_index, cur_frame.op_index);
       } else { // slightly weak
         compiled_edge_target_t compiled_target;
         compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
@@ -615,10 +629,10 @@ void opcode_executing(const zend_op *op)
                compiled_target.type, op->opcode);
         }
 
-        if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index,
-                                         cur_frame.op_index)) {
-          generate_opcode_edge(&cur_frame.cfm, prev_frame.op_index, cur_frame.op_index);
-        }
+        if (!edge_found)
+          routine_cfg_add_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index, cur_frame.op_index,
+                                      current_session.user_level);
+        generate_opcode_edge(&cur_frame.cfm, prev_frame.op_index, cur_frame.op_index);
       }
     }
   }

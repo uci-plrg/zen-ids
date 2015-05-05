@@ -51,7 +51,7 @@ static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL }
 static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_hash,
                                    const char *routine_name)
 {
-  SPOT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
+  PRINT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
 
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
@@ -324,7 +324,7 @@ void function_compiled(zend_op_array *op_array)
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
 
                 write_routine_edge(true, cfm.app, fqn->function.hash, i,
-                                   to_routine_hash, 0, USER_LEVEL_BOTTOM);
+                                   to_routine_hash, 0, USER_LEVEL_TOP);
               } break;
               case ZEND_EVAL: {
                 char *eval_body = resolve_eval_body(op);
@@ -343,7 +343,7 @@ void function_compiled(zend_op_array *op_array)
           if (fcall->routine_hash > 0) {
             SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
             write_routine_edge(true, cfm.app, fqn->function.hash, i,
-                               fcall->routine_hash, 0, USER_LEVEL_BOTTOM);
+                               fcall->routine_hash, 0, USER_LEVEL_TOP);
           } else if (fcall->opcode > 0) {
             SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
                  "Dataset: %s. edges: %d.\n", i, fcall->opcode, cfm.routine_name, fqn->unit.path,
@@ -435,7 +435,7 @@ void function_compiled(zend_op_array *op_array)
       }
 #endif
 
-      routine_cfg_add_opcode_edge(cfm.cfg, i, target.index, USER_LEVEL_COMPILER);
+      routine_cfg_add_opcode_edge(cfm.cfg, i, target.index, USER_LEVEL_TOP);
       PRINT("\t[create edge %u|0x%x(%u,%u) -> %u for {%s|%s, 0x%x}]\n",
             i, op->opcode, op->op1_type, op->op2_type, target.index,
             fqn->unit.path, fqn->function.cfm.routine_name,
@@ -466,7 +466,7 @@ void function_compiled(zend_op_array *op_array)
     for (i = 0; i < cfm.cfg->opcode_edges.size; i++) {
       cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
       write_op_edge(cfm.app, fqn->function.hash, cfg_edge->from_index,
-                    cfg_edge->to_index, USER_LEVEL_COMPILER);
+                    cfg_edge->to_index, USER_LEVEL_TOP);
 #ifdef SPOT_DEBUG
       if (spot) {
         SPOT("\t[emit %d -> %d in 0x%x]\n", cfg_edge->from_index,

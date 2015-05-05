@@ -20,3 +20,6 @@ restore-snapshot -w /hd/www/html/wordpress -d wordpress -s /hd/script-safe/snaps
 
 mysqldump -u root -p wordpress > wordpress.sql
 
+go build gor -o /hd/script-safe/go/bin/gor
+
+gor -input-file="log.gor|i" -output-sync-http="http://dc-4.calit2.uci.edu:8080"

@@ -75,7 +75,7 @@ typedef struct _execution_context_t {
 
 typedef enum _user_level_t {
   USER_LEVEL_BOTTOM = 0,
-  USER_LEVEL_COMPILER = 0x3f,
+  USER_LEVEL_TOP = 0x3f,
 } user_level_t;
 
 typedef struct _user_session_t {
@@ -125,6 +125,8 @@ bool is_php_session_active();
 zval *php_session_lookup_var(zend_string *key);
 zval *php_session_set_var(zend_string *key, zval *value);
 void set_opmon_user_level(long user_level);
+
+void tokenize_file(void);
 
 static inline uint64 hash_addr(void *addr)
 {

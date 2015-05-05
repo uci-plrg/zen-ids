@@ -13,8 +13,8 @@ typedef struct _application_list_t {
 static application_list_t *application_list = NULL;
 static application_t unknown_app = { "unknown", "/", NULL, NULL, NULL };
 
-#define SITE_ROOT_FILENAME "opmon.site.root"
-#define SITE_ROOT_FILENAME_LEN 16
+#define SITE_ROOTS_FILENAME "opmon.site.roots"
+#define SITE_ROOTS_FILENAME_LEN 17
 
 void init_operand_resolver()
 {
@@ -27,7 +27,7 @@ void destroy_operand_resolver()
   application_list_t *next_app, *app = application_list;
   while (app != NULL) {
     next_app = app->next;
-    close_cfg_files(&next_app->app);
+    close_cfg_files(&app->app);
     free((char *) app->app.root);
     free((char *) app->app.name);
     free(app);
@@ -102,8 +102,6 @@ static application_t *new_site_app(char *buffer)
   const char *app_name;
   char *new_app_name;
 
-  SPOT("Found application %s\n", buffer);
-
   new_app = malloc(sizeof(application_list_t));
 
   app_name = strrchr(buffer, '/');
@@ -128,12 +126,10 @@ static application_t *new_site_app(char *buffer)
   return &new_app->app;
 }
 
-application_t *locate_application(const char *filename /*absolute path*/)
+static application_t *lookup_application(const char *filename /*absolute path*/)
 {
-  char *buffer, *parent_dir;
   uint length = strlen(filename);
   application_list_t *next_app = application_list;
-  struct stat file_info;
 
   // return existing app if there is one
   while (next_app != NULL) {
@@ -143,7 +139,20 @@ application_t *locate_application(const char *filename /*absolute path*/)
     next_app = next_app->next;
   }
 
-  buffer = malloc(length + SITE_ROOT_FILENAME_LEN + 1);
+  return NULL;
+}
+
+application_t *locate_application(const char *filename /*absolute path*/)
+{
+  char *buffer, *parent_dir;
+  uint length = strlen(filename);
+  struct stat file_info;
+
+  application_t *app = lookup_application(filename);
+  if (app != NULL)
+    return app;
+
+  buffer = malloc(length + SITE_ROOTS_FILENAME_LEN + 1);
   strcpy(buffer, filename);
 
   if (strcmp(buffer + length - 5, ".phar") == 0) {
@@ -154,14 +163,43 @@ application_t *locate_application(const char *filename /*absolute path*/)
 
   while ((parent_dir = strrchr(buffer, '/')) != NULL) {
     parent_dir[1] = '\0'; // truncate after trailing slash
-    strcat(buffer, SITE_ROOT_FILENAME);
+    strcat(buffer, SITE_ROOTS_FILENAME);
     if (stat(buffer, &file_info) == 0) {
-      parent_dir[0] = '\0'; // remove filename and trailing slash
-      return new_site_app(buffer);
+      FILE *roots = fopen(buffer, "rt");
+      char line[128], *path;
+      int line_length;
+
+      parent_dir[0] = '\0'; // remove filename and trailing slash from `buffer`
+      while (fgets(line, 128, roots) != NULL) {
+        line_length = strlen(line);
+        if (line_length == 0)
+          continue;
+
+        line[line_length-1] = '\0';
+        if (strcmp(line, ".") == 0) {
+          path = strdup(buffer);
+        } else {
+          path = malloc(strlen(buffer) + line_length + 2);
+          strcpy(path, buffer);
+          if (path[strlen(path)-1] != '/')
+            strcat(path, "/");
+          strcat(path, line);
+          if (path[strlen(path)-1] == '/')
+            path[strlen(path)-1] = '\0';
+        }
+        new_site_app(path);
+      }
+      fclose(roots);
+      break;
     }
     parent_dir[0] = '\0'; // remove filename and trailing slash
   }
 
   free(buffer);
+
+  app = lookup_application(filename);
+  if (app != NULL)
+    return app;
+
   return &unknown_app;
 }
