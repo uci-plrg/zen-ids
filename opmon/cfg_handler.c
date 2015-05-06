@@ -490,8 +490,10 @@ void cfg_request(bool start)
       SPOT("New session id %s (0x%x)\n", session.id, session.hash);
     }
   } else {
-    flush_all_outputs(request_state.app);
-    request_state.app = NULL;
+    if (request_state.app != NULL) {
+      flush_all_outputs(request_state.app);
+      request_state.app = NULL;
+    }
   }
 }
 
