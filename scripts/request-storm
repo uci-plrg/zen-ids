@@ -11,5 +11,5 @@ h7="nonsense1: cc -I. -I/hd/script-safe/php-cfi/opmon -DPHP_ATOM_INC -I/hd/scrip
 for i in {1..10000}
 do
   curl -i -H "$h1" -H "$h2" -H "$h3" -H "$h4" -H "$h5" -H "$h6" -H "$h7" \
-       http://dw-7.calit2.uci.edu &> /dev/null
+       http://dw-7.eecs.uci.edu &> /dev/null
 done
