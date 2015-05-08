@@ -107,6 +107,7 @@ void initialize_interp_context()
   first_thread_id = pthread_self();
 
   current_session.user_level = USER_LEVEL_BOTTOM;
+  current_session.active = false;
 }
 
 void initialize_interp_app_context(application_t *app)
@@ -273,8 +274,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   //if (stack_event.state == STACK_STATE_UNWINDING)
   //  return false;
 
-  if (execute_data == cur_frame.execute_data &&
-      op_array->opcodes == cur_frame.opcodes) {
+  if (execute_data == cur_frame.execute_data && op_array->opcodes == cur_frame.opcodes) {
     prev_frame = cur_frame;
     cur_frame.op_index = (execute_data->opline - op_array->opcodes);
     cur_frame.opcode = op->opcode;
@@ -361,8 +361,8 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
                compiled_target.type, new_prev_op->opcode);
         }
         if (IS_SAME_FRAME(new_prev_frame, *(stack_frame_t *) new_cur_frame.cfm.app->base_frame)) {
-          SPOT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
-               new_cur_frame.cfm.cfg->routine_hash);
+          SPOT("Entry edge to %s (0x%x) on pid 0x%x\n", new_cur_frame.cfm.routine_name,
+               new_cur_frame.cfm.cfg->routine_hash, getpid());
         }
       }
 
@@ -389,7 +389,7 @@ static void update_user_session()
     zval *session_zval = php_get_session_var(key);
     if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
       set_opmon_user_level(USER_LEVEL_BOTTOM);
-      PRINT("<session> Session has no user level for key %s during update on pid 0x%x"
+      SPOT("<session> Session has no user level for key %s during update on pid 0x%x"
             "--assigning bottom level\n", key->val, getpid());
     } else {
       PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
@@ -397,8 +397,11 @@ static void update_user_session()
     }
     zend_string_release(key);
 
+    current_session.active = true;
+
     PRINT("<session> Updated current user session to level %d\n", current_session.user_level);
   } else {
+    current_session.active = false;
     // TODO: why is the session sometimes inactive??
   }
 }
@@ -478,6 +481,10 @@ void opcode_executing(const zend_op *op)
   }
 
   stack_pointer_moved = update_stack_frame(op);
+
+  if (!current_session.active)
+    SPOT("<session> Inactive session while executing %s. User level is %d.\n",
+         cur_frame.cfm.routine_name, current_session.user_level);
 
 #ifdef SPOT_DEBUG
   if (cur_frame.cfm.cfg->routine_hash == 0x35b71951)

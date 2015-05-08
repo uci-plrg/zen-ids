@@ -44,6 +44,6 @@ fi
 
 [ ! -z "$directory" ] && echo $(dirname "$file") && exit
 [ ! -z "$log" ] && echo "$file" && exit
-[ ! -z "$session" ] && echo "$webserver_path/$file" && exit
+[ ! -z "$session" ] && echo "$PHP_DATASET_DIR/$webserver_path/$file" && exit
 echo "Error: please choose an option [ -d  | -l ]"
 

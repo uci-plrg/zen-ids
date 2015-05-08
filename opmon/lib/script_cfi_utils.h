@@ -80,6 +80,7 @@ typedef enum _user_level_t {
 
 typedef struct _user_session_t {
   user_level_t user_level;
+  bool active;
 } user_session_t;
 
 enum {
