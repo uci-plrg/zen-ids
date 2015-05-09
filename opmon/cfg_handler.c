@@ -17,6 +17,7 @@
 #include "cfg_handler.h"
 
 // #define URL_DECODE 1
+#define USER_LEVEL_SHIFT 26
 
 typedef struct _cfg_files_t {
   FILE *node;
@@ -488,8 +489,8 @@ void cfg_request(bool start)
       strcpy(session.id, PS(id)->val);
       session.hash = hash_string(session.id);
       SPOT("New session id %s (0x%x) on pid 0x%x\n", session.id, session.hash, getpid());
-      if (strcmp(session.id, "9491nc08len3diid9t7r5757e5") == 0 ||
-          strcmp(session.id, "i6ivdkcgdmurtjcffudk5frna4") == 0) {
+      if (strcmp(session.id, "9491nc08len3diid9t7r5757e5") == 0 /* ||
+          strcmp(session.id, "i6ivdkcgdmurtjcffudk5frna4") == 0 */) {
         SPOT("Faking user level 10 for truncated session\n");
         set_opmon_user_level(10);
       }
@@ -521,7 +522,7 @@ void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint 
 
   PRINT("Write op-edge 0x%x #%d -> #%d to cfg\n", routine_hash, from_index, to_index);
 
-  from_index |= (user_level << 26);
+  from_index |= (user_level << USER_LEVEL_SHIFT);
 
   fwrite(&routine_hash, sizeof(uint), 1, cfg_files->op_edge);
   fwrite(&from_index, sizeof(uint), 1, cfg_files->op_edge);
@@ -559,7 +560,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
   PRINT("Write routine-edge {0x%x #%d} -> {0x%x #%d} to cfg\n",
         from_routine_hash, from_index, to_routine_hash, to_index);
 
-  packed_from_index = from_index | (user_level << 26);
+  packed_from_index = from_index | (user_level << USER_LEVEL_SHIFT);
 
   if (request_state.is_new_request) {
     uint timestamp = get_timestamp();
@@ -568,6 +569,17 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     fwrite(&request_state.request_id, sizeof(uint), 1, cfg_files->request_edge);
     fwrite(&session.hash, sizeof(uint), 1, cfg_files->request_edge);
     fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);
+
+    /* Make an entry point if the stack policy didn't see it */
+    if (from_routine_hash != ENTRY_POINT_HASH) {
+      uint entry_point_hash = ENTRY_POINT_HASH;
+      uint entry_point_index = (user_level << USER_LEVEL_SHIFT);
+
+      fwrite(&entry_point_hash, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&entry_point_index, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&from_index, sizeof(uint), 1, cfg_files->request_edge);
+    }
 
     write_request_entry(cfg_files);
 

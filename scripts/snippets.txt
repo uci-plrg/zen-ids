@@ -23,3 +23,4 @@ mysqldump -u root -p wordpress > wordpress.sql
 go build gor -o /hd/script-safe/go/bin/gor
 
 gor -input-file="log.gor|i" -output-sync-http="http://dc-4.calit2.uci.edu:8080"
+    -output-http-header-filter User-Agent:^[^WG]..[^od1]

@@ -361,8 +361,8 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
                compiled_target.type, new_prev_op->opcode);
         }
         if (IS_SAME_FRAME(new_prev_frame, *(stack_frame_t *) new_cur_frame.cfm.app->base_frame)) {
-          SPOT("Entry edge to %s (0x%x) on pid 0x%x\n", new_cur_frame.cfm.routine_name,
-               new_cur_frame.cfm.cfg->routine_hash, getpid());
+          SPOT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
+               new_cur_frame.cfm.cfg->routine_hash);
         }
       }
 
@@ -375,6 +375,12 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
               p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
       }
     }
+  }
+
+  if (new_prev_frame.cfm.cfg->routine_hash == 0x11aec51c ||
+      new_prev_frame.cfm.cfg->routine_hash == 0x5d003de8 ||
+      new_prev_frame.cfm.cfg->routine_hash == 0x783216db) {
+    SPOT("(debug stop)");
   }
 
   cur_frame = new_cur_frame;
