@@ -27,12 +27,14 @@ void destroy_operand_resolver()
   application_list_t *next_app, *app = application_list;
   while (app != NULL) {
     next_app = app->next;
-    close_cfg_files(&app->app);
+    cfg_destroy_application(&app->app);
     free((char *) app->app.root);
     free((char *) app->app.name);
+    cfg_free(app->app.cfg);
     free(app);
     app = next_app;
   }
+  cfg_free(unknown_app.cfg);
 }
 
 const char *resolve_constant_include(zend_op *op)

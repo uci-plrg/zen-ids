@@ -82,16 +82,6 @@ bool is_php_session_active()
   return PS(id) != NULL && IS_SESSION(PS(http_session_vars));
 }
 
-// unused
-zval *php_session_lookup_var(zend_string *key)
-{
-  if (!IS_SESSION(PS(http_session_vars)))
-    return NULL;
-
-  HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
-  return zend_hash_find(session_table, key);
-}
-
 zval *php_session_set_var(zend_string *key, zval *value)
 {
   zval *cell;
@@ -111,17 +101,17 @@ void set_opmon_user_level(long user_level)
     zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
     zval *session_zval = php_get_session_var(key);
     if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
-      session_zval = malloc(sizeof(zval)); // TODO: seems to leak
-      ZVAL_LONG(session_zval, user_level);
-      session_zval = php_session_set_var(key, session_zval);
+      zval new_session_zval;
+      ZVAL_LONG(&new_session_zval, user_level);
+      session_zval = php_session_set_var(key, &new_session_zval);
       PRINT("<session> No user session during set_user_level--"
             "created new session user with level %ld\n", user_level);
     } else {
       PRINT("<session> Found session user level %ld during set_user_level\n",
             Z_LVAL_P(session_zval));
       Z_LVAL_P(session_zval) = user_level;
-      zend_string_release(key);
     }
+    zend_string_release(key);
     PRINT("<session> Set session user with level %ld on pid 0x%x\n",
           Z_LVAL_P(session_zval), getpid());
   } else {

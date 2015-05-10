@@ -221,23 +221,8 @@ void init_cfg_handler()
   memset(&request_state, 0, sizeof(request_state_t));
 }
 
-void close_cfg_files(application_t *app)
+void destroy_cfg_handler()
 {
-  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
-
-  PRINT("  === Close cfg files\n");
-
-  if (cfg_files != NULL)  {
-    fclose(cfg_files->node);
-    fclose(cfg_files->op_edge);
-    fclose(cfg_files->routine_edge);
-    fclose(cfg_files->routine_catalog);
-    if (!is_standalone_app) {
-      fclose(cfg_files->request);
-      fclose(cfg_files->request_edge);
-    }
-  }
-
   if (request_state.edges != NULL) {
     request_edge_t *edge;
     for (edge = (request_edge_t *) scarray_iterator_start(request_state.edge_pool);
@@ -333,6 +318,7 @@ void starting_script(const char *script_path)
     if (stat(cfg_file_path, &dirinfo) != 0) {
       if (mkdir(cfg_file_path, 0777) != 0) {
         ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
+        efree(resolved_path);
         return;
       }
     }
@@ -345,6 +331,8 @@ void starting_script(const char *script_path)
     open_output_files(resolved_path);
     standalone_dataset = load_dataset(resolved_path);
   }
+
+  init_operand_resolver();
 
   efree(resolved_path);
 }
@@ -464,6 +452,28 @@ void cfg_initialize_application(application_t *app)
   initialize_interp_app_context(app);
 }
 
+void cfg_destroy_application(application_t *app)
+{
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+
+  PRINT("  === Close cfg files\n");
+
+  if (cfg_files != NULL)  {
+    fclose(cfg_files->node);
+    fclose(cfg_files->op_edge);
+    fclose(cfg_files->routine_edge);
+    fclose(cfg_files->routine_catalog);
+    if (!is_standalone_app) {
+      fclose(cfg_files->request);
+      fclose(cfg_files->request_edge);
+    }
+    if (!is_standalone_app)
+      free(cfg_files);
+  }
+
+  destroy_interp_app_context(app);
+}
+
 void cfg_request(bool start)
 {
   request_state.is_in_request = start;
@@ -541,7 +551,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
   uint64 key = HASH_ROUTINE_EDGE(from_routine_hash, to_routine_hash);
   uint packed_from_index;
 
-  if (!is_new_in_process) {
+  if (!is_new_in_process && !is_standalone_app) {
     request_edge_t *next = (request_edge_t *) sctable_lookup(request_state.edges, key);
     edge_entry = next;
     while (next != NULL) {
@@ -599,8 +609,6 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     if (new_edge == NULL) {
       if (request_state.pool_index < request_state.edge_pool->size) {
         new_edge = scarray_get(request_state.edge_pool, request_state.pool_index++);
-        if (new_edge == edge_entry)
-          ERROR("Fail!\n");
       } else {
         new_edge = malloc(sizeof(request_edge_t));
         memset(new_edge, 0, sizeof(request_edge_t));

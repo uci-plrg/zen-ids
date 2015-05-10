@@ -6,12 +6,14 @@
 #include "cfg.h"
 
 void init_cfg_handler();
-void close_cfg_files(application_t *app);
+void destroy_cfg_handler();
 
 void starting_script(const char *script_path);
 void worker_startup();
 void server_startup();
+
 void cfg_initialize_application(application_t *app);
+void cfg_destroy_application(application_t *app);
 void cfg_request(bool start);
 void cfg_form(const char *form_data, int length);
 

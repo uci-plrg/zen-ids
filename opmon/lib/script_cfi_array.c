@@ -136,6 +136,7 @@ void *scarray_iterator_next()
   if (iterator.index == iterator.array->size)
     return NULL;
 
+  iterator.item++;
   if (iterator.item - iterator.block->blocks == BLOCK_SIZE) {
     iterator.block = get_block(iterator.array, iterator.index);
     iterator.item = &iterator.block->blocks[0];
@@ -149,7 +150,7 @@ void scarray_unit_test()
   uint i, j;
   char *buffer;
 
-  PRINT("Script-CFI array test starting...\n");
+  SPOT("Script-CFI array test starting...\n");
 
   scarray_t a;
 
@@ -169,10 +170,19 @@ void scarray_unit_test()
   }
 
   for (i = 0x40; i < 0x10000; i++) {
-    PRINT("Array has %s in position %d\n", (const char *) scarray_get(&a, i), i);
+    SPOT("Array has %s in position %d\n", (const char *) scarray_get(&a, i), i);
+  }
+
+  i = 0;
+  for (buffer = (char *) scarray_iterator_start(&a);
+       buffer != NULL; buffer = (char *) scarray_iterator_next(), i++) {
+    if (i == 63)
+      SPOT("stop here\n");
+    SPOT("Free element %s\n", buffer);
+    free(buffer);
   }
 
   scarray_destroy(&a);
 
-  PRINT("Script-CFI array test successful!\n");
+  SPOT("Script-CFI array test successful!\n");
 }

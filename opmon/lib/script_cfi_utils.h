@@ -122,8 +122,6 @@ void opmon_activate_printer();
 void setup_base_path(char *path, const char *category, const char *app_path);
 
 bool is_php_session_active();
-// unused
-zval *php_session_lookup_var(zend_string *key);
 zval *php_session_set_var(zend_string *key, zval *value);
 void set_opmon_user_level(long user_level);
 

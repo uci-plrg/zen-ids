@@ -34,6 +34,13 @@ routine_cfg_t *routine_cfg_new(uint routine_hash)
   return cfg;
 }
 
+void routine_cfg_free(routine_cfg_t *cfg) // mem-todo
+{
+  scarray_destroy(&cfg->opcodes);
+  scarray_destroy(&cfg->opcode_edges);
+  free(cfg);
+}
+
 void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_uchar extended_value,
                                ushort line_number, uint index)
 {
@@ -88,6 +95,15 @@ cfg_t *cfg_new()
   cfg->routine_edges.hash_bits = 10;
   sctable_init(&cfg->routine_edges);
   return cfg;
+}
+
+void cfg_free(cfg_t *cfg) // mem-todo
+{
+  if (cfg != NULL) {
+    sctable_destroy(&cfg->routines);
+    sctable_destroy(&cfg->routine_edges);
+    free(cfg);
+  }
 }
 
 void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine)

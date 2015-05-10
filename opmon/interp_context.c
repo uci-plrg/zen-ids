@@ -134,6 +134,12 @@ void initialize_interp_app_context(application_t *app)
     write_node(app, ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame->cfm.cfg, 0), 0);
 }
 
+void destroy_interp_app_context(application_t *app)
+{
+  routine_cfg_free(((stack_frame_t *) app->base_frame)->cfm.cfg);
+  free(app->base_frame);
+}
+
 static void push_exception_frame()
 {
   INCREMENT_STACK(exception_stack, exception_frame);
@@ -283,13 +289,6 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     new_cur_frame.cfm = get_last_eval_cfm();
   } else {
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
-  }
-
-  if (new_cur_frame.cfm.cfg != NULL && new_cur_frame.cfm.cfg->routine_hash == 0x55dfeca5) {
-    if ((execute_data->opline - op_array->opcodes) == 0)
-      SPOT("stop\n");
-    SPOT("Op %d of 0x%x %s\n", (uint) (execute_data->opline - op_array->opcodes),
-         new_cur_frame.cfm.cfg == NULL ? 0 : new_cur_frame.cfm.cfg->routine_hash, new_cur_frame.cfm.routine_name);
   }
 
   //if (stack_event.state == STACK_STATE_UNWINDING)

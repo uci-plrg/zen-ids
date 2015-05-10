@@ -42,7 +42,7 @@ bool is_static_analysis()
 
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
-  //scarray_unit_test();
+  // scarray_unit_test();
 
   static_analysis = getenv(ENV_STATIC_ANALYSIS);
 
@@ -67,4 +67,5 @@ void destroy_event_handler()
 {
   destroy_metadata_handler();
   destroy_operand_resolver();
+  destroy_cfg_handler();
 }
