@@ -3,7 +3,9 @@
 . $csc/scripts/cs-common
 
 function usage() {
-  echo "dgt -d <dataset-dir> [ -1 <standalone-mode> -s <php-src-dir> ] [ -p <server-port> ]"
+  echo "dgt -d <dataset-dir> -n <predictor-count> [ (-1 <standalone-mode> -s <php-src-dir> ) | ( -p <server-port> ) ]"
+  echo "    [ -t train/test ]"
+  echo "    # predictor-count: number of predictors to report (-1 for all)"
 }
 
 check_help $1 usage
