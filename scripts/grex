@@ -3,7 +3,7 @@
 . $csc/scripts/cs-common
 
 function usage() {
-  echo "grex -s <dataset-dir> -o <output-file>"
+  echo "grex -d <dataset-dir> -o <output-file>"
 }
 
 check_help $1 usage
