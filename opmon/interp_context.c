@@ -274,7 +274,6 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   zend_execute_data *execute_data = EG(current_execute_data), *prev_execute_data;
   zend_op_array *op_array = &execute_data->func->op_array;
   stack_frame_t new_cur_frame, new_prev_frame;
-  bool check_lost_entry_point = false;
 
   if (op_array == NULL || op_array->opcodes == NULL)
     return false; // nothing to do
@@ -291,43 +290,6 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
       SPOT("stop\n");
     SPOT("Op %d of 0x%x %s\n", (uint) (execute_data->opline - op_array->opcodes),
          new_cur_frame.cfm.cfg == NULL ? 0 : new_cur_frame.cfm.cfg->routine_hash, new_cur_frame.cfm.routine_name);
-  }
-
-  prev_execute_data = execute_data->prev_execute_data;
-  if (prev_execute_data != NULL) {
-    if (prev_execute_data->func == NULL) {
-      if (op_array->type == ZEND_USER_FUNCTION && prev_execute_data->prev_execute_data == NULL) {
-        if (op_array->function_name == NULL) {
-          ERROR("Unhandled entry point: calling a script body as a user function\n");
-        } else {
-          new_prev_frame = *(stack_frame_t *) cur_frame.cfm.app->base_frame;
-          check_lost_entry_point = true;
-
-          if (execute_data == cur_frame.execute_data && op_array->opcodes == cur_frame.opcodes &&
-              (execute_data->opline - op_array->opcodes) > get_first_executable_index(op_array->opcodes)) {
-            uint index = (uint)(execute_data->opline - op_array->opcodes);
-            uint first_executable_index = get_first_executable_index(op_array->opcodes);
-            SPOT("<entry> Skipping this entry point into 0x%x %s? Op index %d (%s), first executable %d (%s)\n",
-                 new_cur_frame.cfm.cfg == NULL ? 0 : new_cur_frame.cfm.cfg->routine_hash, new_cur_frame.cfm.routine_name,
-                 index, zend_get_opcode_name(op_array->opcodes[index].opcode),
-                 first_executable_index, zend_get_opcode_name(op_array->opcodes[first_executable_index].opcode));
-          }
-        }
-      }
-    } else {
-      while (prev_execute_data != NULL &&
-             (prev_execute_data->func == NULL ||
-              prev_execute_data->func->op_array.type == ZEND_INTERNAL_FUNCTION))
-        prev_execute_data = prev_execute_data->prev_execute_data;
-      if (prev_execute_data == NULL) {
-        new_prev_frame = *(stack_frame_t *) cur_frame.cfm.app->base_frame;
-      } else {
-        zend_op_array *prev_op_array = &prev_execute_data->func->op_array;
-        lookup_cfm(execute_data->prev_execute_data, prev_op_array, &new_prev_frame.cfm);
-      }
-      if (new_prev_frame.cfm.cfg->routine_hash == 0x55dfeca5)
-        SPOT("(debug stop)\n");
-    }
   }
 
   //if (stack_event.state == STACK_STATE_UNWINDING)
@@ -352,9 +314,6 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
         break;
       default: ;
     }
-
-    if (check_lost_entry_point)
-      SPOT("<entry> Skipping possible lost entry point\n");
 
     return false; // nothing to do
   }
@@ -439,13 +398,6 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
               p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
       }
     }
-  }
-
-  if (new_prev_frame.cfm.cfg->routine_hash != 1 &&
-      (new_cur_frame.cfm.cfg->routine_hash == 0x2e7f4b03 ||
-       new_cur_frame.cfm.cfg->routine_hash == 0x55dfeca5 ||
-       new_cur_frame.cfm.cfg->routine_hash == 0x640efa6d)) {
-    SPOT("(debug stop)");
   }
 
   cur_frame = new_cur_frame;
