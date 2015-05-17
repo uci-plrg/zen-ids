@@ -55,7 +55,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_function_compile_complete = function_compiled;
   monitor->notify_request = cfg_request;
   monitor->notify_worker_startup = init_worker;
-  monitor->opmon_tokenize = tokenize_file;
+  //monitor->opmon_tokenize = tokenize_file;
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
 

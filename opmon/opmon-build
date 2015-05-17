@@ -6,5 +6,12 @@ cd $PHP_CFI/opmon
 [ ! -e "./configure" ] && $PHP_HOME/scripts/phpize
 [ ! -e "./Makefile" ] && ./current-config
 make install
-cp -u /hd/lib/imagick/imagick/modules/imagick.so modules
 
+imagick="/hd/lib/imagick/imagick/modules/imagick.so"
+
+if [ -e "$imagick" ]
+then
+  cp -u $imagick modules
+else
+  echo "Not install the imagick module (not found)"
+fi
