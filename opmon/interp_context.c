@@ -504,9 +504,10 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
-  if (!current_session.active)
-    SPOT("<session> Inactive session while executing %s. User level is %d.\n",
-         cur_frame.cfm.routine_name, current_session.user_level);
+  if (!current_session.active) {
+    PRINT("<session> Inactive session while executing %s. User level is %d.\n",
+          cur_frame.cfm.routine_name, current_session.user_level);
+  }
 
 #ifdef SPOT_DEBUG
   if (cur_frame.cfm.cfg->routine_hash == 0x35b71951)
