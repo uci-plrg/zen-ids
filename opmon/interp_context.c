@@ -411,7 +411,7 @@ static void update_user_session()
     zval *session_zval = php_get_session_var(key);
     if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
       set_opmon_user_level(USER_LEVEL_BOTTOM);
-      SPOT("<session> Session has no user level for key %s during update on pid 0x%x"
+      PRINT("<session> Session has no user level for key %s during update on pid 0x%x"
             "--assigning bottom level\n", key->val, getpid());
     } else {
       PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));

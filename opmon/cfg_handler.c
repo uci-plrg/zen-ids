@@ -163,49 +163,54 @@ static void write_request_entry(cfg_files_t *cfg_files)
 #endif
 
       fprintf(cfg_files->request, "<post-variable> ");
-      php_stream_rewind(SG(request_info).request_body);
-      while (true) {
-        size = SG(request_info).request_body->ops->read(SG(request_info).request_body, buffer,
-                                                        SAPI_POST_BLOCK_SIZE);
-        if (size == 0)
-          break;
-        set = buffer;
-        do {
-          mark = strchr(set, '&');
-          if (mark == NULL)
+
+      if (SG(request_info).request_body == NULL) {
+        fprintf(cfg_files->request, "(null)");
+      } else {
+        php_stream_rewind(SG(request_info).request_body);
+        while (true) {
+          size = SG(request_info).request_body->ops->read(SG(request_info).request_body, buffer,
+                                                          SAPI_POST_BLOCK_SIZE);
+          if (size == 0)
             break;
+          set = buffer;
+          do {
+            mark = strchr(set, '&');
+            if (mark == NULL)
+              break;
 #ifdef URL_DECODE
-          decode_size = mark - set;
-          decode_fragment_size = 0;
-          if (size == SAPI_POST_BLOCK_SIZE) {
-            if (set[decode_size-1] == '%')
-              decode_fragment_size = 1;
-            else if (set[decode_size-2] == '%')
-              decode_fragment_size = 2;
-            decode_size = decode_size - decode_fragment_size;
-          }
-          strncat(decode_buffer, set, decode_size);
-          set += decode_size;
-          decode_size = php_url_decode(decode_buffer, decode_size);
+            decode_size = mark - set;
+            decode_fragment_size = 0;
+            if (size == SAPI_POST_BLOCK_SIZE) {
+              if (set[decode_size-1] == '%')
+                decode_fragment_size = 1;
+              else if (set[decode_size-2] == '%')
+                decode_fragment_size = 2;
+              decode_size = decode_size - decode_fragment_size;
+            }
+            strncat(decode_buffer, set, decode_size);
+            set += decode_size;
+            decode_size = php_url_decode(decode_buffer, decode_size);
+            fwrite(decode_buffer, sizeof(char), decode_size, cfg_files->request);
+            fprintf(cfg_files->request, "\n<post-variable> ");
+            if (decode_fragment_size > 0)
+              strncpy(decode_buffer, set, decode_fragment_size);
+            else
+              decode_buffer[0] = '\0';
+#else
+            fwrite(set, sizeof(char), mark - set, cfg_files->request);
+            fprintf(cfg_files->request, "\n<post-variable> ");
+#endif
+            set = mark + 1;
+          } while (set < (buffer + SAPI_POST_BLOCK_SIZE));
+#ifdef URL_DECODE
+          strncat(decode_buffer, set, size - (set - buffer));
+          decode_size = php_url_decode(decode_buffer, size - (set - buffer));
           fwrite(decode_buffer, sizeof(char), decode_size, cfg_files->request);
-          fprintf(cfg_files->request, "\n<post-variable> ");
-          if (decode_fragment_size > 0)
-            strncpy(decode_buffer, set, decode_fragment_size);
-          else
-            decode_buffer[0] = '\0';
 #else
-          fwrite(set, sizeof(char), mark - set, cfg_files->request);
-          fprintf(cfg_files->request, "\n<post-variable> ");
+          fwrite(set, sizeof(char), size - (set - buffer), cfg_files->request);
 #endif
-          set = mark + 1;
-        } while (set < (buffer + SAPI_POST_BLOCK_SIZE));
-#ifdef URL_DECODE
-        strncat(decode_buffer, set, size - (set - buffer));
-        decode_size = php_url_decode(decode_buffer, size - (set - buffer));
-        fwrite(decode_buffer, sizeof(char), decode_size, cfg_files->request);
-#else
-        fwrite(set, sizeof(char), size - (set - buffer), cfg_files->request);
-#endif
+        }
       }
       fprintf(cfg_files->request, "\n");
     } break;
