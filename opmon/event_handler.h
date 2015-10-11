@@ -7,5 +7,6 @@ void init_event_handler(zend_opcode_monitor_t *monitor);
 void destroy_event_handler();
 const char *get_static_analysis();
 bool is_static_analysis();
+FILE *get_opcode_dump_file();
 
 #endif

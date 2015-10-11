@@ -1,12 +1,14 @@
 #!/bin/bash
 
-while getopts "l" option
+while getopts "ls:o:" option
 do
   case $option in
     l) local=true;;
+    s) static_analysis="OPMON_STATIC_ANALYSIS=$OPTARG";;
+    o) opcode_dump="OPMON_OPCODE_DUMP=$OPTARG";;
   esac
 done
 
 [ -z "$local" ] && cd $PHP_HOME
 
-gdb $PHP_HOME/bin/php
+$static_analysis $opcode_dump gdb $PHP_HOME/bin/php

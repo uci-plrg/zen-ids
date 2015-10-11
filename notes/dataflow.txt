@@ -1,0 +1,40 @@
+
+ === zend_op (instruction)
+
+ · zend_op is defined as _zend_op in zend_compile.h
+ · a zend_op has two operands (op1 and op2, struct znode_op), each with a type (op1_type and op2_type)
+ · a zend_op has one result (struct znode_op) with a type result_type (uninitialized if not used)
+ · a znode_op is interpreted according to its corresponding type
+ · the op[12]_type and result_type have domain (from zend_compile.h):
+    #define IS_CONST         (1<<0)  /* Constant (op[12].zv has some constant value type)
+    #define IS_TMP_VAR       (1<<1)  /* Stack variable (op[12].var is an offset in execute_data to a `zval *`) */
+    #define IS_VAR           (1<<2)  /* Variable (op[12].var is an offset in execute_data to a `zval *`) */
+    #define IS_UNUSED        (1<<3)  /* Unused variable */
+    #define IS_CV            (1<<4)  /* Compiled variable (op[12].var is an offset in execute_data to a `zval *`) */
+    #define EXT_TYPE_UNUSED	 (1<<5)  /* Return value unused (not applicable to src operands) */
+ · note: in some cases an IS_CONST operand may have a direct op[12].constant value. This seems to occur only
+         for literals, and is often elided during compilation via constant folding
+
+ === zval (operand)
+
+ · zval is defined as _zval_struct in zend_types.h
+ · the zval->value is interpreted according to its type
+ · the zval->u1.v.type has domain (from zend_types.h):
+    #define IS_UNDEF          0
+    #define IS_NULL           1
+    #define IS_FALSE          2
+    #define IS_TRUE           3
+    #define IS_LONG           4
+    #define IS_DOUBLE         5
+    #define IS_STRING         6
+    #define IS_ARRAY          7
+    #define IS_OBJECT         8
+    #define IS_RESOURCE       9
+    #define IS_REFERENCE      10
+
+ === local variables
+
+ · the zend_execute_data (hardcoded in macros as `execute_data`) contains a list of local variables
+ · for znode_op of type var (IS_TMP_VAR, IS_VAR, IS_CV), the znode_op.var points into the execute_data
+ · the variable's `zval *` is found in the list using, e.g., `EX_VAR(op1.var)`, which expands to:
+     ((zval*)(((char*)(execute_data)) + ((int)(op1.var))))

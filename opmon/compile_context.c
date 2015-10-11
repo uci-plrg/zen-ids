@@ -84,6 +84,42 @@ static inline void reset_fcall_stack()
   fcall_frame = fcall_stack + 1;
 }
 
+static void dump_operand(FILE *file, znode_op *operand, zend_uchar type)
+{
+  fprintf(file, "[");
+  switch (type) {
+    case IS_CONST:
+      fprintf(file, "const 0x%lx (zv:"PX")", operand->zv->value.lval, p2int(operand->zv));
+      break;
+    case IS_TMP_VAR:
+    case IS_VAR:
+    case IS_CV:
+      fprintf(file, "var #%d", (int)(operand->var / sizeof(zval *)));
+      break;
+  }
+  fprintf(file, "]");
+}
+
+static inline void dump_opcode(FILE *file, zend_op *op)
+{
+  fprintf(file, "\t%04d: 0x%02x %s", op->lineno, op->opcode,
+          zend_get_opcode_name(op->opcode));
+
+  fprintf(file, "  ");
+
+  if ((op->result_type & EXT_TYPE_UNUSED) == 0) {
+    dump_operand(file, &op->result, op->result_type);
+    fprintf(file, " = ");
+  }
+  if (op->op1_type != IS_UNUSED)
+    dump_operand(file, &op->op1, op->op1_type);
+  if (op->op1_type != IS_UNUSED && op->op2_type != IS_UNUSED)
+    fprintf(file, " ? ");
+  if (op->op2_type != IS_UNUSED)
+    dump_operand(file, &op->op2, op->op2_type);
+  fprintf(file, "\n");
+}
+
 inline int is_closure(const char *function_name)
 {
   const char *closure_position;
@@ -118,6 +154,7 @@ void function_compiled(zend_op_array *op_array)
   const char *function_name;
   char *buffer, *filename, *site_filename;
   char routine_name[ROUTINE_NAME_LENGTH], closure_id[CLOSURE_ID_LENGTH];
+  FILE *opcode_dump = get_opcode_dump_file();
 #ifdef SPOT_DEBUG
   bool spot = false;
 #endif
@@ -248,6 +285,13 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.hash);
   }
 
+  if (opcode_dump != NULL) {
+    if (is_script_body)
+      fprintf(opcode_dump, " === %s (0x%x)\n", routine_name, fqn->function.hash);
+    else
+      fprintf(opcode_dump, " === %s|%s (0x%x)\n", fqn->unit.path, routine_name, fqn->function.hash);
+  }
+
   sctable_add_or_replace(&routines_by_hash, fqn->function.hash, fqn);
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn);
 
@@ -270,6 +314,9 @@ void function_compiled(zend_op_array *op_array)
 
     PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
           op->opcode, i, routine_name, fqn->function.hash);
+
+    if (opcode_dump != NULL)
+      dump_opcode(opcode_dump, op);
 
     if (is_static_analysis()) {
       uint to_routine_hash;

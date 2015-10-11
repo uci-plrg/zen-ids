@@ -16,12 +16,14 @@ function usage() {
 
 [ "$1" == "--help" ] && usage && exit
 
-while getopts "a:d" option
+while getopts "ls:do:" option
 do
   case $option in
-    a) php_options="$php_options -l"; 
-       export OPMON_STATIC_ANALYSIS=$OPTARG;;
+    l) php_options="$php_options -l";;
+    s) static_analysis="$OPTARG";
+       export OPMON_STATIC_ANALYSIS="$OPTARG";;
     d) debug=true;;
+    o) export OPMON_OPCODE_DUMP="$OPTARG";;
   esac
 done
 
@@ -50,7 +52,7 @@ echo "Logging to intermediate file $log"
 echo "Monitor PHP on script ["$(basename "$script")"]" > $log
 $PHP_HOME/bin/php $php_options $script $@ &>> $log
 
-if [ -z "$OPMON_STATIC_ANALYSIS" ]
+if [ -z "$static_analysis" ]
 then
   script_basename=$(basename $script)
   script_basename=${script_basename%.*}
@@ -59,7 +61,7 @@ then
 else
   script_basename=$(echo $script | sed "s/\//_/g")
   script_basename=${script_basename%.*}
-  run_data_dir=$rundir/$OPMON_STATIC_ANALYSIS
+  run_data_dir=$rundir/$static_analysis
 fi
 run_log="$run_data_dir/$script_basename.log"
 
