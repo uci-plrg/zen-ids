@@ -435,8 +435,22 @@ void dump_field_assignment(FILE *file, zend_op *op, zend_op *next_op)
   fprintf(file, "\n");
 }
 
+void dump_foreach_fetch(FILE *file, zend_op *op, zend_op *next_op)
+{
+  dump_opcode_header(file, op);
+  fprintf(file, " in ");
+  dump_operand(file, &op->op1, op->op1_type);
+  fprintf(file, ": ");
+  dump_operand(file, &next_op->result, next_op->result_type);
+  fprintf(file, " = key, ");
+  dump_operand(file, &op->result, op->result_type);
+  fprintf(file, " = value\n");
+}
+
 void dump_opcode(FILE *file, zend_op *op)
 {
+  zend_op *jump_target = NULL;
+
   dump_opcode_header(file, op);
 
   if (uses_return_value(op)) {
@@ -454,15 +468,39 @@ void dump_opcode(FILE *file, zend_op *op)
       }
     }
   }
-  if (op->op1_type != IS_UNUSED)
+  if (op->op1_type != IS_UNUSED) {
     dump_operand(file, &op->op1, op->op1_type);
+  } else {
+    switch (op->opcode) {
+      case ZEND_JMP:
+      case ZEND_FAST_CALL:
+      case ZEND_GOTO:
+        jump_target = op->op1.jmp_addr;
+        break;
+    }
+  }
   if (op->op1_type != IS_UNUSED && op->op2_type != IS_UNUSED)
     fprintf(file, " ? ");
   if (op->op2_type != IS_UNUSED) {
     dump_operand(file, &op->op2, op->op2_type);
-  } else if (op->opcode == ZEND_JMPZ) {
-    int delta = (int) (op->op2.jmp_addr - op);
-    fprintf(file, " @ %s%d", delta > 0 ? "+" : "-", delta);
+  } else {
+    switch (op->opcode) {
+      case ZEND_JMPZ:
+      case ZEND_JMPZNZ:
+      case ZEND_JMPZ_EX:
+      case ZEND_JMPNZ_EX:
+      case ZEND_COALESCE:
+      case ZEND_JMP_SET:
+      case ZEND_FE_RESET:
+      case ZEND_FE_FETCH:
+      case ZEND_NEW:
+        jump_target = op->op2.jmp_addr;
+        break;
+    }
+  }
+  if (jump_target != NULL) {
+    int delta = (int) (jump_target - op);
+    fprintf(file, " @ %s%d", delta > 0 ? "+" : "", delta);
   }
   fprintf(file, "\n");
 }

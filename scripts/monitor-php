@@ -16,7 +16,9 @@ function usage() {
 
 [ "$1" == "--help" ] && usage && exit
 
-while getopts "ls:do:" option
+php_bin="php"
+
+while getopts "ls:do:w" option
 do
   case $option in
     l) php_options="$php_options -l";;
@@ -24,17 +26,20 @@ do
        export OPMON_STATIC_ANALYSIS="$OPTARG";;
     d) debug=true;;
     o) export OPMON_OPCODE_DUMP="$OPTARG";;
+    w) php_bin="php-cgi";;
   esac
 done
 
 shift $(( $OPTIND - 1 ))
+
+export SCRIPT_FILENAME="$1" # only for php-cgi, but otherwise ignored
 
 script=$1
 shift
 
 if [ ! -z "$debug" ]
 then
-  gdb --args $PHP_HOME/bin/php $php_options $script $@
+  gdb --args $PHP_HOME/bin/$php_bin $php_options $script $@
   exit
 fi
 
@@ -50,7 +55,7 @@ echo "Logging to intermediate file $log"
 [ ! -f "$script" ] && echo "Script '$script' does not exist! Exiting now." && exit
 
 echo "Monitor PHP on script ["$(basename "$script")"]" > $log
-$PHP_HOME/bin/php $php_options $script $@ &>> $log
+$PHP_HOME/bin/$php_bin $php_options $script $@ &>> $log
 
 if [ -z "$static_analysis" ]
 then

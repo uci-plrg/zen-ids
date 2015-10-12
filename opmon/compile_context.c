@@ -307,6 +307,9 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_ASSIGN_OBJ:
           dump_field_assignment(opcode_dump_file, op, &op_array->opcodes[i+1]);
           break;
+        case ZEND_FE_FETCH:
+          dump_foreach_fetch(opcode_dump_file, op, &op_array->opcodes[i+1]);
+          break;
         default:
           dump_opcode(opcode_dump_file, op);
       }

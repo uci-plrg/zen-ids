@@ -13,6 +13,7 @@ void dump_operand(FILE *file, znode_op *operand, zend_uchar type);
 void dump_fcall_opcode(FILE *file, zend_op *op, const char *routine_name);
 void dump_fcall_arg(FILE *file, zend_op *op, const char *routine_name);
 void dump_field_assignment(FILE *file, zend_op *op, zend_op *next_op);
+void dump_foreach_fetch(FILE *file, zend_op *op, zend_op *next_op);
 void dump_opcode(FILE *file, zend_op *op);
 
 #endif
