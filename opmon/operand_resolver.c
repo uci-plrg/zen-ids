@@ -205,3 +205,265 @@ application_t *locate_application(const char *filename /*absolute path*/)
 
   return &unknown_app;
 }
+
+
+static bool uses_return_value(zend_op *op)
+{
+  switch (op->opcode) {
+    case ZEND_ADD:
+    case ZEND_SUB:
+    case ZEND_MUL:
+    case ZEND_DIV:
+    case ZEND_MOD:
+    case ZEND_SL:
+    case ZEND_SR:
+    case ZEND_CONCAT:
+    case ZEND_IS_IDENTICAL:
+    case ZEND_IS_NOT_IDENTICAL:
+    case ZEND_IS_EQUAL:
+    case ZEND_IS_NOT_EQUAL:
+    case ZEND_IS_SMALLER:
+    case ZEND_IS_SMALLER_OR_EQUAL:
+    case ZEND_BW_OR:
+    case ZEND_BW_AND:
+    case ZEND_BW_XOR:
+    case ZEND_BOOL_XOR:
+    case ZEND_BW_NOT:
+    case ZEND_POST_INC_OBJ:
+    case ZEND_POST_DEC_OBJ:
+    case ZEND_POST_INC:
+    case ZEND_POST_DEC:
+    case ZEND_PRINT:
+    case ZEND_FETCH_R:
+    case ZEND_FETCH_W:
+    case ZEND_FETCH_RW:
+    case ZEND_FETCH_FUNC_ARG:
+    case ZEND_FETCH_UNSET:
+    case ZEND_FETCH_IS:
+    case ZEND_FETCH_DIM_R:
+    case ZEND_FETCH_DIM_W:
+    case ZEND_FETCH_DIM_RW:
+    case ZEND_FETCH_DIM_IS:
+    case ZEND_FETCH_DIM_FUNC_ARG:
+    case ZEND_FETCH_DIM_UNSET:
+    case ZEND_FETCH_OBJ_R:
+    case ZEND_FETCH_OBJ_W:
+    case ZEND_FETCH_OBJ_RW:
+    case ZEND_FETCH_OBJ_IS:
+    case ZEND_FETCH_OBJ_FUNC_ARG:
+    case ZEND_FETCH_OBJ_UNSET:
+    case ZEND_FETCH_LIST:
+    case ZEND_JMPZ_EX:
+    case ZEND_JMPNZ_EX:
+    case ZEND_ADD_CHAR:
+    case ZEND_ADD_STRING:
+    case ZEND_ADD_VAR:
+    case ZEND_FETCH_CLASS:
+    case ZEND_RECV:
+    case ZEND_RECV_INIT:
+    case ZEND_RECV_VARIADIC:
+    case ZEND_BOOL:
+    case ZEND_CASE:
+    case ZEND_FETCH_CONSTANT:
+    case ZEND_ADD_ARRAY_ELEMENT:
+    case ZEND_INIT_ARRAY:
+    case ZEND_CAST:
+    case ZEND_FE_RESET:
+    case ZEND_FE_FETCH:
+    case ZEND_ISSET_ISEMPTY_VAR:
+    case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+    case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+    case ZEND_BEGIN_SILENCE:
+    case ZEND_DECLARE_CLASS:
+    case ZEND_DECLARE_INHERITED_CLASS:
+    case ZEND_INSTANCEOF:
+    case ZEND_DECLARE_LAMBDA_FUNCTION:
+    case ZEND_POW:
+    case ZEND_ASSIGN_POW:
+    case ZEND_STRLEN:
+    case ZEND_TYPE_CHECK:
+    case ZEND_DEFINED:
+    case ZEND_QM_ASSIGN:
+    case ZEND_CATCH:
+      return true;
+    case ZEND_ECHO:
+    case ZEND_JMP:
+    case ZEND_JMPZ:
+    case ZEND_JMPNZ:
+    case ZEND_JMPZNZ:
+    case ZEND_FREE:
+    case ZEND_INIT_STATIC_METHOD_CALL:
+    case ZEND_INIT_FCALL_BY_NAME:
+    case ZEND_INIT_USER_CALL:
+    case ZEND_INIT_NS_FCALL_BY_NAME:
+    case ZEND_INIT_FCALL:
+    case ZEND_INIT_METHOD_CALL:
+    case ZEND_GENERATOR_RETURN:
+    case ZEND_THROW:
+    case ZEND_SEND_VAL:
+    case ZEND_SEND_VAL_EX:
+    case ZEND_SEND_VAR:
+    case ZEND_SEND_VAR_NO_REF:
+    case ZEND_SEND_REF:
+    case ZEND_SEND_VAR_EX:
+    case ZEND_SEND_UNPACK:
+    case ZEND_SEND_ARRAY:
+    case ZEND_SEND_USER:
+    case ZEND_BRK:
+    case ZEND_CONT:
+    case ZEND_GOTO:
+    case ZEND_UNSET_VAR:
+    case ZEND_UNSET_DIM:
+    case ZEND_UNSET_OBJ:
+    case ZEND_EXIT:
+    case ZEND_END_SILENCE:
+    case ZEND_JMP_SET:
+    case ZEND_COALESCE:
+    case ZEND_EXT_STMT:
+    case ZEND_EXT_FCALL_BEGIN:
+    case ZEND_EXT_FCALL_END:
+    case ZEND_DECLARE_INHERITED_CLASS_DELAYED:
+    case ZEND_DECLARE_FUNCTION:
+    case ZEND_TICKS:
+    case ZEND_EXT_NOP:
+    case ZEND_NOP:
+    case ZEND_ADD_INTERFACE:
+    case ZEND_ADD_TRAIT:
+    case ZEND_BIND_TRAITS:
+    case ZEND_VERIFY_ABSTRACT_CLASS:
+    case ZEND_DECLARE_CONST:
+    case ZEND_SEPARATE:
+    case ZEND_DISCARD_EXCEPTION:
+    case ZEND_FAST_CALL:
+    case ZEND_BIND_GLOBAL:
+    case ZEND_RETURN:
+      return false;
+    default:
+      return (op->result_type & EXT_TYPE_UNUSED) == 0;
+  }
+}
+
+void dump_operand(FILE *file, znode_op *operand, zend_uchar type)
+{
+  fprintf(file, "[");
+  switch (type) {
+    case IS_CONST:
+      switch (operand->zv->u1.v.type) {
+        case IS_UNDEF:
+          fprintf(file, "const <undefined> (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_NULL:
+          fprintf(file, "const null (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_FALSE:
+          fprintf(file, "const false (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_TRUE:
+          fprintf(file, "const true (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_LONG:
+          fprintf(file, "const 0x%lx (zv:"PX")", operand->zv->value.lval, p2int(operand->zv));
+          break;
+        case IS_DOUBLE:
+          fprintf(file, "const %f (zv:"PX")", operand->zv->value.dval, p2int(operand->zv));
+          break;
+        case IS_STRING:
+          fprintf(file, "const \"%.24s\" (zv:"PX")", Z_STR_P(operand->zv)->val, p2int(operand->zv));
+          break;
+        case IS_ARRAY:
+          fprintf(file, "const array? (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_OBJECT:
+          fprintf(file, "const object? (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_RESOURCE:
+          fprintf(file, "const resource? (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_REFERENCE:
+          fprintf(file, "const reference? (zv:"PX")", p2int(operand->zv));
+          break;
+        default:
+          fprintf(file, "const what?? (zv:"PX")", p2int(operand->zv));
+          break;
+      }
+      break;
+    case IS_TMP_VAR:
+    case IS_VAR:
+    case IS_CV:
+      fprintf(file, "var #%d", (int)(operand->var / sizeof(zval *)));
+      break;
+    default:
+      fprintf(file, "?");
+  }
+  fprintf(file, "]");
+}
+
+static void dump_opcode_header(FILE *file, zend_op *op)
+{
+  fprintf(file, "\t%04d: 0x%02x %s  ", op->lineno, op->opcode,
+          zend_get_opcode_name(op->opcode));
+}
+
+void dump_fcall_opcode(FILE *file, zend_op *op, const char *routine_name)
+{
+  dump_opcode_header(file, op);
+  if (uses_return_value(op)) {
+    dump_operand(file, &op->result, op->result_type);
+    fprintf(file, " = ");
+  }
+  fprintf(file, "%s\n", routine_name);
+}
+
+void dump_fcall_arg(FILE *file, zend_op *op, const char *routine_name)
+{
+  dump_opcode_header(file, op);
+  dump_operand(file, &op->op1, op->op1_type);
+  fprintf(file, " -> %s\n", routine_name);
+}
+
+void dump_field_assignment(FILE *file, zend_op *op, zend_op *next_op)
+{
+  dump_opcode_header(file, op);
+  if (op->op1_type == IS_UNUSED)
+    fprintf(file, "$this");
+  else
+    dump_operand(file, &op->op1, IS_CV);
+  fprintf(file, ".");
+  dump_operand(file, &op->op2, op->op2_type);
+  fprintf(file, " = ");
+  dump_operand(file, &next_op->op1, next_op->op1_type);
+  fprintf(file, "\n");
+}
+
+void dump_opcode(FILE *file, zend_op *op)
+{
+  dump_opcode_header(file, op);
+
+  if (uses_return_value(op)) {
+    dump_operand(file, &op->result, op->result_type);
+    fprintf(file, " = ");
+    if (op->op1_type == IS_UNUSED && op->op2_type == IS_UNUSED) {
+      switch (op->opcode) {
+        case ZEND_RECV:
+        case ZEND_RECV_INIT:
+        case ZEND_RECV_VARIADIC:
+          fprintf(file, "(arg)");
+          break;
+        default:
+          fprintf(file, "(fcall stack)");
+      }
+    }
+  }
+  if (op->op1_type != IS_UNUSED)
+    dump_operand(file, &op->op1, op->op1_type);
+  if (op->op1_type != IS_UNUSED && op->op2_type != IS_UNUSED)
+    fprintf(file, " ? ");
+  if (op->op2_type != IS_UNUSED) {
+    dump_operand(file, &op->op2, op->op2_type);
+  } else if (op->opcode == ZEND_JMPZ) {
+    int delta = (int) (op->op2.jmp_addr - op);
+    fprintf(file, " @ %s%d", delta > 0 ? "+" : "-", delta);
+  }
+  fprintf(file, "\n");
+}
+

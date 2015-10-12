@@ -38,3 +38,15 @@
  · for znode_op of type var (IS_TMP_VAR, IS_VAR, IS_CV), the znode_op.var points into the execute_data
  · the variable's `zval *` is found in the list using, e.g., `EX_VAR(op1.var)`, which expands to:
      ((zval*)(((char*)(execute_data)) + ((int)(op1.var))))
+
+
+ === handlers
+
+ · the implementation of each opcode is in zend_vm_execute.h
+ · this source file is generated from the much more readable zend_vm_def.h
+
+
+always:
+  post_incdec
+  fech_var_addr
+

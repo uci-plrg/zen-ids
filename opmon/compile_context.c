@@ -36,6 +36,7 @@ typedef struct _function_fqn_t {
 typedef struct _fcall_init_t {
   uint init_index;
   uint routine_hash;
+  const char *routine_name;
   zend_uchar opcode;
 } fcall_init_t;
 
@@ -51,11 +52,12 @@ static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL }
 static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_hash,
                                    const char *routine_name)
 {
-  PRINT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
+  SPOT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
 
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
   fcall_frame->routine_hash = routine_hash;
+  fcall_frame->routine_name = strdup(routine_name);
   fcall_frame->opcode = opcode;
 }
 
@@ -64,6 +66,7 @@ static inline void push_fcall_skip(uint index, zend_uchar opcode)
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
   fcall_frame->routine_hash = 0;
+  fcall_frame->routine_name = NULL;
   fcall_frame->opcode = opcode;
 }
 
@@ -79,45 +82,14 @@ static inline fcall_init_t *pop_fcall_init()
   return top;
 }
 
+static inline fcall_init_t *peek_fcall_init()
+{
+  return fcall_frame;
+}
+
 static inline void reset_fcall_stack()
 {
   fcall_frame = fcall_stack + 1;
-}
-
-static void dump_operand(FILE *file, znode_op *operand, zend_uchar type)
-{
-  fprintf(file, "[");
-  switch (type) {
-    case IS_CONST:
-      fprintf(file, "const 0x%lx (zv:"PX")", operand->zv->value.lval, p2int(operand->zv));
-      break;
-    case IS_TMP_VAR:
-    case IS_VAR:
-    case IS_CV:
-      fprintf(file, "var #%d", (int)(operand->var / sizeof(zval *)));
-      break;
-  }
-  fprintf(file, "]");
-}
-
-static inline void dump_opcode(FILE *file, zend_op *op)
-{
-  fprintf(file, "\t%04d: 0x%02x %s", op->lineno, op->opcode,
-          zend_get_opcode_name(op->opcode));
-
-  fprintf(file, "  ");
-
-  if ((op->result_type & EXT_TYPE_UNUSED) == 0) {
-    dump_operand(file, &op->result, op->result_type);
-    fprintf(file, " = ");
-  }
-  if (op->op1_type != IS_UNUSED)
-    dump_operand(file, &op->op1, op->op1_type);
-  if (op->op1_type != IS_UNUSED && op->op2_type != IS_UNUSED)
-    fprintf(file, " ? ");
-  if (op->op2_type != IS_UNUSED)
-    dump_operand(file, &op->op2, op->op2_type);
-  fprintf(file, "\n");
 }
 
 inline int is_closure(const char *function_name)
@@ -154,7 +126,7 @@ void function_compiled(zend_op_array *op_array)
   const char *function_name;
   char *buffer, *filename, *site_filename;
   char routine_name[ROUTINE_NAME_LENGTH], closure_id[CLOSURE_ID_LENGTH];
-  FILE *opcode_dump = get_opcode_dump_file();
+  FILE *opcode_dump_file = get_opcode_dump_file();
 #ifdef SPOT_DEBUG
   bool spot = false;
 #endif
@@ -285,11 +257,11 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.hash);
   }
 
-  if (opcode_dump != NULL) {
+  if (opcode_dump_file != NULL) {
     if (is_script_body)
-      fprintf(opcode_dump, " === %s (0x%x)\n", routine_name, fqn->function.hash);
+      fprintf(opcode_dump_file, " === %s (0x%x)\n", routine_name, fqn->function.hash);
     else
-      fprintf(opcode_dump, " === %s|%s (0x%x)\n", fqn->unit.path, routine_name, fqn->function.hash);
+      fprintf(opcode_dump_file, " === %s|%s (0x%x)\n", fqn->unit.path, routine_name, fqn->function.hash);
   }
 
   sctable_add_or_replace(&routines_by_hash, fqn->function.hash, fqn);
@@ -302,23 +274,48 @@ void function_compiled(zend_op_array *op_array)
     return; // verify equal?
   }
 
-  if (is_static_analysis())
+  if (is_static_analysis() || opcode_dump_file != NULL)
     reset_fcall_stack();
 
   for (i = 0; i < op_array->last; i++) {
     compiled_edge_target_t target;
     zend_op *op = &op_array->opcodes[i];
     //cfg_node_t from_node = { op->opcode, i };
-    if (zend_get_opcode_name(op->opcode) == NULL)
-      continue;
-
     PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
           op->opcode, i, routine_name, fqn->function.hash);
 
-    if (opcode_dump != NULL)
-      dump_opcode(opcode_dump, op);
+    if (opcode_dump_file != NULL) {
+      fcall_init_t *fcall;
 
-    if (is_static_analysis()) {
+      switch (op->opcode) {
+        case ZEND_DO_FCALL:
+          fcall = peek_fcall_init();
+          dump_fcall_opcode(opcode_dump_file, op, fcall->routine_name);
+          break;
+        case ZEND_SEND_VAL:
+        case ZEND_SEND_VAL_EX:
+        case ZEND_SEND_VAR:
+        case ZEND_SEND_VAR_NO_REF:
+        case ZEND_SEND_REF:
+        case ZEND_SEND_VAR_EX:
+        case ZEND_SEND_UNPACK:
+        case ZEND_SEND_ARRAY:
+        case ZEND_SEND_USER:
+          fcall = peek_fcall_init();
+          dump_fcall_arg(opcode_dump_file, op, fcall->routine_name);
+          break;
+        case ZEND_ASSIGN_OBJ:
+          dump_field_assignment(opcode_dump_file, op, &op_array->opcodes[i+1]);
+          break;
+        default:
+          dump_opcode(opcode_dump_file, op);
+      }
+    }
+
+    if (zend_get_opcode_name(op->opcode) == NULL)
+      continue;
+
+    if (is_static_analysis() || opcode_dump_file != NULL) {
       uint to_routine_hash;
       const char *classname;
       bool ignore_call = false;
@@ -382,8 +379,16 @@ void function_compiled(zend_op_array *op_array)
           }
         } break;
         case ZEND_NEW: {
-          if (op->op1_type == IS_CONST)
+          if (op->op1_type == IS_CONST) {
             PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
+            classname = Z_STRVAL_P(op->op1.zv);
+          } else {
+            classname = "<unknown-type>";
+          }
+
+          sprintf(routine_name, "new %s", classname);
+          to_routine_hash = hash_routine(routine_name);
+          push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
         } break;
         case ZEND_DO_FCALL: {
           fcall_init_t *fcall = pop_fcall_init();
@@ -397,6 +402,7 @@ void function_compiled(zend_op_array *op_array)
                  op->lineno, fqn->function.hash, cfm.dataset == NULL ? "missing" : "found",
                  cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.app, cfm.dataset, i));
           }
+          free((char *) fcall->routine_name);
         } break;
         case ZEND_INIT_FCALL:
         case ZEND_INIT_FCALL_BY_NAME:
@@ -407,9 +413,10 @@ void function_compiled(zend_op_array *op_array)
           //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
           //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
 
-          if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL) {
+          if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL &&
+              opcode_dump_file == NULL) {
             ignore_call = true;
-            break; // ignore builtins for now
+            break; // ignore builtins for now (unless dumping ops)
           }
 
           classname = "<default>";
@@ -418,17 +425,14 @@ void function_compiled(zend_op_array *op_array)
           push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
         } break;
         case ZEND_INIT_METHOD_CALL: {
-          if (op->op2_type == IS_CONST) {
-            if (op->op1_type == IS_UNUSED) {
-              classname = op_array->scope->name->val;
-            } else {
-              WARN("Call to method %s on unknown type\n", Z_STRVAL_P(op->op2.zv));
-              break;
-            }
-            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
-            to_routine_hash = hash_routine(routine_name);
-            push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
-          }
+          if (op->op2_type == IS_CONST && op->op1_type == IS_UNUSED)
+            classname = op_array->scope->name->val;
+          else
+            classname = "<class-instance>";
+
+          sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+          to_routine_hash = hash_routine(routine_name);
+          push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
         } break;
         case ZEND_INIT_STATIC_METHOD_CALL: {
           classname = NULL;
