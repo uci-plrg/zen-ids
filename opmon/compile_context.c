@@ -409,21 +409,24 @@ void function_compiled(zend_op_array *op_array)
         } break;
         case ZEND_INIT_FCALL:
         case ZEND_INIT_FCALL_BY_NAME:
-          if (op->op2_type != IS_CONST)
-            break;
         case ZEND_INIT_NS_FCALL_BY_NAME: {
-          // in ZEND_INIT_FCALL_BY_NAME_SPEC_CONST_HANDLER:
-          //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
-          //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
+          if (op->op2_type == IS_CONST) {
+            // in ZEND_INIT_FCALL_BY_NAME_SPEC_CONST_HANDLER:
+            //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
+            //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
 
-          if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL &&
-              opcode_dump_file == NULL) {
-            ignore_call = true;
-            break; // ignore builtins for now (unless dumping ops)
+            if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL &&
+                opcode_dump_file == NULL) {
+              ignore_call = true;
+              break; // ignore builtins for now (unless dumping ops)
+            }
+
+            classname = "<default>";
+            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+          } else if (op->op2_type != IS_UNUSED) { // some kind of var
+            uint var_index = (uint) (op->op2.var / sizeof(zval *));
+            sprintf(routine_name, "<var #%d>", var_index);
           }
-
-          classname = "<default>";
-          sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
           to_routine_hash = hash_routine(routine_name);
           push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
         } break;

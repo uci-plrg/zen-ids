@@ -18,7 +18,7 @@ function usage() {
 
 php_bin="php"
 
-while getopts "ls:do:w" option
+while getopts "ls:do:wk:" option
 do
   case $option in
     l) php_options="$php_options -l";;
@@ -27,6 +27,7 @@ do
     d) debug=true;;
     o) export OPMON_OPCODE_DUMP="$OPTARG";;
     w) php_bin="php-cgi";;
+    k) php_options="$php_options -k $OPTARG";;
   esac
 done
 

@@ -19,7 +19,7 @@ typedef struct _cfg_opcode_edge_t {
 
 typedef struct _cfg_opcode_t {
   zend_uchar opcode;
-  byte extended_value;
+  zend_ulong extended_value;
   ushort line_number;
 } cfg_opcode_t;
 
@@ -78,7 +78,7 @@ routine_cfg_get_opcode_edge(routine_cfg_t *routine, uint index)
 
 routine_cfg_t *routine_cfg_new(uint routine_hash);
 void routine_cfg_free(routine_cfg_t *cfg);
-void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_uchar extended_value,
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_ulong extended_value,
                                ushort line_number, uint index);
 bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index);
 void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index,

@@ -41,7 +41,7 @@ void routine_cfg_free(routine_cfg_t *cfg) // mem-todo
   free(cfg);
 }
 
-void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_uchar extended_value,
+void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_ulong extended_value,
                                ushort line_number, uint index)
 {
   cfg_opcode_t *cfg_opcode;
