@@ -46,7 +46,4 @@
  · this source file is generated from the much more readable zend_vm_def.h
 
 
-always:
-  post_incdec
-  fech_var_addr
 

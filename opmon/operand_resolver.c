@@ -418,10 +418,13 @@ void dump_fcall_arg(FILE *file, zend_op *op, const char *routine_name)
 {
   dump_opcode_header(file, op);
   dump_operand(file, 'a', &op->op1, op->op1_type);
-  fprintf(file, " -> %s\n", routine_name);
+  if (op->opcode == ZEND_SEND_ARRAY)
+    fprintf(file, " -*-> %s\n", routine_name);
+  else
+    fprintf(file, " -%d-> %s\n", op->op2.num, routine_name);
 }
 
-void dump_field_assignment(FILE *file, zend_op *op, zend_op *next_op)
+void dump_map_assignment(FILE *file, zend_op *op, zend_op *next_op)
 {
   dump_opcode_header(file, op);
   if (op->op1_type == IS_UNUSED)
@@ -524,5 +527,253 @@ void dump_opcode(FILE *file, zend_op *op)
     fprintf(file, " @ %s%d %s", delta > 0 ? "+" : "", delta, jump_reason);
   }
   fprintf(file, "\n");
+}
+
+void identify_sink_operands(FILE *file, zend_op *op)
+{
+  switch (op->opcode) {
+    case ZEND_ADD:
+    case ZEND_SUB:
+    case ZEND_MUL:
+    case ZEND_DIV:
+    case ZEND_MOD:
+    case ZEND_SL:
+    case ZEND_SR:
+    case ZEND_BW_OR:
+    case ZEND_BW_AND:
+    case ZEND_BW_XOR:
+    case ZEND_BW_NOT:
+      fprintf(file, "\tsink(number) {op1,op2} => {result}");
+      break;
+    case ZEND_ASSIGN_ADD:
+    case ZEND_ASSIGN_SUB:
+    case ZEND_ASSIGN_MUL:
+    case ZEND_ASSIGN_DIV:
+    case ZEND_ASSIGN_MOD:
+    case ZEND_ASSIGN_SL:
+    case ZEND_ASSIGN_SR:
+    case ZEND_ASSIGN_BW_OR:
+    case ZEND_ASSIGN_BW_AND:
+    case ZEND_ASSIGN_BW_XOR:
+      fprintf(file, "\tsink(local:number) {op1,op2} => {op1,result}");
+      break;
+    case ZEND_CONCAT:
+      fprintf(file, "\tsink(local:string) {op1,op2} => {result}");
+      break;
+    case ZEND_ASSIGN_CONCAT:
+      fprintf(file, "\tsink(local:string) {op1,op2} => {op1,result}");
+      break;
+    case ZEND_BOOL_NOT:
+    case ZEND_BOOL_XOR:
+      fprintf(file, "\tsink(local:bool) {op1,op2} => {result}");
+      break;
+    case ZEND_IS_IDENTICAL:
+    case ZEND_IS_NOT_IDENTICAL:
+    case ZEND_IS_EQUAL:
+    case ZEND_IS_NOT_EQUAL:
+    case ZEND_IS_SMALLER:
+    case ZEND_IS_SMALLER_OR_EQUAL:
+      fprintf(file, "\tsink(condition) {op1,op2} => {branch-condition}");
+      break;
+    case ZEND_PRE_INC_OBJ:
+    case ZEND_PRE_DEC_OBJ:
+    case ZEND_POST_INC_OBJ:
+    case ZEND_POST_DEC_OBJ:
+      fprintf(file, "\tsink(local:number) {op1.op2} => {op1.op2,result}");
+      break;
+    case ZEND_PRE_INC:
+    case ZEND_PRE_DEC:
+    case ZEND_POST_INC:
+    case ZEND_POST_DEC:
+      fprintf(file, "\tsink(local:number) {op1} => {op1,result}");
+      break;
+    case ZEND_ECHO:
+      fprintf(file, "\tsink(local:number) {op1} => {output}");
+      break;
+    case ZEND_PRINT:
+      fprintf(file, "\tsink(local:number) {op1} => {output,result}");
+      break;
+    case ZEND_FETCH_R:
+    case ZEND_FETCH_W:
+    case ZEND_FETCH_RW:
+    case ZEND_FETCH_IS:
+      fprintf(file, "\tsink(global) {op1(type).op2} => {result}");
+      break;
+    case ZEND_FETCH_UNSET:
+      fprintf(file, "\tsink(global) {} => {op1(type).op2}");
+      break;
+    case ZEND_FETCH_DIM_R:
+    case ZEND_FETCH_DIM_W:
+    case ZEND_FETCH_DIM_RW:
+    case ZEND_FETCH_DIM_IS:
+    case ZEND_FETCH_OBJ_R:
+    case ZEND_FETCH_OBJ_W:
+    case ZEND_FETCH_OBJ_RW:
+    case ZEND_FETCH_OBJ_IS:
+      fprintf(file, "\tsink(local:map) {op1.op2} => {result}");
+      break;
+    case ZEND_FETCH_DIM_UNSET:
+    case ZEND_FETCH_OBJ_UNSET:
+      fprintf(file, "\tsink(local:map) {} => {op1.op2}");
+      break;
+    case ZEND_ASSIGN:
+      fprintf(file, "\tsink(local) {op2} => {op1,result}");
+      break;
+    case ZEND_ASSIGN_OBJ:
+    case ZEND_ASSIGN_DIM:
+      fprintf(file, "\tsink(map) {value} => {base.field}");
+      break;
+    case ZEND_JMPZ:
+    case ZEND_JMPNZ:
+    case ZEND_JMPZNZ:
+    case ZEND_JMPZ_EX:
+    case ZEND_JMPNZ_EX:
+      fprintf(file, "\tsink(branch) {branch-condition} => {opline}");
+      break;
+    /* wrong name: ADD means APPEND */
+    case ZEND_ADD_CHAR:   /* (op2 must be a const char) */
+    case ZEND_ADD_STRING: /* (op2 must be a const string) */
+    case ZEND_ADD_VAR:    /* (may convert op2 to string) */
+      fprintf(file, "\tsink(var:string) {op2,result} => {result}");
+      break;
+    case ZEND_INIT_METHOD_CALL:
+      fprintf(file, "\tsink(edge) {op1.op2} => {opline}");
+      break;
+    case ZEND_INIT_STATIC_METHOD_CALL:
+      fprintf(file, "\tsink(edge) {op1(type).op2} => {opline}");
+      break;
+    case ZEND_INIT_FCALL:
+    case ZEND_INIT_FCALL_BY_NAME:
+    case ZEND_INIT_USER_CALL:
+    case ZEND_INIT_NS_FCALL_BY_NAME:
+      fprintf(file, "\tsink(edge) {op2} => {opline}");
+      break;
+    case ZEND_NEW:
+      fprintf(file, "\tsink(edge) {op1(,op2)} => {opline}");
+      break;
+    case ZEND_THROW:
+      fprintf(file, "\tsink(edge) {op1} => {opline}");
+      break;
+    case ZEND_SEND_VAL:
+    case ZEND_SEND_VAL_EX:
+    case ZEND_SEND_VAR:
+    case ZEND_SEND_VAR_NO_REF:
+    case ZEND_SEND_REF:
+    case ZEND_SEND_USER:
+      fprintf(file, "\tsink(local) {op1} => {arg(# in op2)}");
+      break;
+    case ZEND_SEND_ARRAY:
+      fprintf(file, "\tsink(local) {op1} => {all-args}");
+      break;
+    case ZEND_RECV:
+    case ZEND_RECV_VARIADIC:
+      fprintf(file, "\tsink(local) {arg} => {result}");
+      break;
+    case ZEND_BOOL:
+    case ZEND_BOOL_NOT:
+      fprintf(file, "\tsink(local) {op1} => {result}");
+      break;
+    case ZEND_BRK:
+    case ZEND_CONT:
+    case ZEND_GOTO:
+      fprintf(file, "\tsink(branch) {op2} => {opline}");
+      break;
+    case ZEND_CASE:
+      fprintf(file, "\tsink(branch) {op1,op2} => {opline}");
+      break;
+    /*
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+    case
+*/
+
+/* ======== SINK TODO ======= *
+
+  ZEND_CAST
+  ZEND_QM_ASSIGN
+
+  ZEND_FETCH_FUNC_ARG?
+  ZEND_FETCH_DIM_FUNC_ARG?
+  ZEND_FETCH_OBJ_FUNC_ARG?
+
+  ZEND_FETCH_LIST
+
+  ZEND_ASSIGN_REF
+
+  ZEND_RETURN_BY_REF
+
+  ZEND_FETCH_CLASS
+
+  ZEND_SEND_UNPACK
+*/
+
+/* ======= SINK NOP ======= *
+
+  ZEND_NOP
+  ZEND_RETURN
+  ZEND_JMP
+  ZEND_FREE
+  ZEND_DO_FCALL
+
+*/
+
+  }
 }
 

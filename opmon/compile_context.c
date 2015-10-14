@@ -305,7 +305,8 @@ void function_compiled(zend_op_array *op_array)
           dump_fcall_arg(opcode_dump_file, op, fcall->routine_name);
           break;
         case ZEND_ASSIGN_OBJ:
-          dump_field_assignment(opcode_dump_file, op, &op_array->opcodes[i+1]);
+        case ZEND_ASSIGN_DIM:
+          dump_map_assignment(opcode_dump_file, op, &op_array->opcodes[i+1]);
           break;
         case ZEND_FE_FETCH:
           dump_foreach_fetch(opcode_dump_file, op, &op_array->opcodes[i+1]);
