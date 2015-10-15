@@ -537,6 +537,7 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_MUL:
     case ZEND_DIV:
     case ZEND_MOD:
+    case ZEND_POW:
     case ZEND_SL:
     case ZEND_SR:
     case ZEND_BW_OR:
@@ -550,6 +551,7 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_ASSIGN_MUL:
     case ZEND_ASSIGN_DIV:
     case ZEND_ASSIGN_MOD:
+    case ZEND_ASSIGN_POW:
     case ZEND_ASSIGN_SL:
     case ZEND_ASSIGN_SR:
     case ZEND_ASSIGN_BW_OR:
@@ -563,9 +565,17 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_ASSIGN_CONCAT:
       fprintf(file, "\tsink(local:string) {op1,op2} => {op1,result}");
       break;
-    case ZEND_BOOL_NOT:
     case ZEND_BOOL_XOR:
       fprintf(file, "\tsink(local:bool) {op1,op2} => {result}");
+      break;
+    case ZEND_INSTANCEOF: /* op1 instanceof op2 */
+      fprintf(file, "\tsink(local:bool) {op1,op2,class-hierarchy} => {result}");
+      break;
+    case ZEND_TYPE_CHECK:
+      fprintf(file, "\tsink(local:bool) {op1,class-hierarchy} => {result}");
+      break;
+    case ZEND_DEFINED:
+      fprintf(file, "\tsink(local:bool) {op1,constants} => {result}");
       break;
     case ZEND_IS_IDENTICAL:
     case ZEND_IS_NOT_IDENTICAL:
@@ -610,11 +620,24 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_FETCH_OBJ_W:
     case ZEND_FETCH_OBJ_RW:
     case ZEND_FETCH_OBJ_IS:
-      fprintf(file, "\tsink(local:map) {op1.op2} => {result}");
+      fprintf(file, "\tsink(map) {op1.op2} => {result}");
       break;
     case ZEND_FETCH_DIM_UNSET:
     case ZEND_FETCH_OBJ_UNSET:
-      fprintf(file, "\tsink(local:map) {} => {op1.op2}");
+      fprintf(file, "\tsink(map) {} => {op1.op2,result}");
+      break;
+    case ZEND_FETCH_CONSTANT:
+      fprintf(file, "\tsink(local) {op1.op2} => {result}");
+      break;
+    case ZEND_UNSET_VAR:
+      if (op->op2_type == IS_UNUSED)
+        fprintf(file, "\tsink(local) {} => {op1}");
+      else
+        fprintf(file, "\tsink(map) {} => {op2.op1}"); /* op2 must be static */
+      break;
+    case ZEND_UNSET_DIM:
+    case ZEND_UNSET_OBJ:
+      fprintf(file, "\tsink(map) {} => {op1.op2}");
       break;
     case ZEND_ASSIGN:
       fprintf(file, "\tsink(local) {op2} => {op1,result}");
@@ -636,6 +659,9 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_ADD_VAR:    /* (may convert op2 to string) */
       fprintf(file, "\tsink(var:string) {op2,result} => {result}");
       break;
+    case ZEND_ADD_ARRAY_ELEMENT: /* insert or append */
+      fprintf(file, "\tsink(map) {op1} => {result.op2}");
+      break;
     case ZEND_INIT_METHOD_CALL:
       fprintf(file, "\tsink(edge) {op1.op2} => {opline}");
       break;
@@ -646,13 +672,37 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_INIT_FCALL_BY_NAME:
     case ZEND_INIT_USER_CALL:
     case ZEND_INIT_NS_FCALL_BY_NAME:
-      fprintf(file, "\tsink(edge) {op2} => {opline}");
+      fprintf(file, "\tsink(edge) {op2} => {fcall-stack}");
       break;
     case ZEND_NEW:
-      fprintf(file, "\tsink(edge) {op1(,op2)} => {opline}");
+      fprintf(file, "\tsink(edge) {op1(,op2)} => {fcall-stack(,opline)}");
+      break;
+    case ZEND_DO_FCALL:
+      fprintf(file, "\tsink(edge) {fcall-stack} => {opline}");
+      break;
+    case ZEND_INCLUDE_OR_EVAL:
+      if (op->extended_value == ZEND_EVAL)
+        fprintf(file, "\tsink(edge) {op1} => {code,opline}");
+      else
+        fprintf(file, "\tsink(edge) {op1} => {opline}");
+      break;
+    case ZEND_CLONE:
+      fprintf(file, "\tsink(edge) {op1} => {opline}");
       break;
     case ZEND_THROW:
-      fprintf(file, "\tsink(edge) {op1} => {opline}");
+      fprintf(file, "\tsink(edge) {op1} => {thrown}");
+      break;
+    case ZEND_HANDLE_EXCEPTION:
+      fprintf(file, "\tsink(edge) {thrown} => {opline}");
+      break;
+    case ZEND_DISCARD_EXCEPTION:
+      fprintf(file, "\tsink(edge) {thrown} => {thrown}");
+      break;
+    case ZEND_FAST_CALL: /* call finally via no-arg fastcall */
+      fprintf(file, "\tsink(edge) {thrown} => {fast-ret,opline}");
+      break;
+    case ZEND_FAST_RET: /* return from fastcall (usually finally) */
+      fprintf(file, "\tsink(edge) {fast-ret} => {opline}");
       break;
     case ZEND_SEND_VAL:
     case ZEND_SEND_VAL_EX:
@@ -681,68 +731,77 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_CASE:
       fprintf(file, "\tsink(branch) {op1,op2} => {opline}");
       break;
-    /*
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-    case
-*/
+    case ZEND_CAST:
+      fprintf(file, "\tsink(local) {op1,ext} => {result}"); /* ext specifies cast dest type */
+      break;
+    case ZEND_FE_RESET:
+      fprintf(file, "\tsink(map) {op1} => {op1(,opline)}"); /* skips foreach if empty */
+      break;
+    case ZEND_FE_FETCH:
+      /* pulls two results: first the key, second the value; or skips foreach if empty */
+      fprintf(file, "\tsink(map) {op1} => {result => next_op.result(,opline)}");
+      break;
+    case ZEND_ISSET_ISEMPTY_VAR:
+      if (op->op2_type == IS_UNUSED)
+        fprintf(file, "\tsink(local:bool) {op1} => {result}");
+      else
+        fprintf(file, "\tsink(local:bool) {op2.op1} => {result}"); /* op2 static */
+      break;
+    case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+    case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+      fprintf(file, "\tsink(local:bool) {op1.op2} => {result}");
+      break;
+    case ZEND_EXIT:
+      if (op->op1_type == IS_UNUSED)
+        fprintf(file, "\tsink(local:bool) {} => {opline}");
+      else
+        fprintf(file, "\tsink(edge) {op1} => {opline,exit-code}");
+      break;
+    case ZEND_BEGIN_SILENCE:
+    case ZEND_END_SILENCE:
+      fprintf(file, "\tsink(internal) {} => {error-reporting}");
+      break;
+    case ZEND_TICKS:
+      fprintf(file, "\tsink(internal) {ext} => {timer}");
+      break;
+    case ZEND_JMP_SET:
+      fprintf(file, "\tsink(branch) {op1} => {result,opline}"); /* NOP if op1 is false */
+      break;
+    case ZEND_COALESCE:
+      fprintf(file, "\tsink(branch) {op1} => {result,opline}"); /* NOP if op1 is NULL */
+      break;
+    case ZEND_QM_ASSIGN:
+      fprintf(file, "\tsink(local) {op1} => {result}");
+      break;
+    case ZEND_DECLARE_CLASS:
+    case ZEND_DECLARE_INHERITED_CLASS:
+      fprintf(file, "\tsink(code) {op1} => {class-hierarchy}");
+      break;
+    case ZEND_DECLARE_INHERITED_CLASS_DELAYED: /* bind op1 only if op2 is unbound */
+      fprintf(file, "\tsink(code) {op1,op2} => {class-hierarchy}");
+      break;
+    case ZEND_DECLARE_FUNCTION:
+      fprintf(file, "\tsink(code) {compiler} => {functions}");
+      break;
+    case ZEND_ADD_INTERFACE:
+    case ZEND_ADD_TRAIT: /* add interface/trait op2 (with zv+1) to class op1 */
+      fprintf(file, "\tsink(code) {op1.(op2,op2.zv+1)} => {class-hierarchy}");
+      break;
+    case ZEND_BIND_TRAITS:
+      fprintf(file, "\tsink(code) {op1} => {class-hierarchy}"); /* bind pending traits to op1 */
+      break;
+    case ZEND_SEPARATE:
+      fprintf(file, "\tsink(local) {op1} => {op1}"); /* unbinds op1 somehow */
+      break;
+    case ZEND_DECLARE_CONST:
+      fprintf(file, "\tsink(global) {op1.op2} => {constants}");
+      break;
+    case ZEND_BIND_GLOBAL: /* binds value in op1 to global named op2 */
+      fprintf(file, "\tsink(global) {op1,op2} => {global}");
+      break;
+    case ZEND_STRLEN:
+      fprintf(file, "\tsink(local:number) {op1} => {result}");
+      break;
 
 /* ======== SINK TODO ======= *
 
@@ -758,20 +817,31 @@ void identify_sink_operands(FILE *file, zend_op *op)
   ZEND_ASSIGN_REF
 
   ZEND_RETURN_BY_REF
+  ZEND_GENERATOR_RETURN
 
   ZEND_FETCH_CLASS
 
   ZEND_SEND_UNPACK
+
+  ZEND_EXT_STMT
+  ZEND_EXT_FCALL_BEGIN
+  ZEND_EXT_FCALL_END
+
+  ZEND_YIELD
+
+  ZEND_DECLARE_LAMBDA_FUNCTION -- tricky scope rules
 */
 
 /* ======= SINK NOP ======= *
 
   ZEND_NOP
+  ZEND_EXT_NOP
   ZEND_RETURN
   ZEND_JMP
   ZEND_FREE
   ZEND_DO_FCALL
-
+  ZEND_VERIFY_ABSTRACT_CLASS
+  ZEND_USER_OPCODE   -- customizable opcode handlers...!
 */
 
   }
