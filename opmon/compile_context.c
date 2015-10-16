@@ -281,6 +281,8 @@ void function_compiled(zend_op_array *op_array)
     compiled_edge_target_t target;
     zend_op *op = &op_array->opcodes[i];
     //cfg_node_t from_node = { op->opcode, i };
+    sink_identifier_t sink_id = {NULL};
+
     PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
           op->opcode, i, routine_name, fqn->function.hash);
 
@@ -291,6 +293,7 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
           dump_fcall_opcode(opcode_dump_file, op, fcall->routine_name);
+          sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_SEND_VAL:
         case ZEND_SEND_VAL_EX:
@@ -303,6 +306,7 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_SEND_USER:
           fcall = peek_fcall_init();
           dump_fcall_arg(opcode_dump_file, op, fcall->routine_name);
+          sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_ASSIGN_OBJ:
         case ZEND_ASSIGN_DIM:
@@ -314,6 +318,19 @@ void function_compiled(zend_op_array *op_array)
         default:
           dump_opcode(opcode_dump_file, op);
       }
+
+      /* Need to see if the sink goes directly to:
+       *   - the session
+       *   - a DB update
+       *   - a file create/open/write
+       */
+      identify_sink_operands(opcode_dump_file, op, sink_id);
+
+      /* Now show sources coming directly from:
+       *   - the session: ZEND_FETCH_R  [r|var #26] = [1|const "_SESSION"
+       *   - a DB query: ZEND_SEND_* where fcall target is mysqli_query
+       *   - a file open/read
+       */
     }
 
     if (zend_get_opcode_name(op->opcode) == NULL)

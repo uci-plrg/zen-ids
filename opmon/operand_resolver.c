@@ -350,26 +350,36 @@ void dump_operand(FILE *file, char index, znode_op *operand, zend_uchar type)
     case IS_CONST:
       switch (operand->zv->u1.v.type) {
         case IS_UNDEF:
-          fprintf(file, "const <undefined> (zv:"PX")", p2int(operand->zv));
+          fprintf(file, "const <undefined-type>");
           break;
         case IS_NULL:
-          fprintf(file, "const null (zv:"PX")", p2int(operand->zv));
+          fprintf(file, "const");
           break;
         case IS_FALSE:
-          fprintf(file, "const false (zv:"PX")", p2int(operand->zv));
+          fprintf(file, "const");
           break;
         case IS_TRUE:
-          fprintf(file, "const true (zv:"PX")", p2int(operand->zv));
+          fprintf(file, "const true");
           break;
         case IS_LONG:
-          fprintf(file, "const 0x%lx (zv:"PX")", operand->zv->value.lval, p2int(operand->zv));
+          fprintf(file, "const 0x%lx", operand->zv->value.lval);
           break;
         case IS_DOUBLE:
-          fprintf(file, "const %f (zv:"PX")", operand->zv->value.dval, p2int(operand->zv));
+          fprintf(file, "const %f", operand->zv->value.dval);
           break;
-        case IS_STRING:
-          fprintf(file, "const \"%.24s\" (zv:"PX")", Z_STR_P(operand->zv)->val, p2int(operand->zv));
-          break;
+        case IS_STRING: {
+          uint i, j;
+          char buffer[32] = {0};
+          const char *str = Z_STR_P(operand->zv)->val;
+
+          for (i = 0, j = 0; i < 31; i++) {
+            if (str[i] == '\0')
+              break;
+            if (str[i] != '\n')
+              buffer[j++] = str[i];
+          }
+          fprintf(file, "\"%s\"", buffer);
+        } break;
         case IS_ARRAY:
           fprintf(file, "const array? (zv:"PX")", p2int(operand->zv));
           break;
@@ -529,7 +539,12 @@ void dump_opcode(FILE *file, zend_op *op)
   fprintf(file, "\n");
 }
 
-void identify_sink_operands(FILE *file, zend_op *op)
+static void print_sink(FILE *file, const char *sink_details)
+{
+  fprintf(file, "\t      %s\n", sink_details);
+}
+
+void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
 {
   switch (op->opcode) {
     case ZEND_ADD:
@@ -544,7 +559,7 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_BW_AND:
     case ZEND_BW_XOR:
     case ZEND_BW_NOT:
-      fprintf(file, "\tsink(number) {op1,op2} => {result}");
+      print_sink(file, "sink(number) {op1,op2} => {result}");
       break;
     case ZEND_ASSIGN_ADD:
     case ZEND_ASSIGN_SUB:
@@ -557,25 +572,25 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_ASSIGN_BW_OR:
     case ZEND_ASSIGN_BW_AND:
     case ZEND_ASSIGN_BW_XOR:
-      fprintf(file, "\tsink(local:number) {op1,op2} => {op1,result}");
+      print_sink(file, "sink(local:number) {op1,op2} => {op1,result}");
       break;
     case ZEND_CONCAT:
-      fprintf(file, "\tsink(local:string) {op1,op2} => {result}");
+      print_sink(file, "sink(local:string) {op1,op2} => {result}");
       break;
     case ZEND_ASSIGN_CONCAT:
-      fprintf(file, "\tsink(local:string) {op1,op2} => {op1,result}");
+      print_sink(file, "sink(local:string) {op1,op2} => {op1,result}");
       break;
     case ZEND_BOOL_XOR:
-      fprintf(file, "\tsink(local:bool) {op1,op2} => {result}");
+      print_sink(file, "sink(local:bool) {op1,op2} => {result}");
       break;
     case ZEND_INSTANCEOF: /* op1 instanceof op2 */
-      fprintf(file, "\tsink(local:bool) {op1,op2,class-hierarchy} => {result}");
+      print_sink(file, "sink(local:bool) {op1,op2,class-hierarchy} => {result}");
       break;
     case ZEND_TYPE_CHECK:
-      fprintf(file, "\tsink(local:bool) {op1,class-hierarchy} => {result}");
+      print_sink(file, "sink(local:bool) {op1,class-hierarchy} => {result}");
       break;
     case ZEND_DEFINED:
-      fprintf(file, "\tsink(local:bool) {op1,constants} => {result}");
+      print_sink(file, "sink(local:bool) {op1,constants} => {result}");
       break;
     case ZEND_IS_IDENTICAL:
     case ZEND_IS_NOT_IDENTICAL:
@@ -583,34 +598,34 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_IS_NOT_EQUAL:
     case ZEND_IS_SMALLER:
     case ZEND_IS_SMALLER_OR_EQUAL:
-      fprintf(file, "\tsink(condition) {op1,op2} => {branch-condition}");
+      print_sink(file, "sink(condition) {op1,op2} => {branch-condition}");
       break;
     case ZEND_PRE_INC_OBJ:
     case ZEND_PRE_DEC_OBJ:
     case ZEND_POST_INC_OBJ:
     case ZEND_POST_DEC_OBJ:
-      fprintf(file, "\tsink(local:number) {op1.op2} => {op1.op2,result}");
+      print_sink(file, "sink(local:number) {op1.op2} => {op1.op2,result}");
       break;
     case ZEND_PRE_INC:
     case ZEND_PRE_DEC:
     case ZEND_POST_INC:
     case ZEND_POST_DEC:
-      fprintf(file, "\tsink(local:number) {op1} => {op1,result}");
+      print_sink(file, "sink(local:number) {op1} => {op1,result}");
       break;
     case ZEND_ECHO:
-      fprintf(file, "\tsink(local:number) {op1} => {output}");
+      print_sink(file, "sink(local:number) {op1} => {output}");
       break;
     case ZEND_PRINT:
-      fprintf(file, "\tsink(local:number) {op1} => {output,result}");
+      print_sink(file, "sink(local:number) {op1} => {output,result}");
       break;
     case ZEND_FETCH_R:
     case ZEND_FETCH_W:
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
-      fprintf(file, "\tsink(global) {op1(type).op2} => {result}");
+      print_sink(file, "sink(global) {op1(type).op2} => {result}");
       break;
     case ZEND_FETCH_UNSET:
-      fprintf(file, "\tsink(global) {} => {op1(type).op2}");
+      print_sink(file, "sink(global) {} => {op1(type).op2}");
       break;
     case ZEND_FETCH_DIM_R:
     case ZEND_FETCH_DIM_W:
@@ -620,89 +635,92 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_FETCH_OBJ_W:
     case ZEND_FETCH_OBJ_RW:
     case ZEND_FETCH_OBJ_IS:
-      fprintf(file, "\tsink(map) {op1.op2} => {result}");
+      print_sink(file, "sink(map) {op1.op2} => {result}");
       break;
     case ZEND_FETCH_DIM_UNSET:
     case ZEND_FETCH_OBJ_UNSET:
-      fprintf(file, "\tsink(map) {} => {op1.op2,result}");
+      print_sink(file, "sink(map) {} => {op1.op2,result}");
       break;
     case ZEND_FETCH_CONSTANT:
-      fprintf(file, "\tsink(local) {op1.op2} => {result}");
+      print_sink(file, "sink(local) {op1.op2} => {result}");
       break;
     case ZEND_UNSET_VAR:
       if (op->op2_type == IS_UNUSED)
-        fprintf(file, "\tsink(local) {} => {op1}");
+        print_sink(file, "sink(local) {} => {op1}");
       else
-        fprintf(file, "\tsink(map) {} => {op2.op1}"); /* op2 must be static */
+        print_sink(file, "sink(map) {} => {op2.op1}"); /* op2 must be static */
       break;
     case ZEND_UNSET_DIM:
     case ZEND_UNSET_OBJ:
-      fprintf(file, "\tsink(map) {} => {op1.op2}");
+      print_sink(file, "sink(map) {} => {op1.op2}");
       break;
     case ZEND_ASSIGN:
-      fprintf(file, "\tsink(local) {op2} => {op1,result}");
+      print_sink(file, "sink(local) {op2} => {op1,result}");
       break;
     case ZEND_ASSIGN_OBJ:
     case ZEND_ASSIGN_DIM:
-      fprintf(file, "\tsink(map) {value} => {base.field}");
+      print_sink(file, "sink(map) {value} => {base.field}");
       break;
     case ZEND_JMPZ:
     case ZEND_JMPNZ:
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
-      fprintf(file, "\tsink(branch) {branch-condition} => {opline}");
+      print_sink(file, "sink(branch) {branch-condition} => {opline}");
       break;
-    /* wrong name: ADD means APPEND */
+    /* opcode has misleading name: ADD means APPEND */
     case ZEND_ADD_CHAR:   /* (op2 must be a const char) */
     case ZEND_ADD_STRING: /* (op2 must be a const string) */
     case ZEND_ADD_VAR:    /* (may convert op2 to string) */
-      fprintf(file, "\tsink(var:string) {op2,result} => {result}");
+      print_sink(file, "sink(local:string) {op2,result} => {result}");
       break;
     case ZEND_ADD_ARRAY_ELEMENT: /* insert or append */
-      fprintf(file, "\tsink(map) {op1} => {result.op2}");
+      print_sink(file, "sink(map) {op1} => {result.op2}");
       break;
     case ZEND_INIT_METHOD_CALL:
-      fprintf(file, "\tsink(edge) {op1.op2} => {opline}");
+      print_sink(file, "sink(edge) {op1.op2} => {fcall-stack}");
       break;
     case ZEND_INIT_STATIC_METHOD_CALL:
-      fprintf(file, "\tsink(edge) {op1(type).op2} => {opline}");
+      print_sink(file, "sink(edge) {op1(type).op2} => {fcall-stack}");
       break;
     case ZEND_INIT_FCALL:
     case ZEND_INIT_FCALL_BY_NAME:
     case ZEND_INIT_USER_CALL:
     case ZEND_INIT_NS_FCALL_BY_NAME:
-      fprintf(file, "\tsink(edge) {op2} => {fcall-stack}");
+      print_sink(file, "sink(edge) {op2} => {fcall-stack}");
       break;
     case ZEND_NEW:
-      fprintf(file, "\tsink(edge) {op1(,op2)} => {fcall-stack(,opline)}");
+      print_sink(file, "sink(edge) {op1(,op2)} => {fcall-stack(,opline)}");
       break;
     case ZEND_DO_FCALL:
-      fprintf(file, "\tsink(edge) {fcall-stack} => {opline}");
+      if (is_db_sink_function(NULL, id.call_target))
+        print_sink(file, "sink(edge) {fcall-stack} => {db,opline}");
+      else
+        print_sink(file, "sink(edge) {fcall-stack} => {opline}");
       break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_EVAL)
-        fprintf(file, "\tsink(edge) {op1} => {code,opline}");
+        print_sink(file, "sink(edge) {op1} => {code,opline}");
       else
-        fprintf(file, "\tsink(edge) {op1} => {opline}");
+        print_sink(file, "sink(edge) {op1} => {opline}");
       break;
     case ZEND_CLONE:
-      fprintf(file, "\tsink(edge) {op1} => {opline}");
+      print_sink(file, "sink(edge) {op1} => {opline}");
       break;
     case ZEND_THROW:
-      fprintf(file, "\tsink(edge) {op1} => {thrown}");
+      print_sink(file, "sink(edge) {op1} => {thrown}");
       break;
     case ZEND_HANDLE_EXCEPTION:
-      fprintf(file, "\tsink(edge) {thrown} => {opline}");
+      print_sink(file, "sink(edge) {thrown} => {opline}");
       break;
     case ZEND_DISCARD_EXCEPTION:
-      fprintf(file, "\tsink(edge) {thrown} => {thrown}");
+      print_sink(file, "sink(edge) {thrown} => {thrown}");
       break;
     case ZEND_FAST_CALL: /* call finally via no-arg fastcall */
-      fprintf(file, "\tsink(edge) {thrown} => {fast-ret,opline}");
+      print_sink(file, "sink(edge) {thrown} => {fast-ret,opline}");
       break;
     case ZEND_FAST_RET: /* return from fastcall (usually finally) */
-      fprintf(file, "\tsink(edge) {fast-ret} => {opline}");
+      print_sink(file, "sink(edge) {fast-ret} => {opline}");
       break;
     case ZEND_SEND_VAL:
     case ZEND_SEND_VAL_EX:
@@ -710,97 +728,97 @@ void identify_sink_operands(FILE *file, zend_op *op)
     case ZEND_SEND_VAR_NO_REF:
     case ZEND_SEND_REF:
     case ZEND_SEND_USER:
-      fprintf(file, "\tsink(local) {op1} => {arg(# in op2)}");
+      print_sink(file, "sink(local) {op1} => {arg(# in op2)}");
       break;
     case ZEND_SEND_ARRAY:
-      fprintf(file, "\tsink(local) {op1} => {all-args}");
+      print_sink(file, "sink(local) {op1} => {all-args}");
       break;
     case ZEND_RECV:
     case ZEND_RECV_VARIADIC:
-      fprintf(file, "\tsink(local) {arg} => {result}");
+      print_sink(file, "sink(local) {arg} => {result}");
       break;
     case ZEND_BOOL:
     case ZEND_BOOL_NOT:
-      fprintf(file, "\tsink(local) {op1} => {result}");
+      print_sink(file, "sink(local) {op1} => {result}");
       break;
     case ZEND_BRK:
     case ZEND_CONT:
     case ZEND_GOTO:
-      fprintf(file, "\tsink(branch) {op2} => {opline}");
+      print_sink(file, "sink(branch) {op2} => {opline}");
       break;
     case ZEND_CASE:
-      fprintf(file, "\tsink(branch) {op1,op2} => {opline}");
+      print_sink(file, "sink(branch) {op1,op2} => {opline}");
       break;
     case ZEND_CAST:
-      fprintf(file, "\tsink(local) {op1,ext} => {result}"); /* ext specifies cast dest type */
+      print_sink(file, "sink(local) {op1,ext} => {result}"); /* ext specifies cast dest type */
       break;
     case ZEND_FE_RESET:
-      fprintf(file, "\tsink(map) {op1} => {op1(,opline)}"); /* skips foreach if empty */
+      print_sink(file, "sink(map) {op1} => {op1(,opline)}"); /* skips foreach if empty */
       break;
     case ZEND_FE_FETCH:
       /* pulls two results: first the key, second the value; or skips foreach if empty */
-      fprintf(file, "\tsink(map) {op1} => {result => next_op.result(,opline)}");
+      print_sink(file, "sink(map) {op1} => {result => next_op.result(,opline)}");
       break;
     case ZEND_ISSET_ISEMPTY_VAR:
       if (op->op2_type == IS_UNUSED)
-        fprintf(file, "\tsink(local:bool) {op1} => {result}");
+        print_sink(file, "sink(local:bool) {op1} => {result}");
       else
-        fprintf(file, "\tsink(local:bool) {op2.op1} => {result}"); /* op2 static */
+        print_sink(file, "sink(local:bool) {op2.op1} => {result}"); /* op2 static */
       break;
     case ZEND_ISSET_ISEMPTY_DIM_OBJ:
     case ZEND_ISSET_ISEMPTY_PROP_OBJ:
-      fprintf(file, "\tsink(local:bool) {op1.op2} => {result}");
+      print_sink(file, "sink(local:bool) {op1.op2} => {result}");
       break;
     case ZEND_EXIT:
       if (op->op1_type == IS_UNUSED)
-        fprintf(file, "\tsink(local:bool) {} => {opline}");
+        print_sink(file, "sink(local:bool) {} => {opline}");
       else
-        fprintf(file, "\tsink(edge) {op1} => {opline,exit-code}");
+        print_sink(file, "sink(edge) {op1} => {opline,exit-code}");
       break;
     case ZEND_BEGIN_SILENCE:
     case ZEND_END_SILENCE:
-      fprintf(file, "\tsink(internal) {} => {error-reporting}");
+      print_sink(file, "sink(internal) {} => {error-reporting}");
       break;
     case ZEND_TICKS:
-      fprintf(file, "\tsink(internal) {ext} => {timer}");
+      print_sink(file, "sink(internal) {ext} => {timer}");
       break;
     case ZEND_JMP_SET:
-      fprintf(file, "\tsink(branch) {op1} => {result,opline}"); /* NOP if op1 is false */
+      print_sink(file, "sink(branch) {op1} => {result,opline}"); /* NOP if op1 is false */
       break;
     case ZEND_COALESCE:
-      fprintf(file, "\tsink(branch) {op1} => {result,opline}"); /* NOP if op1 is NULL */
+      print_sink(file, "sink(branch) {op1} => {result,opline}"); /* NOP if op1 is NULL */
       break;
     case ZEND_QM_ASSIGN:
-      fprintf(file, "\tsink(local) {op1} => {result}");
+      print_sink(file, "sink(local) {op1} => {result}");
       break;
     case ZEND_DECLARE_CLASS:
     case ZEND_DECLARE_INHERITED_CLASS:
-      fprintf(file, "\tsink(code) {op1} => {class-hierarchy}");
+      print_sink(file, "sink(code) {op1} => {class-hierarchy}");
       break;
     case ZEND_DECLARE_INHERITED_CLASS_DELAYED: /* bind op1 only if op2 is unbound */
-      fprintf(file, "\tsink(code) {op1,op2} => {class-hierarchy}");
+      print_sink(file, "sink(code) {op1,op2} => {class-hierarchy}");
       break;
     case ZEND_DECLARE_FUNCTION:
-      fprintf(file, "\tsink(code) {compiler} => {functions}");
+      print_sink(file, "sink(code) {compiler} => {functions}");
       break;
     case ZEND_ADD_INTERFACE:
     case ZEND_ADD_TRAIT: /* add interface/trait op2 (with zv+1) to class op1 */
-      fprintf(file, "\tsink(code) {op1.(op2,op2.zv+1)} => {class-hierarchy}");
+      print_sink(file, "sink(code) {op1.(op2,op2.zv+1)} => {class-hierarchy}");
       break;
     case ZEND_BIND_TRAITS:
-      fprintf(file, "\tsink(code) {op1} => {class-hierarchy}"); /* bind pending traits to op1 */
+      print_sink(file, "sink(code) {op1} => {class-hierarchy}"); /* bind pending traits to op1 */
       break;
     case ZEND_SEPARATE:
-      fprintf(file, "\tsink(local) {op1} => {op1}"); /* unbinds op1 somehow */
+      print_sink(file, "sink(local) {op1} => {op1}"); /* unbinds op1 somehow */
       break;
     case ZEND_DECLARE_CONST:
-      fprintf(file, "\tsink(global) {op1.op2} => {constants}");
+      print_sink(file, "sink(global) {op1.op2} => {constants}");
       break;
     case ZEND_BIND_GLOBAL: /* binds value in op1 to global named op2 */
-      fprintf(file, "\tsink(global) {op1,op2} => {global}");
+      print_sink(file, "sink(global) {op1,op2} => {global}");
       break;
     case ZEND_STRLEN:
-      fprintf(file, "\tsink(local:number) {op1} => {result}");
+      print_sink(file, "sink(local:number) {op1} => {result}");
       break;
 
 /* ======== SINK TODO ======= *
@@ -847,3 +865,404 @@ void identify_sink_operands(FILE *file, zend_op *op)
   }
 }
 
+#define DB_STMT_TYPE "mysqli_stmt"
+#define DB_STMT_PREFIX "mysqli_stmt_"
+#define DB_STMT_PREFIX_LEN (strlen(DB_STMT_PREFIX))
+
+static bool is_db_stmt_function_base(const char *type, const char *name)
+{
+  return (type == NULL && strncmp(name, DB_STMT_PREFIX, DB_STMT_PREFIX_LEN) == 0) ||
+         (type != NULL && strcmp(type, DB_STMT_TYPE) == 0);
+}
+
+#define DB_SQL_TYPE "mysqli"
+#define DB_SQL_PREFIX "mysqli_"
+#define DB_SQL_PREFIX_LEN (strlen(DB_SQL_PREFIX))
+
+static bool is_db_sql_function_base(const char *type, const char *name)
+{
+  return ((type == NULL && strncmp(name, DB_SQL_PREFIX, DB_SQL_PREFIX_LEN) == 0) ||
+          (type != NULL && strcmp(type, DB_SQL_TYPE) == 0)) &&
+         !is_db_stmt_function_base(type, name);
+}
+
+static bool is_db_sql_source_function(const char *name)
+{ /* separate cases to allow for a possible enum mapping later on */
+  if (strcmp(name, "multi_query") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_field") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_fields") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_field_direct") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_lengths") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_all") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_array") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_assoc") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_object") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch_row") == 0) {
+    return true;
+  } else if (strcmp(name, "field_count") == 0) {
+    return true;
+  } else if (strcmp(name, "field_seek") == 0) {
+    return true;
+  } else if (strcmp(name, "field_tell") == 0) {
+    return true;
+  } else if (strcmp(name, "insert_id") == 0) {
+    return true;
+  } else if (strcmp(name, "next_result") == 0) {
+    return true;
+  } else if (strcmp(name, "num_fields") == 0) {
+    return true;
+  } else if (strcmp(name, "num_rows") == 0) {
+    return true;
+  } else if (strcmp(name, "reap_async_query") == 0) {
+    return true;
+  }
+  return false;
+}
+
+static bool is_db_stmt_source_function(const char *name)
+{
+  if (strcmp(name, "bind_result") == 0) {
+    return true;
+  } else if (strcmp(name, "data_seek") == 0) {
+    return true;
+  } else if (strcmp(name, "fetch") == 0) {
+    return true;
+  } else if (strcmp(name, "field_count") == 0) {
+    return true;
+  } else if (strcmp(name, "get_result") == 0) {
+    return true;
+  } else if (strcmp(name, "insert_id") == 0) {
+    return true;
+  } else if (strcmp(name, "more_results") == 0) {
+    return true;
+  } else if (strcmp(name, "next_result") == 0) {
+    return true;
+  } else if (strcmp(name, "num_rows") == 0) {
+    return true;
+  } else if (strcmp(name, "param_count") == 0) {
+    return true;
+  } else if (strcmp(name, "result_metadata") == 0) {
+    return true;
+  }
+  return false;
+}
+
+bool is_db_source_function(const char *type, const char *name)
+{
+  return (is_db_sql_function_base(type, name) &&
+          is_db_sql_source_function(type == NULL ? name + DB_SQL_PREFIX_LEN : name)) ||
+         (is_db_stmt_function_base(type, name) &&
+          is_db_stmt_source_function(type == NULL ? name + DB_STMT_PREFIX_LEN : name));
+}
+
+static bool is_db_sql_sink_function(const char *name)
+{ /* separate cases to allow for a possible enum mapping later on */
+  if (strcmp(name, "multi_query") == 0) {
+    return true;
+  } else if (strcmp(name, "prepare") == 0) {
+    return true;
+  } else if (strcmp(name, "query") == 0) {
+    return true;
+  } else if (strcmp(name, "select_db") == 0) {
+    return true;
+  }
+  return false;
+}
+
+static bool is_db_stmt_sink_function(const char *name)
+{
+  if (strcmp(name, "attr_get") == 0) {
+    return true;
+  } else if (strcmp(name, "attr_set") == 0) {
+    return true;
+  } else if (strcmp(name, "bind_param") == 0) {
+    return true;
+  } else if (strcmp(name, "prepare") == 0) {
+    return true;
+  } else if (strcmp(name, "reset") == 0) {
+    return true;
+  } else if (strcmp(name, "send_long_data") == 0) {
+    return true;
+  }
+  return false;
+}
+
+bool is_db_sink_function(const char *type, const char *name)
+{
+  return (is_db_sql_function_base(type, name) &&
+          is_db_sql_sink_function(type == NULL ? name + DB_SQL_PREFIX_LEN : name)) ||
+         (is_db_stmt_function_base(type, name) &&
+          is_db_stmt_sink_function(type == NULL ? name + DB_STMT_PREFIX_LEN : name));
+}
+
+bool is_file_source_function(const char *name)
+{
+  if (strcmp(name, "dir") == 0) {
+    return true;
+  } else if (strcmp(name, "getcwd") == 0) {
+    return true;
+  } else if (strcmp(name, "readdir") == 0) {
+    return true;
+  } else if (strcmp(name, "scandir") == 0) {
+    return true;
+  }
+  return false;
+}
+
+bool is_file_sink_function(const char *name)
+{
+  if (strcmp(name, "chdir") == 0) {
+    return true;
+  } else if (strcmp(name, "chroot") == 0) {
+    return true;
+  } else if (strcmp(name, "closedir") == 0) {
+    return true;
+  } else if (strcmp(name, "opendir") == 0) {
+    return true;
+  } else if (strcmp(name, "rewinddir") == 0) {
+    return true;
+  }
+  return false;
+}
+
+bool is_system_source_function(const char *name)
+{
+  if (strcmp(name, "shmop_read") == 0) {
+    return true;
+  } else if (strcmp(name, "shmop_size") == 0) {
+    return true;
+  } else if (strcmp(name, "expect_expectl") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_alarm") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_errno") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_get_last_err") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_getpriority") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_strerror") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wexitstatus") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wifexited") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wifsignaled") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wifstopped") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wstopsig") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wtermsig") == 0) {
+    return true;
+  } else if (strcmp(name, "basename") == 0) {
+    return true;
+  } else if (strcmp(name, "dirname") == 0) {
+    return true;
+  } else if (strcmp(name, "disk_free_space") == 0) {
+    return true;
+  } else if (strcmp(name, "disk_total_space") == 0) {
+    return true;
+  } else if (strcmp(name, "diskfreespace") == 0) {
+    return true;
+  } else if (strcmp(name, "feof") == 0) {
+    return true;
+  } else if (strcmp(name, "fgetc") == 0) {
+    return true;
+  } else if (strcmp(name, "fgetcsv") == 0) {
+    return true;
+  } else if (strcmp(name, "fgets") == 0) {
+    return true;
+  } else if (strcmp(name, "fgetss") == 0) {
+    return true;
+  } else if (strcmp(name, "file_exists") == 0) {
+    return true;
+  } else if (strcmp(name, "file_get_contents") == 0) {
+    return true;
+  } else if (strcmp(name, "file") == 0) {
+    return true;
+  } else if (strcmp(name, "fileatime") == 0) {
+    return true;
+  } else if (strcmp(name, "filectime") == 0) {
+    return true;
+  } else if (strcmp(name, "filegroup") == 0) {
+    return true;
+  } else if (strcmp(name, "fileinode") == 0) {
+    return true;
+  } else if (strcmp(name, "filemtime") == 0) {
+    return true;
+  } else if (strcmp(name, "fileowner") == 0) {
+    return true;
+  } else if (strcmp(name, "fileperms") == 0) {
+    return true;
+  } else if (strcmp(name, "filesize") == 0) {
+    return true;
+  } else if (strcmp(name, "filetype") == 0) {
+    return true;
+  } else if (strcmp(name, "fnmatch") == 0) {
+    return true;
+  } else if (strcmp(name, "fread") == 0) {
+    return true;
+  } else if (strcmp(name, "fscanf") == 0) {
+    return true;
+  } else if (strcmp(name, "fstat") == 0) {
+    return true;
+  } else if (strcmp(name, "ftell") == 0) {
+    return true;
+  } else if (strcmp(name, "glob") == 0) {
+    return true;
+  } else if (strcmp(name, "is_dir") == 0) {
+    return true;
+  } else if (strcmp(name, "is_executable") == 0) {
+    return true;
+  } else if (strcmp(name, "is_file") == 0) {
+    return true;
+  } else if (strcmp(name, "is_link") == 0) {
+    return true;
+  } else if (strcmp(name, "is_readable") == 0) {
+    return true;
+  } else if (strcmp(name, "is_uploaded_file") == 0) {
+    return true;
+  } else if (strcmp(name, "is_writable") == 0) {
+    return true;
+  } else if (strcmp(name, "is_writeable") == 0) {
+    return true;
+  } else if (strcmp(name, "linkinfo") == 0) {
+    return true;
+  } else if (strcmp(name, "lstat") == 0) {
+    return true;
+  } else if (strcmp(name, "parse_ini_file") == 0) {
+    return true;
+  } else if (strcmp(name, "parse_ini_string") == 0) {
+    return true;
+  } else if (strcmp(name, "pathinfo") == 0) {
+    return true;
+  } else if (strcmp(name, "readfile") == 0) {
+    return true;
+  } else if (strcmp(name, "readlink") == 0) {
+    return true;
+  } else if (strcmp(name, "realpath_cache_get") == 0) {
+    return true;
+  } else if (strcmp(name, "realpath_cache_size") == 0) {
+    return true;
+  } else if (strcmp(name, "realpath") == 0) {
+    return true;
+  } else if (strcmp(name, "stat") == 0) {
+  //} else if (strcmp(name, "") == 0) {
+  }
+  return false;
+}
+
+bool is_system_sink_function(const char *name)
+{
+  if (strcmp(name, "shmop_close") == 0) {
+    return true;
+  } else if (strcmp(name, "shmop_delete") == 0) {
+    return true;
+  } else if (strcmp(name, "shmop_open") == 0) {
+    return true;
+  } else if (strcmp(name, "shmop_write") == 0) {
+    return true;
+  } else if (strcmp(name, "expect_popen") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_exec") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_fork") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_setpriority") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_signal_dispatch") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_signal") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_sigprocmask") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_sigtimedwait") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_sigwaitinfo") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wait") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_waitpid") == 0) {
+    return true;
+  } else if (strcmp(name, "chgrp") == 0) {
+    return true;
+  } else if (strcmp(name, "chmod") == 0) {
+    return true;
+  } else if (strcmp(name, "chown") == 0) {
+    return true;
+  } else if (strcmp(name, "clearstatcache") == 0) {
+    return true;
+  } else if (strcmp(name, "copy") == 0) {
+    return true;
+  } else if (strcmp(name, "delete") == 0) {
+    return true;
+  } else if (strcmp(name, "fclose") == 0) {
+    return true;
+  } else if (strcmp(name, "fflush") == 0) {
+    return true;
+  } else if (strcmp(name, "file_put_contents") == 0) {
+    return true;
+  } else if (strcmp(name, "flock") == 0) {
+    return true;
+  } else if (strcmp(name, "fopen") == 0) {
+    return true;
+  } else if (strcmp(name, "fpassthru") == 0) {
+    return true;
+  } else if (strcmp(name, "fputcsv") == 0) {
+    return true;
+  } else if (strcmp(name, "fputs") == 0) {
+    return true;
+  } else if (strcmp(name, "fseek") == 0) {
+    return true;
+  } else if (strcmp(name, "ftruncate") == 0) {
+    return true;
+  } else if (strcmp(name, "fwrite") == 0) {
+    return true;
+  } else if (strcmp(name, "lchgrp") == 0) {
+    return true;
+  } else if (strcmp(name, "lchown") == 0) {
+    return true;
+  } else if (strcmp(name, "link") == 0) {
+    return true;
+  } else if (strcmp(name, "mkdir") == 0) {
+    return true;
+  } else if (strcmp(name, "move_uploaded_file") == 0) {
+    return true;
+  } else if (strcmp(name, "pclose") == 0) {
+    return true;
+  } else if (strcmp(name, "popen") == 0) {
+    return true;
+  } else if (strcmp(name, "rename") == 0) {
+    return true;
+  } else if (strcmp(name, "rewind") == 0) {
+    return true;
+  } else if (strcmp(name, "rmdir") == 0) {
+    return true;
+  } else if (strcmp(name, "set_file_buffer") == 0) {
+    return true;
+  } else if (strcmp(name, "symlink") == 0) {
+    return true;
+  } else if (strcmp(name, "tempnam") == 0) {
+    return true;
+  } else if (strcmp(name, "tmpfile") == 0) {
+    return true;
+  } else if (strcmp(name, "touch") == 0) {
+    return true;
+  } else if (strcmp(name, "umask") == 0) {
+    return true;
+  } else if (strcmp(name, "unlink") == 0) {
+    return true;
+  //} else if (strcmp(name, "") == 0) {
+  }
+  return false;
+}
