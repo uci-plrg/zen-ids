@@ -695,6 +695,10 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_DO_FCALL:
       if (is_db_sink_function(NULL, id.call_target))
         print_sink(file, "sink(edge) {fcall-stack} => {db,opline}");
+      else if (is_file_sink_function(id.call_target))
+        print_sink(file, "sink(edge) {fcall-stack} => {file,opline}");
+      else if (is_system_sink_function(id.call_target))
+        print_sink(file, "sink(edge) {fcall-stack} => {system,opline}");
       else
         print_sink(file, "sink(edge) {fcall-stack} => {opline}");
       break;
