@@ -33,14 +33,29 @@ typedef union _sink_identifier_t {
 } sink_identifier_t;
 
 typedef enum _dataflow_condition_t {
-  DATAFLOW_CONDITION_DIRECT,
-  DATAFLOW_CONDITION_LOGICAL,
-  DATAFLOW_CONDITION_INDIRECT,
+  DATAFLOW_CONDITION_DIRECT,    /* the dataflow always occurs at this op */
+  DATAFLOW_CONDITION_LOGICAL,   /* the dataflow depends on an immediate condition */
+  DATAFLOW_CONDITION_INDIRECT,  /* the global state affects the dataflow */
 } dataflow_condition_t;
 
 typedef enum _dataflow_effect_t {
+  /* The effect depends only on the immediate content and types of the operands--can be
+   * fully determined from static and immediate observation, though not necessarily.
+   */
   DATAFLOW_EFFECT_CERTAIN,
+  /* The dataflow is certain to occur, but the effect depends on global state.
+   *   - local variable assignment never depends on global state
+   *   - arrays and objects:
+   *     - global state may always affect an l-value
+   *     - statically declared r-value can be definite (required to be deeply static?)
+   *   - type-dependent operations are only be certain for statically declared types
+   *   - dynamic execution and function definition can only be certain for static source
+   *   -
+   */
   DATAFLOW_EFFECT_UNCERTAIN,
+  /* The effect may or may not occur, depending on global state conditions. This effect is
+   * redundant with DATAFLOW_CONDITION_INDIRECT for a single op; mainly useful for subflows.
+   */
   DATAFLOW_EFFECT_POTENTIAL
 } dataflow_effect_t;
 
