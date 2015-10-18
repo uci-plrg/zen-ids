@@ -8,6 +8,8 @@ PHP_ARG_ENABLE(opcode-monitor, whether to enable opcode monitoring,
 if test "$PHP_OPCODE_MONITOR" != "no"; then
   PHP_SUBST(OPCODE_MONITOR_SHARED_LIBADD)
   PHP_REQUIRE_CXX()
+  PHP_EVAL_INCLINE("-I/usr/include/apache2")
+  PHP_EVAL_INCLINE("-I/usr/include/apr-1.0")
   opmon_sources="opcode_monitor.c \
                  event_handler.c \
                  interp_context.c \

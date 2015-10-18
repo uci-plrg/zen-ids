@@ -32,6 +32,18 @@ typedef union _sink_identifier_t {
   const char *call_target;
 } sink_identifier_t;
 
+typedef enum _dataflow_condition_t {
+  DATAFLOW_CONDITION_DIRECT,
+  DATAFLOW_CONDITION_LOGICAL,
+  DATAFLOW_CONDITION_INDIRECT,
+} dataflow_condition_t;
+
+typedef enum _dataflow_effect_t {
+  DATAFLOW_EFFECT_CERTAIN,
+  DATAFLOW_EFFECT_UNCERTAIN,
+  DATAFLOW_EFFECT_POTENTIAL
+} dataflow_effect_t;
+
 void init_operand_resolver();
 void destroy_operand_resolver();
 const char *resolve_constant_include(zend_op *op);
@@ -48,5 +60,9 @@ void dump_opcode(FILE *file, zend_op *op);
 void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id);
 bool is_db_source_function(const char *type, const char *name);
 bool is_db_sink_function(const char *type, const char *name);
+bool is_file_source_function(const char *name);
+bool is_file_sink_function(const char *name);
+bool is_system_source_function(const char *name);
+bool is_system_sink_function(const char *name);
 
 #endif
