@@ -38,26 +38,48 @@ typedef enum _dataflow_condition_t {
   DATAFLOW_CONDITION_INDIRECT,  /* the global state affects the dataflow */
 } dataflow_condition_t;
 
-typedef enum _dataflow_effect_t {
-  /* The effect depends only on the immediate content and types of the operands--can be
-   * fully determined from static and immediate observation, though not necessarily.
-   */
-  DATAFLOW_EFFECT_CERTAIN,
-  /* The dataflow is certain to occur, but the effect depends on global state.
-   *   - local variable assignment never depends on global state
-   *   - arrays and objects:
-   *     - global state may always affect an l-value
-   *     - statically declared r-value can be definite (required to be deeply static?)
-   *   - type-dependent operations are only be certain for statically declared types
-   *   - dynamic execution and function definition can only be certain for static source
-   *   -
-   */
-  DATAFLOW_EFFECT_UNCERTAIN,
-  /* The effect may or may not occur, depending on global state conditions. This effect is
-   * redundant with DATAFLOW_CONDITION_INDIRECT for a single op; mainly useful for subflows.
-   */
-  DATAFLOW_EFFECT_POTENTIAL
-} dataflow_effect_t;
+/* Notes about dataflow effects:
+ *
+ *   - local variable assignment never depends on global state
+ *   - arrays and objects:
+ *     - global state may always affect an l-value
+ *     - statically declared r-value can be definite (required to be deeply static?)
+ *   - type-dependent operations are only certain for statically declared types
+ *   - dynamic execution and function definition can only be certain for static source
+ *   -
+ *
+ * Given complete knowledge about the inputs to any op, we an always compute its effects.
+ *
+ * Static compututation of some ops depends on whether the program uses indeterminate assignment:
+ *   - global variables require that all global assignments use statically determinate variables
+ *   - maps require that:
+ *     - all map modifications use statically determinate keys and values
+ *     - control flow in map operations is statically determinate
+ * In general it will be rare for these ops to be statically determinate. But we may hypothesize
+ * a particular value and then proceed with analysis as if no alternatives were possible.
+ */
+
+typedef enum _dataflow_source_t {
+  /* Only the operands themselves can affect the op result. */
+  DATAFLOW_SOURCE_IMMEDIATE,
+  /* Only the containing routine can affect the op result. */
+  DATAFLOW_SOURCE_ROUTINE,
+  /* Dataflow from other routines may affect the op result. */
+  DATAFLOW_SOURCE_PROGRAM,
+  /* Specific hypothetical values are assumed
+  DATAFLOW_SOURCE_HYPOTHETICAL,
+  /* Nothing is known (yet) about the scope of potential dataflow to the operands. */
+  DATAFLOW_SOURCE_UNRESOLVED
+} dataflow_source_t;
+
+typedef enum _dataflow_source_scope_t {
+  /* Only the immediate operands can affect the op result. */
+  DATAFLOW_SOURCE_SCOPE_IMMEDIATE,
+  /* Dataflow to the op result may potentially be limited to local variables of any routine. */
+  DATAFLOW_SOURCE_SCOPE_LOCAL,
+  /* Global state always flows to the op result. */
+  DATAFLOW_SOURCE_SCOPE_GLOBAL,
+} dataflow_source_scope_t;
 
 void init_operand_resolver();
 void destroy_operand_resolver();
