@@ -66,7 +66,7 @@ typedef enum _dataflow_source_t {
   DATAFLOW_SOURCE_ROUTINE,
   /* Dataflow from other routines may affect the op result. */
   DATAFLOW_SOURCE_PROGRAM,
-  /* Specific hypothetical values are assumed
+  /* Specific hypothetical values */
   DATAFLOW_SOURCE_HYPOTHETICAL,
   /* Nothing is known (yet) about the scope of potential dataflow to the operands. */
   DATAFLOW_SOURCE_UNRESOLVED
