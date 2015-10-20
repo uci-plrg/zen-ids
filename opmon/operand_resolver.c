@@ -402,6 +402,9 @@ void dump_operand(FILE *file, char index, znode_op *operand, zend_uchar type)
     case IS_CV:
       fprintf(file, "var #%d", (uint)(operand->var / sizeof(zval *)));
       break;
+    case IS_UNUSED:
+      fprintf(file, "-");
+      break;
     default:
       fprintf(file, "?");
   }
@@ -559,7 +562,7 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_BW_AND:
     case ZEND_BW_XOR:
     case ZEND_BW_NOT:
-      print_sink(file, "sink(number) {s1,s2} =d=> {result}");
+      print_sink(file, "sink(local:number) {s1,s2} =d=> {result}");
       break;
     case ZEND_ASSIGN_ADD:
     case ZEND_ASSIGN_SUB:
@@ -613,10 +616,10 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
       print_sink(file, "sink(local:number) {s1} =d=> {s1,result}");
       break;
     case ZEND_ECHO:
-      print_sink(file, "sink(local:number) {s1} =d=> {output}");
+      print_sink(file, "sink(output) {s1} =d=> {output}");
       break;
     case ZEND_PRINT:
-      print_sink(file, "sink(local:number) {s1} =d=> {output}, {len(s1)} =d=> {result}");
+      print_sink(file, "sink(output,local:number) {s1} =d=> {output}, {len(s1)} =d=> {result}");
       break;
     case ZEND_FETCH_R:
     case ZEND_FETCH_W:
@@ -625,7 +628,7 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
       if (op->op2_type == IS_UNUSED)
         print_sink(file, "sink(local) {s1} =d=> {result}");
       else
-        print_sink(file, "sink(global) {g2.1} =d=> {result}");
+        print_sink(file, "sink(local) {g2.1} =d=> {result}");
       break;
     case ZEND_FETCH_UNSET:
       print_sink(file, "sink(global) {g1.2} =d=> {result}, {} =d=> {g1.2}");
@@ -821,8 +824,8 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_DECLARE_CONST:
       print_sink(file, "sink(global) {g1.2} =d=> {global}");
       break;
-    case ZEND_BIND_GLOBAL: /* binds value in op1 to global named op2 */
-      print_sink(file, "sink(global) {g1.2} =d=> {global}");
+    case ZEND_BIND_GLOBAL: /* binds value in op2 to global named op1 */
+      print_sink(file, "sink(local) {g2} =d=> {s1}");
       break;
     case ZEND_STRLEN:
       print_sink(file, "sink(local:number) {s1} =d=> {result}");

@@ -57,6 +57,24 @@ typedef enum _dataflow_condition_t {
  *     - control flow in map operations is statically determinate
  * In general it will be rare for these ops to be statically determinate. But we may hypothesize
  * a particular value and then proceed with analysis as if no alternatives were possible.
+ *
+ * Other things to model:
+ *
+ *   - SQL:
+ *     - operation type: {insert, update, delete}
+ *     - source/destination table
+ *     - referenced tables
+ *   - functions
+ *     - sources affecting the sinks (return value, globals and I/O)
+ *       - args
+ *       - globals
+ *       - input (files, db, system)
+ *     - sinks
+ *       - globals
+ *       - output (page, files, db, system)
+ *   - object structures
+ *     - identify roots
+ *     - identify each object's relationship to its root(s)
  */
 
 typedef enum _dataflow_source_t {
