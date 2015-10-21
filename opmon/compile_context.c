@@ -152,7 +152,7 @@ void function_compiled(zend_op_array *op_array)
         if (strcmp(function_name, "__lambda_func") == 0) {
           is_eval = true;
           eval_id = get_next_eval_id();
-          sprintf(routine_name, "<default>:lambda_%d", EG(lambda_count)+1);
+          sprintf(routine_name, COMPILED_ROUTINE_DEFAULT_SCOPE":lambda_%d", EG(lambda_count)+1);
           has_routine_name = true;
         }
       }
@@ -439,7 +439,7 @@ void function_compiled(zend_op_array *op_array)
               break; // ignore builtins for now (unless dumping ops)
             }
 
-            classname = "<default>";
+            classname = COMPILED_ROUTINE_DEFAULT_SCOPE;
             sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
           } else if (op->op2_type != IS_UNUSED) { // some kind of var
             uint var_index = (uint) (op->op2.var / sizeof(zval *));

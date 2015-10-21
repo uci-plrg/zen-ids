@@ -5,6 +5,8 @@
 #include "metadata_handler.h"
 
 #define COMPILED_EDGE_UNKNOWN_TARGET 0xffffffffU
+#define COMPILED_ROUTINE_DEFAULT_SCOPE "<default>"
+#define COMPILED_ROUTINE_DEFAULT_SCOPE_LEN strlen(COMPILED_ROUTINE_DEFAULT_SCOPE)
 
 typedef enum _compiled_edge_type_t {
   COMPILED_EDGE_NONE,

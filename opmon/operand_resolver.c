@@ -1,6 +1,7 @@
 #include "php.h"
 #include "cfg.h"
 #include "cfg_handler.h"
+#include "compile_context.h"
 #include "lib/script_cfi_utils.h"
 #include "operand_resolver.h"
 
@@ -370,7 +371,7 @@ void dump_operand(FILE *file, char index, znode_op *operand, zend_uchar type)
         case IS_STRING: {
           uint i, j;
           char buffer[32] = {0};
-          const char *str = Z_STR_P(operand->zv)->val;
+          const char *str = Z_STRVAL_P(operand->zv);
 
           for (i = 0, j = 0; i < 31; i++) {
             if (str[i] == '\0')
@@ -422,7 +423,14 @@ void dump_fcall_opcode(FILE *file, zend_op *op, const char *routine_name)
   dump_opcode_header(file, op);
   if (uses_return_value(op)) {
     dump_operand(file, 'r', &op->result, op->result_type);
-    fprintf(file, " = ");
+    if (is_db_source_function(NULL, routine_name))
+      fprintf(file, " <=db= ");
+    else if (is_file_source_function(routine_name))
+      fprintf(file, " <=file= ");
+    else if (is_system_source_function(routine_name))
+      fprintf(file, " <=system= ");
+    else
+      fprintf(file, " = ");
   }
   fprintf(file, "%s\n", routine_name);
 }
@@ -471,8 +479,10 @@ void dump_opcode(FILE *file, zend_op *op)
   dump_opcode_header(file, op);
 
   if (uses_return_value(op)) {
-    dump_operand(file, 'r', &op->result, op->result_type);
-    fprintf(file, " = ");
+    if (op->result_type != IS_UNUSED) {
+      dump_operand(file, 'r', &op->result, op->result_type);
+      fprintf(file, " = ");
+    }
     if (op->op1_type == IS_UNUSED && op->op2_type == IS_UNUSED) {
       switch (op->opcode) {
         case ZEND_RECV:
@@ -562,7 +572,7 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_BW_AND:
     case ZEND_BW_XOR:
     case ZEND_BW_NOT:
-      print_sink(file, "sink(local:number) {s1,s2} =d=> {result}");
+      print_sink(file, "sink(zval:number) {1,2} =d=> {result}");
       break;
     case ZEND_ASSIGN_ADD:
     case ZEND_ASSIGN_SUB:
@@ -575,25 +585,25 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_ASSIGN_BW_OR:
     case ZEND_ASSIGN_BW_AND:
     case ZEND_ASSIGN_BW_XOR:
-      print_sink(file, "sink(local:number) {s1,s2} =d=> {s1,result}");
+      print_sink(file, "sink(zval:number) {1,2} =d=> {1,result}");
       break;
     case ZEND_CONCAT:
-      print_sink(file, "sink(local:string) {s1,s2} =d=> {result}");
+      print_sink(file, "sink(zval:string) {1,2} =d=> {result}");
       break;
     case ZEND_ASSIGN_CONCAT:
-      print_sink(file, "sink(local:string) {s1,s2} =d=> {s1,result}");
+      print_sink(file, "sink(zval:string) {1,2} =d=> {1,result}");
       break;
     case ZEND_BOOL_XOR:
-      print_sink(file, "sink(local:bool) {s1,s2} =d=> {result}");
+      print_sink(file, "sink(zval:bool) {1,2} =d=> {result}");
       break;
     case ZEND_INSTANCEOF: /* op1 instanceof op2 */
-      print_sink(file, "sink(local:bool) {s1,g2} =d=> {result}");
+      print_sink(file, "sink(zval:bool) {1,2} =d=> {result}");
       break;
     case ZEND_TYPE_CHECK: /* check metadata consistency for op1 */
-      print_sink(file, "sink(local:bool) {s1} =d=> {result}");
+      print_sink(file, "sink(zval:bool) {1} =d=> {result}");
       break;
     case ZEND_DEFINED:
-      print_sink(file, "sink(local:bool) {g1} =d=> {result}");
+      print_sink(file, "sink(zval:bool) {1} =d=> {result}");
       break;
     case ZEND_IS_IDENTICAL:
     case ZEND_IS_NOT_IDENTICAL:
@@ -601,37 +611,56 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_IS_NOT_EQUAL:
     case ZEND_IS_SMALLER:
     case ZEND_IS_SMALLER_OR_EQUAL:
-      print_sink(file, "sink(condition) {s1,s2} =d=> {branch-condition}");
+      print_sink(file, "sink(zval:bool) {1,2} =d=> {result}");
       break;
     case ZEND_PRE_INC_OBJ:
     case ZEND_PRE_DEC_OBJ:
     case ZEND_POST_INC_OBJ:
     case ZEND_POST_DEC_OBJ:
-      print_sink(file, "sink(local:number) {g1.2} =d=> {g1.2,result}");
+      print_sink(file, "sink(zval:number) {1.2} =d=> {1.2,result}");
       break;
     case ZEND_PRE_INC:
     case ZEND_PRE_DEC:
     case ZEND_POST_INC:
     case ZEND_POST_DEC:
-      print_sink(file, "sink(local:number) {s1} =d=> {s1,result}");
+      print_sink(file, "sink(zval:number) {1} =d=> {1,result}");
       break;
     case ZEND_ECHO:
-      print_sink(file, "sink(output) {s1} =d=> {output}");
+      print_sink(file, "sink(output) {1} =d=> {output}");
       break;
     case ZEND_PRINT:
-      print_sink(file, "sink(output,local:number) {s1} =d=> {output}, {len(s1)} =d=> {result}");
+      print_sink(file, "sink(output,zval:number) {1} =d=> {output}, {len(1)} =d=> {result}");
       break;
-    case ZEND_FETCH_R:
+    case ZEND_FETCH_R:  /* fetch a superglobal */
     case ZEND_FETCH_W:
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
-      if (op->op2_type == IS_UNUSED)
-        print_sink(file, "sink(local) {s1} =d=> {result}");
-      else
-        print_sink(file, "sink(local) {g2.1} =d=> {result}");
+      if (op->op2_type == IS_UNUSED) {
+        const char *superglobal_name = Z_STRVAL_P(op->op1.zv);
+        if (superglobal_name != NULL) {
+          if (strcmp(superglobal_name, "_SESSION") == 0) {
+            print_sink(file, "sink(zval) {session} =d=> {result}");
+            break;
+          } else if (strcmp(superglobal_name, "_REQUEST") == 0 ||
+                     strcmp(superglobal_name, "_GET") == 0 ||
+                     strcmp(superglobal_name, "_POST") == 0 ||
+                     strcmp(superglobal_name, "_COOKIE") == 0 ||
+                     strcmp(superglobal_name, "_FILES") == 0) {
+            print_sink(file, "sink(zval) {user} =d=> {result}");
+            break;
+          } else if (strcmp(superglobal_name, "_ENV") == 0 ||
+                     strcmp(superglobal_name, "_SERVER") == 0) {
+            print_sink(file, "sink(zval) {env} =d=> {result}");
+            break;
+          }
+        }
+        print_sink(file, "sink(zval) {1} =d=> {result}");
+      } else {
+        print_sink(file, "sink(zval) {2.1} =d=> {result}");
+      }
       break;
     case ZEND_FETCH_UNSET:
-      print_sink(file, "sink(global) {g1.2} =d=> {result}, {} =d=> {g1.2}");
+      print_sink(file, "sink(zval,zval) {1.2} =d=> {result}, {} =d=> {1.2}");
       break;
     case ZEND_FETCH_DIM_R:
     case ZEND_FETCH_DIM_W:
@@ -641,62 +670,63 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_FETCH_OBJ_W:
     case ZEND_FETCH_OBJ_RW:
     case ZEND_FETCH_OBJ_IS:
-      print_sink(file, "sink(map) {g1.2} =d=> {result}");
+      print_sink(file, "sink(zval:map) {1.2} =d=> {result}");
       break;
     case ZEND_FETCH_DIM_UNSET:
     case ZEND_FETCH_OBJ_UNSET:
-      print_sink(file, "sink(map) {g1.2} =d=> {result}, {} =d=> {g1.2}");
+      print_sink(file, "sink(zval:map) {1.2} =d=> {result}, {} =d=> {1.2}");
       break;
     case ZEND_FETCH_CONSTANT:
-      print_sink(file, "sink(local) {g1.2} =d=> {result}");
+      print_sink(file, "sink(zval) {1.2} =d=> {result}");
       break;
     case ZEND_UNSET_VAR:
       if (op->op2_type == IS_UNUSED)
-        print_sink(file, "sink(local) {} =d=> {s1}");
+        print_sink(file, "sink(zval) {} =d=> {1}");
       else
-        print_sink(file, "sink(map) {} =d=> {g2.1}"); /* op2 must be static */
+        print_sink(file, "sink(zval:map) {} =d=> {2.1}"); /* op2 must be static */
       break;
     case ZEND_UNSET_DIM:
     case ZEND_UNSET_OBJ:
-      print_sink(file, "sink(map) {} =d=> {g1.2}");
+      print_sink(file, "sink(zval:map) {} =d=> {1.2}");
       break;
     case ZEND_ASSIGN:
-      print_sink(file, "sink(local) {s2} =d=> {s1,result}");
+    case ZEND_ASSIGN_REF:
+      print_sink(file, "sink(zval) {2} =d=> {1,result}");
       break;
     case ZEND_ASSIGN_OBJ:
     case ZEND_ASSIGN_DIM:
-      print_sink(file, "sink(map) {s(value)} =d=> {g(base.field)}");
+      print_sink(file, "sink(zval:map) {s(value)} =d=> {g(base.field)}");
       break;
     case ZEND_JMPZ:
     case ZEND_JMPNZ:
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
-      print_sink(file, "sink(branch) {branch-condition} =l=> {opline}");
+      print_sink(file, "sink(branch) {1} =l=> {opline}");
       break;
     /* opcode has misleading name: ADD means APPEND */
     case ZEND_ADD_CHAR:   /* (op2 must be a const char) */
     case ZEND_ADD_STRING: /* (op2 must be a const string) */
     case ZEND_ADD_VAR:    /* (may convert op2 to string) */
-      print_sink(file, "sink(local:string) {s2,result} =d=> {result}");
+      print_sink(file, "sink(zval:string) {2,result} =d=> {result}");
       break;
     case ZEND_ADD_ARRAY_ELEMENT: /* insert or append */
-      print_sink(file, "sink(map) {s1} =d=> {result[s2]}");
+      print_sink(file, "sink(zval:map) {1} =d=> {result[2]}");
       break;
     case ZEND_INIT_METHOD_CALL:
-      print_sink(file, "sink(edge) {g1.2} =d=> {fcall-stack}");
+      print_sink(file, "sink(edge) {1.2} =d=> {fcall-stack}");
       break;
     case ZEND_INIT_STATIC_METHOD_CALL:
-      print_sink(file, "sink(edge) {g1.2} =d=> {fcall-stack}");
+      print_sink(file, "sink(edge) {1.2} =d=> {fcall-stack}");
       break;
     case ZEND_INIT_FCALL:
     case ZEND_INIT_FCALL_BY_NAME:
     case ZEND_INIT_USER_CALL:
     case ZEND_INIT_NS_FCALL_BY_NAME:
-      print_sink(file, "sink(edge) {s2} =d=> {fcall-stack}");
+      print_sink(file, "sink(edge) {2} =d=> {fcall-stack}");
       break;
     case ZEND_NEW:
-      print_sink(file, "sink(edge) {g1} =d=> {fcall-stack} (or skip via s2 => opline if no ctor)");
+      print_sink(file, "sink(edge) {1} =d=> {fcall-stack} (or skip via 2 => opline if no ctor)");
       break;
     case ZEND_DO_FCALL:
       if (is_db_sink_function(NULL, id.call_target))
@@ -710,15 +740,15 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
       break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_EVAL)
-        print_sink(file, "sink(edge) {s1} =d=> {code,opline}");
+        print_sink(file, "sink(edge) {1} =d=> {code,opline}");
       else
-        print_sink(file, "sink(edge) {s1} =d=> {opline}, {file} =d=> {code}");
+        print_sink(file, "sink(edge) {1} =d=> {opline}, {file} =d=> {code}");
       break;
     case ZEND_CLONE:
-      print_sink(file, "sink(edge) {s1} =d=> {opline,result}");
+      print_sink(file, "sink(edge) {1} =d=> {opline,result}");
       break;
     case ZEND_THROW:
-      print_sink(file, "sink(edge) {s1} =d=> {fast-ret,thrown}");
+      print_sink(file, "sink(edge) {1} =d=> {fast-ret,thrown}");
       break;
     case ZEND_HANDLE_EXCEPTION: /* makes fastcall to finally blocks */
       print_sink(file, "sink(edge) {thrown} =i=> {opline}");
@@ -738,97 +768,97 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
     case ZEND_SEND_VAR_NO_REF:
     case ZEND_SEND_REF:
     case ZEND_SEND_USER:
-      print_sink(file, "sink(local) {s1} =d=> {fcall-stack(s2 is arg#)}");
+      print_sink(file, "sink(zval) {1} =d=> {fcall-stack(2 is arg#)}");
       break;
     case ZEND_SEND_ARRAY:
-      print_sink(file, "sink(local) {s1} =d=> {fcall-stack(all args)}");
+      print_sink(file, "sink(zval) {1} =d=> {fcall-stack(all args)}");
       break;
     case ZEND_RECV:
     case ZEND_RECV_VARIADIC:
-      print_sink(file, "sink(local) {fcall-stack(arg)} =i=> {result}");
+      print_sink(file, "sink(zval) {fcall-stack(arg)} =i=> {result}");
       break;
     case ZEND_BOOL:
     case ZEND_BOOL_NOT:
-      print_sink(file, "sink(local) {s1} =d=> {result}");
+      print_sink(file, "sink(zval) {1} =d=> {result}");
       break;
     case ZEND_BRK:
     case ZEND_CONT:
     case ZEND_GOTO:
-      print_sink(file, "sink(branch) {s2} =i=> {opline}");
+      print_sink(file, "sink(branch) {2} =i=> {opline}");
       break;
-    case ZEND_CASE: /* execute case if s1 == s2 (via fast_equal_function) */
-      print_sink(file, "sink(branch) {s1,s2} =l=> {opline}");
+    case ZEND_CASE: /* execute case if 1 == 2 (via fast_equal_function) */
+      print_sink(file, "sink(zval:bool) {1,2} =l=> {result}");
       break;
     case ZEND_CAST:
-      print_sink(file, "sink(local) {s1,sx} =d=> {result}"); /* sx specifies cast dest type */
+      print_sink(file, "sink(zval) {1,ext} =d=> {result}"); /* ext specifies cast dest type */
       break;
     case ZEND_FE_RESET: /* starts an iterator */
-      print_sink(file, "sink(map) {s1} =d=> {result} (or skips via s2 => opline if s1 is empty)");
+      print_sink(file, "sink(zval:map) {1} =d=> {result} (or skips via 2 => opline if 1 is empty)");
       break;
     case ZEND_FE_FETCH: /* advances an iterator */
-      print_sink(file, "sink(map) {s1} =d=> {result(key), next_op.result(value)} "
-                       "(or terminates via s2 => opline}");
+      print_sink(file, "sink(zval:map) {1} =d=> {result(key), next_op.result(value)} "
+                       "(or terminates via 2 => opline}");
       break;
     case ZEND_ISSET_ISEMPTY_VAR:
       if (op->op2_type == IS_UNUSED)
-        print_sink(file, "sink(local:bool) {s1} =d=> {result}");
+        print_sink(file, "sink(zval:bool) {1} =d=> {result}");
       else
-        print_sink(file, "sink(local:bool) {g2.1} =d=> {result}"); /* op2 must be static */
+        print_sink(file, "sink(zval:bool) {2.1} =d=> {result}"); /* op2 must be static */
       break;
     case ZEND_ISSET_ISEMPTY_DIM_OBJ:
     case ZEND_ISSET_ISEMPTY_PROP_OBJ:
-      print_sink(file, "sink(local:bool) {g1.2} =d=> {result}");
+      print_sink(file, "sink(zval:bool) {1.2} =d=> {result}");
       break;
     case ZEND_EXIT:
       if (op->op1_type == IS_UNUSED)
-        print_sink(file, "sink(local:bool) {} =d=> {opline}");
+        print_sink(file, "sink(edge) {} =d=> {opline}");
       else
-        print_sink(file, "sink(edge) {} =d=> {opline}, {s1} =d=> {exit-code}");
+        print_sink(file, "sink(edge) {} =d=> {opline}, {1} =d=> {exit-code}");
       break;
     case ZEND_BEGIN_SILENCE:
     case ZEND_END_SILENCE:
       print_sink(file, "sink(internal) {} =d=> {error-reporting}");
       break;
     case ZEND_TICKS:
-      print_sink(file, "sink(internal) {sx} =d=> {timer}");
+      print_sink(file, "sink(internal) {ext} =d=> {timer}");
       break;
     case ZEND_JMP_SET:
-      print_sink(file, "sink(branch) {s1} =l=> {result,opline}"); /* NOP if op1 is false */
+      print_sink(file, "sink(branch) {1} =l=> {result,opline}"); /* NOP if op1 is false */
       break;
     case ZEND_COALESCE:
-      print_sink(file, "sink(branch) {s1} =l=> {result,opline}"); /* NOP if op1 is NULL */
+      print_sink(file, "sink(branch) {1} =l=> {result,opline}"); /* NOP if op1 is NULL */
       break;
     case ZEND_QM_ASSIGN:
-      print_sink(file, "sink(local) {s1} =?=> {result}");
+      print_sink(file, "sink(zval?) {1} =?=> {result}");
       break;
     case ZEND_DECLARE_CLASS:
     case ZEND_DECLARE_INHERITED_CLASS:
-      print_sink(file, "sink(code) {s1} =i=> {code}");
+      print_sink(file, "sink(code) {1} =i=> {code}");
       break;
     case ZEND_DECLARE_INHERITED_CLASS_DELAYED: /* bind op1 only if op2 is unbound */
-      print_sink(file, "sink(code) {g1,g2} =i=> {code}");
+      print_sink(file, "sink(code) {1,2} =i=> {code}");
       break;
     case ZEND_DECLARE_FUNCTION:
       print_sink(file, "sink(code) {compiler} =i=> {code}");
       break;
     case ZEND_ADD_INTERFACE:
     case ZEND_ADD_TRAIT: /* add interface/trait op2 (with zv+1) to class op1 */
-      print_sink(file, "sink(code) {g1(.[g2,g2.zv+1])} =i=> {code}");
+      print_sink(file, "sink(code) {1(.[2,2.zv+1])} =i=> {code}");
       break;
     case ZEND_BIND_TRAITS:
-      print_sink(file, "sink(code) {g1} =i=> {code}"); /* bind pending traits of op1 */
+      print_sink(file, "sink(code) {1} =i=> {code}"); /* bind pending traits of op1 */
       break;
     case ZEND_SEPARATE:
-      print_sink(file, "sink(local) {g1} =d=> {op1}"); /* unbinds op1 somehow */
+      print_sink(file, "sink(zval) {1} =d=> {op1}"); /* unbinds op1 somehow */
       break;
     case ZEND_DECLARE_CONST:
-      print_sink(file, "sink(global) {g1.2} =d=> {global}");
+      print_sink(file, "sink(zval) {1.2} =d=> {global}");
       break;
     case ZEND_BIND_GLOBAL: /* binds value in op2 to global named op1 */
-      print_sink(file, "sink(local) {g2} =d=> {s1}");
+      print_sink(file, "sink(global) {2} =d=> {1}");
       break;
     case ZEND_STRLEN:
-      print_sink(file, "sink(local:number) {s1} =d=> {result}");
+      print_sink(file, "sink(zval:number) {1} =d=> {result}");
       break;
 
 /* ======== SINK TODO ======= *
@@ -841,8 +871,6 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
   ZEND_FETCH_OBJ_FUNC_ARG?
 
   ZEND_FETCH_LIST
-
-  ZEND_ASSIGN_REF
 
   ZEND_RETURN_BY_REF
   ZEND_GENERATOR_RETURN
@@ -876,29 +904,44 @@ void identify_sink_operands(FILE *file, zend_op *op, sink_identifier_t id)
 }
 
 #define DB_STMT_TYPE "mysqli_stmt"
-#define DB_STMT_PREFIX "mysqli_stmt_"
+#define DB_STMT_PREFIX COMPILED_ROUTINE_DEFAULT_SCOPE":mysqli_stmt_"
 #define DB_STMT_PREFIX_LEN (strlen(DB_STMT_PREFIX))
 
 static bool is_db_stmt_function_base(const char *type, const char *name)
 {
-  return (type == NULL && strncmp(name, DB_STMT_PREFIX, DB_STMT_PREFIX_LEN) == 0) ||
-         (type != NULL && strcmp(type, DB_STMT_TYPE) == 0);
+  if (type == NULL) {
+    if (strncmp(name, DB_STMT_PREFIX, DB_STMT_PREFIX_LEN) != 0)
+      return false;
+  } else {
+    if (strcmp(type, DB_STMT_PREFIX) != 0)
+      return false;
+  }
+  return true;
 }
 
 #define DB_SQL_TYPE "mysqli"
-#define DB_SQL_PREFIX "mysqli_"
+#define DB_SQL_PREFIX COMPILED_ROUTINE_DEFAULT_SCOPE":mysqli_"
 #define DB_SQL_PREFIX_LEN (strlen(DB_SQL_PREFIX))
 
 static bool is_db_sql_function_base(const char *type, const char *name)
 {
-  return ((type == NULL && strncmp(name, DB_SQL_PREFIX, DB_SQL_PREFIX_LEN) == 0) ||
-          (type != NULL && strcmp(type, DB_SQL_TYPE) == 0)) &&
-         !is_db_stmt_function_base(type, name);
+  if (is_db_stmt_function_base(type, name))
+    return false;
+
+  if (type == NULL) {
+    if (strncmp(name, DB_SQL_PREFIX, DB_SQL_PREFIX_LEN) != 0)
+      return false;
+  } else {
+    if (strcmp(type, DB_SQL_TYPE) != 0)
+      return false;
+  }
+
+  return true;
 }
 
 static bool is_db_sql_source_function(const char *name)
 { /* separate cases to allow for a possible enum mapping later on */
-  if (strcmp(name, "multi_query") == 0) {
+  if (strcmp(name, "connect") == 0) {
     return true;
   } else if (strcmp(name, "fetch_field") == 0) {
     return true;
@@ -980,7 +1023,9 @@ static bool is_db_sql_sink_function(const char *name)
     return true;
   } else if (strcmp(name, "prepare") == 0) {
     return true;
-  } else if (strcmp(name, "query") == 0) {
+  } else if (strcmp(name, "query") == 0) { /* not a source: only the fetch functions are sources */
+    return true;
+  } else if (strcmp(name, "multi_query") == 0) {
     return true;
   } else if (strcmp(name, "select_db") == 0) {
     return true;

@@ -46,4 +46,99 @@
  · this source file is generated from the much more readable zend_vm_def.h
 
 
+ === dataflow effects
+
+  · `include` and `require` propagate locals!
+  · arrays and objects:
+    · global state may always affect an l-value
+    · statically declared r-value can be definite (required to be deeply static?)
+  · type-dependent operations are only certain for statically declared types in
+    control flow paths that are static and certainly reached
+  · dynamic execution and function definition can only be certain for static source
+  · given complete knowledge about the inputs to any op, we an always compute its effects
+  · static compututation of some ops depends on whether the program uses any indeterminate assignments:
+    · computing global variables: all global assignments must use statically determinate variables
+    · computing maps:
+      · all map modifications must use statically determinate keys and values
+      · control flow in map operations must be statically determinate
+    -> rare for these ops to be statically determinate
+    -> may hypothesize a particular value and then proceed with analysis
+
+ === things to model
+
+  · SQL:
+    · operation type: {insert, update, delete}
+    · source/destination table
+    · referenced tables
+  · functions
+    · sources affecting the sinks (return value, globals and I/O)
+      · args
+      · globals
+      · input (files, db, system)
+    · sinks
+      · globals
+      · output (page, files, db, system)
+  · object structures
+    · identify roots
+    · identify each object's relationship to its root(s)
+
+ === global binding
+
+  · any variable can be bound into global space (or unbound from it) at any time
+  · is it safe to say for any variable that if it is not usually bound to a global,
+    then it is probably never bound to a global?
+  · examples:
+
+ -- Ref to global array:
+
+gc = {refcount = 0x1, u = {v = {type = 0xa, flags = 0x0, gc_info = 0x0}, type_info = 0xa}},
+val = {value = {lval = 0x7fffee85e360,
+                dval = 6.9533413210698024e-310,
+                counted = 0x7fffee85e360,
+                str = 0x7fffee85e360,
+                arr = 0x7fffee85e360,
+                obj = 0x7fffee85e360,
+                res = 0x7fffee85e360,
+                ref = 0x7fffee85e360,
+                ast = 0x7fffee85e360,
+                zv = 0x7fffee85e360,
+                ptr = 0x7fffee85e360,
+                ce = 0x7fffee85e360,
+                func = 0x7fffee85e360},
+       u1 = {v = {type = 0x7, type_flags = 0xe, const_flags = 0x0, reserved = 0x0}, type_info = 0xe07},
+       u2 = {var_flags = 0x0, next = 0x0, cache_slot = 0x0, lineno = 0x0}}
+
+ -- Ref to local array:
+
+gc = {refcount = 0x2, u = {v = {type = 0xa, flags = 0x0, gc_info = 0x0}, type_info = 0xa}},
+val = {value = {lval = 0x7fffee85e600,
+                dval = 6.9533413211030036e-310,
+                counted = 0x7fffee85e600,
+                str = 0x7fffee85e600,
+                arr = 0x7fffee85e600,
+                obj = 0x7fffee85e600,
+                res = 0x7fffee85e600,
+                ref = 0x7fffee85e600,
+                ast = 0x7fffee85e600,
+                zv = 0x7fffee85e600,
+                ptr = 0x7fffee85e600,
+                ce = 0x7fffee85e600,
+                func = 0x7fffee85e600},
+       u1 = {v = {type = 0x7, type_flags = 0xe, const_flags = 0x0, reserved = 0x0}, type_info = 0xe07},
+       u2 = {var_flags = 0x7fff, next = 0x7fff, cache_slot = 0x7fff, lineno = 0x7fff}}
+
+ -- Array:
+
+gc = {refcount = 0x1, u = {v = {type = 0xa, flags = 0x0, gc_info = 0x0}, type_info = 0xa}},
+ht = {nTableSize = 0xee85e360,
+      nTableMask = 0x7fff,
+      nNumUsed = 0xe07,
+      nNumOfElements = 0x0,
+      nNextFreeElement = 0x18,
+      arData = 0xfb7598,
+      arHash = 0x0,
+      pDestructor = 0x1fa,
+      nInternalPointer = 0x1,
+      u = {v = {flags = 0xa, nApplyCount = 0x0, reserve = 0x0}, flags = 0xa}}
+
 

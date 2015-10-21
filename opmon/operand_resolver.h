@@ -38,45 +38,6 @@ typedef enum _dataflow_condition_t {
   DATAFLOW_CONDITION_INDIRECT,  /* the global state affects the dataflow */
 } dataflow_condition_t;
 
-/* Notes about dataflow effects:
- *
- *   - local variable assignment never depends on global state
- *   - arrays and objects:
- *     - global state may always affect an l-value
- *     - statically declared r-value can be definite (required to be deeply static?)
- *   - type-dependent operations are only certain for statically declared types
- *   - dynamic execution and function definition can only be certain for static source
- *   -
- *
- * Given complete knowledge about the inputs to any op, we an always compute its effects.
- *
- * Static compututation of some ops depends on whether the program uses indeterminate assignment:
- *   - global variables require that all global assignments use statically determinate variables
- *   - maps require that:
- *     - all map modifications use statically determinate keys and values
- *     - control flow in map operations is statically determinate
- * In general it will be rare for these ops to be statically determinate. But we may hypothesize
- * a particular value and then proceed with analysis as if no alternatives were possible.
- *
- * Other things to model:
- *
- *   - SQL:
- *     - operation type: {insert, update, delete}
- *     - source/destination table
- *     - referenced tables
- *   - functions
- *     - sources affecting the sinks (return value, globals and I/O)
- *       - args
- *       - globals
- *       - input (files, db, system)
- *     - sinks
- *       - globals
- *       - output (page, files, db, system)
- *   - object structures
- *     - identify roots
- *     - identify each object's relationship to its root(s)
- */
-
 typedef enum _dataflow_source_t {
   /* Only the operands themselves can affect the op result. */
   DATAFLOW_SOURCE_IMMEDIATE,
