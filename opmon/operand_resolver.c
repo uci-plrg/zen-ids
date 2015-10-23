@@ -344,7 +344,7 @@ static bool uses_return_value(zend_op *op)
   }
 }
 
-void dump_operand(FILE *file, char index, znode_op *operand, zend_uchar type)
+void dump_operand(FILE *file, char index, zend_op_array *ops, znode_op *operand, zend_uchar type)
 {
   fprintf(file, "[%c|", index);
   switch (type) {
@@ -398,10 +398,12 @@ void dump_operand(FILE *file, char index, znode_op *operand, zend_uchar type)
           break;
       }
       break;
-    case IS_TMP_VAR:
     case IS_VAR:
+    case IS_TMP_VAR:
+      fprintf(file, "var #%d", (uint) (EX_VAR_TO_NUM(operand->var) - ops->last_var));
+      break;
     case IS_CV:
-      fprintf(file, "var #%d", (uint)(operand->var / sizeof(zval *)));
+      fprintf(file, "var $%s", ops->vars[EX_VAR_TO_NUM(operand->var)]->val);
       break;
     case IS_UNUSED:
       fprintf(file, "-");
@@ -418,11 +420,11 @@ static void dump_opcode_header(FILE *file, zend_op *op)
           zend_get_opcode_name(op->opcode));
 }
 
-void dump_fcall_opcode(FILE *file, zend_op *op, const char *routine_name)
+void dump_fcall_opcode(FILE *file, zend_op_array *ops, zend_op *op, const char *routine_name)
 {
   dump_opcode_header(file, op);
   if (uses_return_value(op)) {
-    dump_operand(file, 'r', &op->result, op->result_type);
+    dump_operand(file, 'r', ops, &op->result, op->result_type);
     if (is_db_source_function(NULL, routine_name))
       fprintf(file, " <=db= ");
     else if (is_file_source_function(routine_name))
@@ -435,43 +437,43 @@ void dump_fcall_opcode(FILE *file, zend_op *op, const char *routine_name)
   fprintf(file, "%s\n", routine_name);
 }
 
-void dump_fcall_arg(FILE *file, zend_op *op, const char *routine_name)
+void dump_fcall_arg(FILE *file, zend_op_array *ops, zend_op *op, const char *routine_name)
 {
   dump_opcode_header(file, op);
-  dump_operand(file, 'a', &op->op1, op->op1_type);
+  dump_operand(file, 'a', ops, &op->op1, op->op1_type);
   if (op->opcode == ZEND_SEND_ARRAY)
     fprintf(file, " -*-> %s\n", routine_name);
   else
     fprintf(file, " -%d-> %s\n", op->op2.num, routine_name);
 }
 
-void dump_map_assignment(FILE *file, zend_op *op, zend_op *next_op)
+void dump_map_assignment(FILE *file, zend_op_array *ops, zend_op *op, zend_op *next_op)
 {
   dump_opcode_header(file, op);
   if (op->op1_type == IS_UNUSED)
     fprintf(file, "$this");
   else
-    dump_operand(file, 'b', &op->op1, IS_CV);
+    dump_operand(file, 'b', ops, &op->op1, IS_CV);
   fprintf(file, ".");
-  dump_operand(file, 'f', &op->op2, op->op2_type);
+  dump_operand(file, 'f', ops, &op->op2, op->op2_type);
   fprintf(file, " = ");
-  dump_operand(file, 'v', &next_op->op1, next_op->op1_type);
+  dump_operand(file, 'v', ops, &next_op->op1, next_op->op1_type);
   fprintf(file, "\n");
 }
 
-void dump_foreach_fetch(FILE *file, zend_op *op, zend_op *next_op)
+void dump_foreach_fetch(FILE *file, zend_op_array *ops, zend_op *op, zend_op *next_op)
 {
   dump_opcode_header(file, op);
   fprintf(file, " in ");
-  dump_operand(file, 'a', &op->op1, op->op1_type);
+  dump_operand(file, 'a', ops, &op->op1, op->op1_type);
   fprintf(file, ": ");
-  dump_operand(file, 'k', &next_op->result, next_op->result_type);
+  dump_operand(file, 'k', ops, &next_op->result, next_op->result_type);
   fprintf(file, ", ");
-  dump_operand(file, 'v', &op->result, op->result_type);
+  dump_operand(file, 'v', ops, &op->result, op->result_type);
   fprintf(file, "\n");
 }
 
-void dump_opcode(FILE *file, zend_op *op)
+void dump_opcode(FILE *file, zend_op_array *ops, zend_op *op)
 {
   zend_op *jump_target = NULL;
   const char *jump_reason = NULL;
@@ -480,7 +482,7 @@ void dump_opcode(FILE *file, zend_op *op)
 
   if (uses_return_value(op)) {
     if (op->result_type != IS_UNUSED) {
-      dump_operand(file, 'r', &op->result, op->result_type);
+      dump_operand(file, 'r', ops, &op->result, op->result_type);
       fprintf(file, " = ");
     }
     if (op->op1_type == IS_UNUSED && op->op2_type == IS_UNUSED) {
@@ -496,7 +498,7 @@ void dump_opcode(FILE *file, zend_op *op)
     }
   }
   if (op->op1_type != IS_UNUSED) {
-    dump_operand(file, '1', &op->op1, op->op1_type);
+    dump_operand(file, '1', ops, &op->op1, op->op1_type);
   } else {
     switch (op->opcode) {
       case ZEND_JMP:
@@ -516,7 +518,7 @@ void dump_opcode(FILE *file, zend_op *op)
   if (op->op1_type != IS_UNUSED && op->op2_type != IS_UNUSED)
     fprintf(file, " ? ");
   if (op->op2_type != IS_UNUSED) {
-    dump_operand(file, '2', &op->op2, op->op2_type);
+    dump_operand(file, '2', ops, &op->op2, op->op2_type);
   } else {
     switch (op->opcode) {
       case ZEND_JMPZ:

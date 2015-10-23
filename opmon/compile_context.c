@@ -292,7 +292,7 @@ void function_compiled(zend_op_array *op_array)
       switch (op->opcode) {
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
-          dump_fcall_opcode(opcode_dump_file, op, fcall->routine_name);
+          dump_fcall_opcode(opcode_dump_file, op_array, op, fcall->routine_name);
           sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_SEND_VAL:
@@ -305,18 +305,18 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
           fcall = peek_fcall_init();
-          dump_fcall_arg(opcode_dump_file, op, fcall->routine_name);
+          dump_fcall_arg(opcode_dump_file, op_array, op, fcall->routine_name);
           sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_ASSIGN_OBJ:
         case ZEND_ASSIGN_DIM:
-          dump_map_assignment(opcode_dump_file, op, &op_array->opcodes[i+1]);
+          dump_map_assignment(opcode_dump_file, op_array, op, &op_array->opcodes[i+1]);
           break;
         case ZEND_FE_FETCH:
-          dump_foreach_fetch(opcode_dump_file, op, &op_array->opcodes[i+1]);
+          dump_foreach_fetch(opcode_dump_file, op_array, op, &op_array->opcodes[i+1]);
           break;
         default:
-          dump_opcode(opcode_dump_file, op);
+          dump_opcode(opcode_dump_file, op_array, op);
       }
 
       /* Need to see if the sink goes directly to:
