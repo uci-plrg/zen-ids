@@ -19,6 +19,7 @@ if test "$PHP_OPCODE_MONITOR" != "no"; then
                  metadata_handler.c \
                  cfg.c \
                  cfg_handler.c \
+		 dataflow.c \
                  lib/script_cfi_utils.c \
                  lib/script_cfi_array.c \
                  lib/script_cfi_hashtable.c"

@@ -7,6 +7,7 @@
 #include "dataset.h"
 #include "metadata_handler.h"
 #include "operand_resolver.h"
+#include "dataflow.h"
 #include "compile_context.h"
 
 #define ROUTINE_NAME_LENGTH 256

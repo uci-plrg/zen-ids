@@ -6,64 +6,6 @@
 #include "lib/script_cfi_array.h"
 #include "lib/script_cfi_utils.h"
 
-typedef enum _dataflow_sink_type_t {
-  SINK_TYPE_VAR_NUM,          /* modifies an int or float variable */
-  SINK_TYPE_VAR_BOOL,         /* modifies a bool variable */
-  SINK_TYPE_VAR_STRING,       /* modifies a string */
-  SINK_TYPE_VAR_COND,         /* can change a branch condition */
-  SINK_TYPE_SESSION,          /* modifies a session variable */
-  SINK_TYPE_OUTPUT,           /* specifies output text */
-  SINK_TYPE_EDGE,             /* specifies a control flow target, e.g. call function by name */
-  SINK_TYPE_SQL,              /* specifies an SQL insert or update (possibly a fragment) */
-  /* Various functions like file_put_contents(), fopen(), fwrite(), etc. It might be a good idea
-   * to monitor system calls in the process, though not sure how (hook?)
-   */
-  SINK_TYPE_FILE,
-  SINK_TYPE_CODE,             /* eval() or create_function() */
-  SINK_TYPE_CLASS_HIERARCHY,  /* add subclass, method, interface, trait */
-  SINK_TYPE_INCLUDE,          /* include() or require() */
-  SINK_TYPE_NONE,             /* no sink here */
-} dataflow_sink_type_t;
-
-typedef enum _dataflow_source_type_t {
-  SOURCE_TYPE_HTTP,      /* HTTP parameters and cookies */
-  SOURCE_TYPE_SESSION,   /* session variables */
-  SOURCE_TYPE_SQL,       /* database query results */
-  SOURCE_TYPE_FILE,      /* file access such as fread() */
-  SOURCE_TYPE_SYSTEM,    /* server and environment configuration */
-  SOURCE_TYPE_NONE,      /* no source here */
-} dataflow_source_type_t;
-
-typedef struct _dataflow_source_t {
-  uint routine_hash;
-  uint op_index;
-  dataflow_source_type_t type;
-} dataflow_source_t;
-
-typedef struct _dataflow_sink_t {
-  uint routine_hash;
-  uint op_index;
-  dataflow_sink_type_t type;
-} dataflow_sink_t;
-
-typedef struct _dataflow_influence_t {
-  dataflow_source_t source;
-  struct _dataflow_influence_t *next;
-} dataflow_influence_t;
-
-typedef struct _dataflow_var_t {
-  bool is_temp;
-  union {
-    uint temp_id;
-    const char *name;
-  };
-} dataflow_var_t;
-
-typedef struct _dataflow_op_t {
-  dataflow_var_t var;
-  dataflow_influence_t *influence;
-} dataflow_op_t;
-
 /*
 typedef struct _cfg_node_t {
   zend_uchar opcode;
@@ -77,15 +19,15 @@ typedef struct _cfg_opcode_edge_t {
   user_level_t user_level;
 } cfg_opcode_edge_t;
 
+typedef struct _cfg_opcode_id_t {
+  uint routine_hash;
+  uint op_index;
+} cfg_opcode_id_t;
+
 typedef struct _cfg_opcode_t {
   zend_uchar opcode;
   ushort line_number;
   zend_ulong extended_value;
-  dataflow_source_t source;
-  dataflow_sink_t sink;
-  dataflow_op_t op1;
-  dataflow_op_t op2;
-  dataflow_op_t result;
 } cfg_opcode_t;
 
 typedef struct _routine_cfg_t {

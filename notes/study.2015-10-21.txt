@@ -1,0 +1,15 @@
+0017: 0x26 ZEND_ASSIGN  [1|var #18] ? [2|"admin"]
+      sink(zval) {2} =d=> {1,result}
+0025: 0x26 ZEND_ASSIGN  [1|var #20] ? [2|"index.php"]
+      sink(zval) {2} =d=> {1,result}
+0028: 0x26 ZEND_ASSIGN  [1|var #22] ? [2|"default"]
+      sink(zval) {2} =d=> {1,result}
+
+
+ === zval-stack ===
+
+0x7fffee815030 (execute_data in zval-stack.php)
+
+0x7fffee815140 (execute_data in zval-stack-include.php)
+0x7fffee8151c0 $a (+ 0x80)
+
