@@ -18,10 +18,11 @@ function usage() {
 
 php_bin="php"
 
-while getopts "ls:do:wk:" option
+while getopts "ls:do:wk:D" option
 do
   case $option in
     l) php_options="$php_options -l";;
+    D) php_options="$php_options -D";;
     s) static_analysis="$OPTARG";
        export OPMON_STATIC_ANALYSIS="$OPTARG";;
     d) debug=true;;

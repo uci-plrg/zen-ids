@@ -77,6 +77,16 @@ routine_cfg_get_opcode(routine_cfg_t *routine, uint index)
   return (cfg_opcode_t *) scarray_get(&routine->opcodes, index);
 }
 
+static inline cfg_opcode_t *
+cfg_opcode_lookup(cfg_t *cfg, cfg_opcode_id_t *id)
+{
+  routine_cfg_t *routine = sctable_lookup(&cfg->routines, id->routine_hash);
+  if (routine != NULL)
+    return routine_cfg_get_opcode(routine, id->op_index);
+  else
+    return NULL;
+}
+
 static inline cfg_opcode_edge_t *
 routine_cfg_get_opcode_edge(routine_cfg_t *routine, uint index)
 {

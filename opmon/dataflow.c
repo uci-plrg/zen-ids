@@ -246,7 +246,7 @@ void dump_map_assignment(FILE *file, zend_op_array *ops, zend_op *op, zend_op *n
   if (op->op1_type == IS_UNUSED)
     fprintf(file, "$this");
   else
-    dump_operand(file, 'b', ops, &op->op1, IS_CV);
+    dump_operand(file, 'b', ops, &op->op1, op->op1_type);
   fprintf(file, ".");
   dump_operand(file, 'f', ops, &op->op2, op->op2_type);
   fprintf(file, " = ");
@@ -1114,4 +1114,27 @@ bool is_system_sink_function(const char *name)
     return true;
   }
   return false;
+}
+
+int static_dataflow(zend_file_handle *file)
+{
+
+
+  SPOT("Start static_dataflow() with file %s\n", file->filename);
+
+  zend_op_array *op_array;
+  int retval = FAILURE;
+
+  zend_try {
+    op_array = zend_compile_file(file, ZEND_INCLUDE TSRMLS_CC);
+    zend_destroy_file_handle(file TSRMLS_CC);
+
+    if (op_array) {
+      destroy_op_array(op_array TSRMLS_CC);
+      efree(op_array);
+      retval = SUCCESS;
+    }
+  } zend_end_try();
+
+  return retval;
 }

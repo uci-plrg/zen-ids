@@ -13,3 +13,66 @@
 0x7fffee815140 (execute_data in zval-stack-include.php)
 0x7fffee8151c0 $a (+ 0x80)
 
+
+ -- Ref to global array:
+
+gc = {refcount = 0x1, u = {v = {type = 0xa, flags = 0x0, gc_info = 0x0}, type_info = 0xa}},
+val = {value = {lval = 0x7fffee85e360,
+                dval = 6.9533413210698024e-310,
+                counted = 0x7fffee85e360,
+                str = 0x7fffee85e360,
+                arr = 0x7fffee85e360,
+                obj = 0x7fffee85e360,
+                res = 0x7fffee85e360,
+                ref = 0x7fffee85e360,
+                ast = 0x7fffee85e360,
+                zv = 0x7fffee85e360,
+                ptr = 0x7fffee85e360,
+                ce = 0x7fffee85e360,
+                func = 0x7fffee85e360},
+       u1 = {v = {type = 0x7, type_flags = 0xe, const_flags = 0x0, reserved = 0x0}, type_info = 0xe07},
+       u2 = {var_flags = 0x0, next = 0x0, cache_slot = 0x0, lineno = 0x0}}
+
+ -- Ref to local array:
+
+gc = {refcount = 0x2, u = {v = {type = 0xa, flags = 0x0, gc_info = 0x0}, type_info = 0xa}},
+val = {value = {lval = 0x7fffee85e600,
+                dval = 6.9533413211030036e-310,
+                counted = 0x7fffee85e600,
+                str = 0x7fffee85e600,
+                arr = 0x7fffee85e600,
+                obj = 0x7fffee85e600,
+                res = 0x7fffee85e600,
+                ref = 0x7fffee85e600,
+                ast = 0x7fffee85e600,
+                zv = 0x7fffee85e600,
+                ptr = 0x7fffee85e600,
+                ce = 0x7fffee85e600,
+                func = 0x7fffee85e600},
+       u1 = {v = {type = 0x7, type_flags = 0xe, const_flags = 0x0, reserved = 0x0}, type_info = 0xe07},
+       u2 = {var_flags = 0x7fff, next = 0x7fff, cache_slot = 0x7fff, lineno = 0x7fff}}
+
+ -- Array:
+
+gc = {refcount = 0x1, u = {v = {type = 0xa, flags = 0x0, gc_info = 0x0}, type_info = 0xa}},
+ht = {nTableSize = 0xee85e360,
+      nTableMask = 0x7fff,
+      nNumUsed = 0xe07,
+      nNumOfElements = 0x0,
+      nNextFreeElement = 0x18,
+      arData = 0xfb7598,
+      arHash = 0x0,
+      pDestructor = 0x1fa,
+      nInternalPointer = 0x1,
+      u = {v = {flags = 0xa, nApplyCount = 0x0, reserve = 0x0}, flags = 0xa}}
+
+
+#4  0x00000000009ff27c in zend_hash_apply (ht=0x1532f00 <module_registry>,
+    apply_func=0x9f38e6 <zend_startup_module_zval>) at /scratch/script-safe/php/Zend/zend_hash.c:1056
+#5  0x00000000009f3e82 in zend_startup_modules () at /scratch/script-safe/php/Zend/zend_API.c:1991
+#6  0x000000000095bcb8 in php_module_startup (sf=0x150fdc0 <cgi_sapi_module>,
+    additional_modules=0x150fd00 <cgi_module_entry>, num_additional_modules=0x1)
+    at /scratch/script-safe/php/main/main.c:2291
+#7  0x0000000000aa7ad8 in php_cgi_startup (sapi_module=0x150fdc0 <cgi_sapi_module>)
+    at /scratch/script-safe/php/sapi/cgi/cgi_main.c:941
+#8  0x0000000000aaa94e in main (argc=0x3, argv=0x7fffffffd238) at /scratch/script-safe/php/sapi/cgi/cgi_main.c:1924

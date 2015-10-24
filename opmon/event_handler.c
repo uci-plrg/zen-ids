@@ -3,6 +3,7 @@
 #include "compile_context.h"
 #include "cfg_handler.h"
 #include "cfg.h"
+#include "dataflow.h"
 #include "operand_resolver.h"
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_array.h"
@@ -76,7 +77,8 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_request = cfg_request;
   monitor->notify_database_query = query_executing;
   monitor->notify_worker_startup = init_worker;
-  //monitor->opmon_tokenize = tokenize_file;
+  monitor->opmon_tokenize = NULL; //tokenize_file;
+  monitor->opmon_dataflow = static_dataflow;
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
 
