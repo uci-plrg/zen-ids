@@ -34,10 +34,13 @@ done
 
 shift $(( $OPTIND - 1 ))
 
-export SCRIPT_FILENAME="$1" # only for php-cgi, but otherwise ignored
-
 script=$1
 shift
+
+[ ! -f "$script" ] && echo "Cannot find target script '$script'. Exiting now." && exit
+
+export SCRIPT_FILENAME="$script" # only for php-cgi (otherwise ignored)
+export PATH_TRANSLATED="$script"
 
 if [ ! -z "$debug" ]
 then

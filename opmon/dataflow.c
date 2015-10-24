@@ -1116,14 +1116,50 @@ bool is_system_sink_function(const char *name)
   return false;
 }
 
-int static_dataflow(zend_file_handle *file)
+typedef struct _dataflow_file_t {
+  char *path;
+  bool analyzed;
+  struct _dataflow_file_t *next;
+} dataflow_file_t;
+
+static dataflow_file_t *dataflow_file_list = NULL;
+static bool is_static_dataflow = false;
+
+void add_static_dataflow_include(const char *include_path)
 {
+  bool found = false;
+  dataflow_file_t *file = dataflow_file_list;
 
+  if (!is_static_dataflow)
+    return;
 
-  SPOT("Start static_dataflow() with file %s\n", file->filename);
+  SPOT("Add static dataflow include %s\n", include_path);
 
+  while (file != NULL) {
+    if (strcmp(include_path, file->path) == 0) {
+      found = true;
+      break;
+    }
+    file = file->next;
+  }
+
+  if (found)
+    return;
+
+  file = malloc(sizeof(dataflow_file_t));
+  file->path = strdup(include_path);
+  file->analyzed = false;
+  file->next = dataflow_file_list;
+  dataflow_file_list = file;
+
+}
+
+static int analyze_file_dataflow(zend_file_handle *file)
+{
   zend_op_array *op_array;
   int retval = FAILURE;
+
+  SPOT("analyze_file_dataflow() for file %s\n", file->filename);
 
   zend_try {
     op_array = zend_compile_file(file, ZEND_INCLUDE TSRMLS_CC);
@@ -1135,6 +1171,63 @@ int static_dataflow(zend_file_handle *file)
       retval = SUCCESS;
     }
   } zend_end_try();
+
+  return retval;
+}
+
+int static_dataflow(zend_file_handle *file)
+{
+  int retval;
+  dataflow_file_t *next_file;
+
+  SPOT("static_dataflow() for file %s\n", file->filename);
+
+  is_static_dataflow = true;
+
+  retval = analyze_file_dataflow(file);
+  if (retval != SUCCESS)
+    return retval;
+
+  while (true) {
+    zend_file_handle file;
+
+    next_file = dataflow_file_list;
+    while (next_file != NULL) {
+      if (!next_file->analyzed)
+        break;
+      next_file = next_file->next;
+    }
+
+    if (next_file == NULL)
+      break;
+
+    next_file->analyzed = true;
+    retval = zend_stream_open(next_file->path, &file);
+    if (retval != SUCCESS) {
+      ERROR("Failed to locate included file '%s'\n", next_file->path);
+      continue; // allow bad includes
+    }
+
+    retval = analyze_file_dataflow(&file);
+    if (retval != SUCCESS)
+      break;
+
+    /*
+    file.type = ZEND_HANDLE_FILENAME;
+    file.filename = file_path->path;
+    file.handle.fp = NULL;
+    file.opened_path = NULL;
+    file.free_filename = 0;
+    */
+  }
+
+  next_file = dataflow_file_list;
+  while (next_file != NULL) {
+    dataflow_file_list = next_file->next;
+    free(next_file->path);
+    free(next_file);
+    next_file = dataflow_file_list;
+  }
 
   return retval;
 }

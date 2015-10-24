@@ -117,6 +117,7 @@ bool is_file_sink_function(const char *name);
 bool is_system_source_function(const char *name);
 bool is_system_sink_function(const char *name);
 
+void add_static_dataflow_include(const char *include_path);
 int static_dataflow(zend_file_handle *file);
 
 #endif

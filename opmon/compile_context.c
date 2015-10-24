@@ -378,6 +378,7 @@ void function_compiled(zend_op_array *op_array)
                 } else {
                   free_internal_to_path = true;
                 }
+                add_static_dataflow_include(internal_to_path);
                 site_to_path = internal_to_path + strlen(fqn->unit.application->root);
                 sprintf(to_routine_name, "%s:<script-body>", site_to_path);
 
