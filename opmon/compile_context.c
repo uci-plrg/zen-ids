@@ -127,7 +127,6 @@ void function_compiled(zend_op_array *op_array)
   const char *function_name;
   char *buffer, *filename, *site_filename;
   char routine_name[ROUTINE_NAME_LENGTH], closure_id[CLOSURE_ID_LENGTH];
-  FILE *opcode_dump_file = get_opcode_dump_file();
 #ifdef SPOT_DEBUG
   bool spot = false;
 #endif
@@ -258,11 +257,11 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.hash);
   }
 
-  if (opcode_dump_file != NULL) {
+  if (is_opcode_dump_enabled()) {
     if (is_script_body)
-      fprintf(opcode_dump_file, " === %s (0x%x)\n", routine_name, fqn->function.hash);
+      dump_script_header(routine_name, fqn->function.hash);
     else
-      fprintf(opcode_dump_file, " === %s|%s (0x%x)\n", fqn->unit.path, routine_name, fqn->function.hash);
+      dump_function_header(fqn->unit.path, routine_name, fqn->function.hash);
   }
 
   sctable_add_or_replace(&routines_by_hash, fqn->function.hash, fqn);
@@ -275,7 +274,7 @@ void function_compiled(zend_op_array *op_array)
     return; // verify equal?
   }
 
-  if (is_static_analysis() || opcode_dump_file != NULL)
+  if (is_static_analysis() || is_opcode_dump_enabled())
     reset_fcall_stack();
 
   for (i = 0; i < op_array->last; i++) {
@@ -287,13 +286,13 @@ void function_compiled(zend_op_array *op_array)
     PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
           op->opcode, i, routine_name, fqn->function.hash);
 
-    if (opcode_dump_file != NULL) {
+    if (is_opcode_dump_enabled()) {
       fcall_init_t *fcall;
 
       switch (op->opcode) {
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
-          dump_fcall_opcode(opcode_dump_file, op_array, op, fcall->routine_name);
+          dump_fcall_opcode(op_array, op, fcall->routine_name);
           sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_SEND_VAL:
@@ -306,18 +305,18 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
           fcall = peek_fcall_init();
-          dump_fcall_arg(opcode_dump_file, op_array, op, fcall->routine_name);
+          dump_fcall_arg(op_array, op, fcall->routine_name);
           sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_ASSIGN_OBJ:
         case ZEND_ASSIGN_DIM:
-          dump_map_assignment(opcode_dump_file, op_array, op, &op_array->opcodes[i+1]);
+          dump_map_assignment(op_array, op, &op_array->opcodes[i+1]);
           break;
         case ZEND_FE_FETCH:
-          dump_foreach_fetch(opcode_dump_file, op_array, op, &op_array->opcodes[i+1]);
+          dump_foreach_fetch(op_array, op, &op_array->opcodes[i+1]);
           break;
         default:
-          dump_opcode(opcode_dump_file, op_array, op);
+          dump_opcode(op_array, op);
       }
 
       /* Need to see if the sink goes directly to:
@@ -325,7 +324,7 @@ void function_compiled(zend_op_array *op_array)
        *   - a DB update
        *   - a file create/open/write
        */
-      identify_sink_operands(opcode_dump_file, op, sink_id);
+      identify_sink_operands(op, sink_id);
 
       /* Now show sources coming directly from:
        *   - the session: ZEND_FETCH_R  [r|var #26] = [1|const "_SESSION"
@@ -337,7 +336,7 @@ void function_compiled(zend_op_array *op_array)
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
 
-    if (is_static_analysis() || opcode_dump_file != NULL) {
+    if (is_static_analysis() || is_opcode_dump_enabled()) {
       uint to_routine_hash;
       const char *classname;
       bool ignore_call = false;
@@ -378,7 +377,8 @@ void function_compiled(zend_op_array *op_array)
                 } else {
                   free_internal_to_path = true;
                 }
-                add_static_dataflow_include(internal_to_path);
+                if (is_dataflow_analysis())
+                  add_static_dataflow_include(internal_to_path);
                 site_to_path = internal_to_path + strlen(fqn->unit.application->root);
                 sprintf(to_routine_name, "%s:<script-body>", site_to_path);
 
@@ -436,7 +436,7 @@ void function_compiled(zend_op_array *op_array)
             //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
 
             if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL &&
-                opcode_dump_file == NULL) {
+                !is_opcode_dump_enabled()) {
               ignore_call = true;
               break; // ignore builtins for now (unless dumping ops)
             }

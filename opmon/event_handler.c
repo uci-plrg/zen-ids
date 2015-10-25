@@ -20,8 +20,15 @@ do { \
     ERROR("function_name exceeds max length 256!\n"); \
 } while (0)
 
+typedef enum _opmon_run_type {
+  OPMON_RUN_EXECUTION,
+  OPMON_RUN_STATIC_ANALYSIS,
+  OPMON_RUN_DATAFLOW_ANALYSIS
+} opmon_run_type;
+
 static const char *static_analysis = NULL;
-static FILE *opcode_dump_file = NULL;
+static const char *opcode_dump_path;
+static opmon_run_type run_type = OPMON_RUN_EXECUTION;
 static void init_top_level_script(const char *script_path)
 {
   starting_script(script_path);
@@ -44,28 +51,42 @@ const char *get_static_analysis()
 
 bool is_static_analysis()
 {
-  return static_analysis != NULL;
+  return run_type == OPMON_RUN_STATIC_ANALYSIS;
 }
 
-FILE *get_opcode_dump_file()
+static int start_dataflow_analysis(zend_file_handle *file)
 {
-  return opcode_dump_file;
+  if (run_type != OPMON_RUN_EXECUTION) {
+    ERROR("Cannot perform static analysis and dataflow analysis at the same time!\n");
+    return FAILURE;
+  }
+
+  run_type = OPMON_RUN_DATAFLOW_ANALYSIS;
+  return analyze_dataflow(file);
+}
+
+bool is_dataflow_analysis()
+{
+  return run_type == OPMON_RUN_DATAFLOW_ANALYSIS;
+}
+
+bool is_opcode_dump_enabled()
+{
+  return opcode_dump_path != NULL;
 }
 
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
-  const char *opcode_dump_path;
   // scarray_unit_test();
 
   static_analysis = getenv(ENV_STATIC_ANALYSIS);
   SPOT("static_analysis: %s\n", static_analysis);
+  if (static_analysis != NULL)
+    run_type = OPMON_RUN_STATIC_ANALYSIS;
 
   opcode_dump_path = getenv(ENV_OPCODE_DUMP);
-  if (opcode_dump_path != NULL) {
-    opcode_dump_file = fopen(opcode_dump_path, "w");
-    if (opcode_dump_file == NULL)
-      ERROR("Failed to open the opcode dump file '%s'\n", opcode_dump_path);
-  }
+  if (opcode_dump_path != NULL)
+    initialize_opcode_dump(opcode_dump_path);
 
   init_compile_context();
   init_cfg_handler();
@@ -78,7 +99,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_database_query = query_executing;
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;
-  monitor->opmon_dataflow = static_dataflow;
+  monitor->opmon_dataflow = start_dataflow_analysis;
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
 
@@ -92,6 +113,6 @@ void destroy_event_handler()
   destroy_operand_resolver();
   destroy_cfg_handler();
 
-  if (opcode_dump_file != NULL)
-    fclose(opcode_dump_file);
+  if (run_type == OPMON_RUN_DATAFLOW_ANALYSIS)
+    destroy_dataflow_analysis();
 }
