@@ -274,8 +274,10 @@ void function_compiled(zend_op_array *op_array)
     return; // verify equal?
   }
 
-  if (is_static_analysis() || is_opcode_dump_enabled())
+  if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled())
     reset_fcall_stack();
+  if (is_dataflow_analysis())
+    add_dataflow_routine(fqn->function.hash);
 
   for (i = 0; i < op_array->last; i++) {
     compiled_edge_target_t target;
@@ -319,24 +321,49 @@ void function_compiled(zend_op_array *op_array)
           dump_opcode(op_array, op);
       }
 
-      /* Need to see if the sink goes directly to:
-       *   - the session
-       *   - a DB update
-       *   - a file create/open/write
-       */
       identify_sink_operands(op, sink_id);
+    }
 
-      /* Now show sources coming directly from:
-       *   - the session: ZEND_FETCH_R  [r|var #26] = [1|const "_SESSION"
-       *   - a DB query: ZEND_SEND_* where fcall target is mysqli_query
-       *   - a file open/read
-       */
+    if (is_dataflow_analysis()) {
+      fcall_init_t *fcall;
+
+      switch (op->opcode) {
+        case ZEND_DO_FCALL:
+          fcall = peek_fcall_init();
+          add_dataflow_fcall(fqn->function.hash, i, op_array, fcall->routine_name);
+          //sink_id.call_target = fcall->routine_name;
+          break;
+        case ZEND_SEND_VAL:
+        case ZEND_SEND_VAL_EX:
+        case ZEND_SEND_VAR:
+        case ZEND_SEND_VAR_NO_REF:
+        case ZEND_SEND_REF:
+        case ZEND_SEND_VAR_EX:
+        case ZEND_SEND_UNPACK:
+        case ZEND_SEND_ARRAY:
+        case ZEND_SEND_USER:
+          fcall = peek_fcall_init();
+          add_dataflow_fcall_arg(fqn->function.hash, i, op_array, fcall->routine_name);
+          //sink_id.call_target = fcall->routine_name;
+          break;
+        case ZEND_ASSIGN_OBJ:
+        case ZEND_ASSIGN_DIM:
+          add_dataflow_map_assignment(fqn->function.hash, i, op_array);
+          break;
+        case ZEND_FE_FETCH:
+          add_dataflow_foreach_fetch(fqn->function.hash, i, op_array);
+          break;
+        default:
+          add_dataflow_opcode(fqn->function.hash, i, op_array);
+      }
+
+      //add_dataflow_sinks(fqn->function.hash, op, sink_id);
     }
 
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
 
-    if (is_static_analysis() || is_opcode_dump_enabled()) {
+    if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled()) {
       uint to_routine_hash;
       const char *classname;
       bool ignore_call = false;
@@ -377,16 +404,18 @@ void function_compiled(zend_op_array *op_array)
                 } else {
                   free_internal_to_path = true;
                 }
-                if (is_dataflow_analysis())
-                  add_static_dataflow_include(internal_to_path);
                 site_to_path = internal_to_path + strlen(fqn->unit.application->root);
                 sprintf(to_routine_name, "%s:<script-body>", site_to_path);
+                to_routine_hash = hash_routine(to_routine_name);
+
+                if (is_dataflow_analysis()) {
+                  add_dataflow_include(fqn->function.hash, i, op_array, internal_to_path,
+                                       to_routine_hash);
+                }
 
                 if (free_internal_to_path)
                   efree((char *) internal_to_path);
                 internal_to_path = site_to_path = NULL;
-
-                to_routine_hash = hash_routine(to_routine_name);
 
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
 

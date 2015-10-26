@@ -166,10 +166,10 @@ void dump_operand(char index, zend_op_array *ops, znode_op *operand, zend_uchar 
           fprintf(opcode_dump_file, "const <undefined-type>");
           break;
         case IS_NULL:
-          fprintf(opcode_dump_file, "const");
+          fprintf(opcode_dump_file, "const null");
           break;
         case IS_FALSE:
-          fprintf(opcode_dump_file, "const");
+          fprintf(opcode_dump_file, "const false");
           break;
         case IS_TRUE:
           fprintf(opcode_dump_file, "const true");
@@ -265,9 +265,9 @@ void dump_map_assignment(zend_op_array *ops, zend_op *op, zend_op *next_op)
   if (op->op1_type == IS_UNUSED)
     fprintf(opcode_dump_file, "$this");
   else
-    dump_operand('b', ops, &op->op1, op->op1_type);
+    dump_operand('m', ops, &op->op1, op->op1_type);
   fprintf(opcode_dump_file, ".");
-  dump_operand('f', ops, &op->op2, op->op2_type);
+  dump_operand('k', ops, &op->op2, op->op2_type);
   fprintf(opcode_dump_file, " = ");
   dump_operand('v', ops, &next_op->op1, next_op->op1_type);
   fprintf(opcode_dump_file, "\n");
@@ -277,7 +277,7 @@ void dump_foreach_fetch(zend_op_array *ops, zend_op *op, zend_op *next_op)
 {
   dump_opcode_header(op);
   fprintf(opcode_dump_file, " in ");
-  dump_operand('a', ops, &op->op1, op->op1_type);
+  dump_operand('m', ops, &op->op1, op->op1_type);
   fprintf(opcode_dump_file, ": ");
   dump_operand('k', ops, &next_op->result, next_op->result_type);
   fprintf(opcode_dump_file, ", ");
@@ -615,7 +615,7 @@ void identify_sink_operands(zend_op *op, sink_identifier_t id)
       break;
     case ZEND_ISSET_ISEMPTY_VAR:
       if (op->op2_type == IS_UNUSED)
-        print_sink("sink(zval:bool) {1} =d=> {result}");
+        print_sink("sink(zval:bool) {1} =d=> {result}"); // is this a superglobal source?
       else
         print_sink("sink(zval:bool) {2.1} =d=> {result}"); /* op2 must be static */
       break;
@@ -1145,33 +1145,18 @@ typedef struct _dataflow_file_t {
   struct _dataflow_file_t *next;
 } dataflow_file_t;
 
+typedef struct _dataflow_graph_t {
+  sctable_t routines;
+} dataflow_graph_t;
+
+typedef struct _dataflow_routine_t {
+  uint routine_hash;
+  scarray_t opcodes;
+} dataflow_routine_t;
+
 static dataflow_file_t *dataflow_file_list = NULL;
-
-void add_static_dataflow_include(const char *include_path)
-{
-  bool found = false;
-  dataflow_file_t *file = dataflow_file_list;
-
-  SPOT("Add static dataflow include %s\n", include_path);
-
-  while (file != NULL) {
-    if (strcmp(include_path, file->path) == 0) {
-      found = true;
-      break;
-    }
-    file = file->next;
-  }
-
-  if (found)
-    return;
-
-  file = malloc(sizeof(dataflow_file_t));
-  file->path = strdup(include_path);
-  file->analyzed = false;
-  file->next = dataflow_file_list;
-  dataflow_file_list = file;
-
-}
+static dataflow_graph_t *dg = NULL;
+static dataflow_routine_t *assembling_routine = NULL;
 
 static int analyze_file_dataflow(zend_file_handle *file)
 {
@@ -1200,6 +1185,10 @@ int analyze_dataflow(zend_file_handle *file)
   dataflow_file_t *next_file;
 
   SPOT("static_dataflow() for file %s\n", file->filename);
+
+  dg = malloc(sizeof(dataflow_graph_t));
+  dg->routines.hash_bits = 9;
+  sctable_init(&dg->routines);
 
   retval = analyze_file_dataflow(file);
   if (retval != SUCCESS)
@@ -1253,4 +1242,275 @@ void destroy_dataflow_analysis()
 {
   if (opcode_dump_file != NULL)
     fclose(opcode_dump_file);
+
+  if (dg != NULL) {
+    sctable_destroy(&dg->routines);
+    free(dg);
+  }
 }
+
+void add_dataflow_routine(uint routine_hash)
+{
+  dataflow_routine_t *routine = malloc(sizeof(dataflow_routine_t));
+  routine->routine_hash = routine_hash;
+  scarray_init(&routine->opcodes);
+  sctable_add(&dg->routines, routine_hash, routine);
+
+  assembling_routine = routine;
+}
+
+static void initilize_dataflow_operand(dataflow_operand_t *operand, zend_op_array *zops,
+                                       znode_op *zop, zend_uchar type)
+{
+  switch (type) {
+    case IS_CONST:
+      operand->value.type = DATAFLOW_VALUE_TYPE_CONST;
+      operand->value.constant = zop->zv;
+      break;
+    case IS_VAR:
+    case IS_TMP_VAR:
+      operand->value.type = DATAFLOW_VALUE_TYPE_TEMP;
+      operand->value.temp_id = (uint) (EX_VAR_TO_NUM(zop->var) - zops->last_var);
+      break;
+    case IS_CV:
+      operand->value.var_name = zops->vars[EX_VAR_TO_NUM(zop->var)]->val;
+      if (strcmp("this", operand->value.var_name) == 0) // maybe...?
+        operand->value.type = DATAFLOW_VALUE_TYPE_THIS;
+      else
+        operand->value.type = DATAFLOW_VALUE_TYPE_VAR;
+      break;
+    case IS_UNUSED:
+    default:
+      operand->value.type = DATAFLOW_VALUE_TYPE_NONE;
+  }
+}
+
+static void initialize_opcode_index(uint routine_hash, uint index, dataflow_routine_t **routine_out,
+                                    dataflow_opcode_t **opcode_out)
+{
+  dataflow_routine_t *routine;
+  dataflow_opcode_t *opcode;
+
+  if (assembling_routine != NULL && assembling_routine->routine_hash == routine_hash)
+    routine = assembling_routine;
+  else
+    routine = sctable_lookup(&dg->routines, routine_hash);
+
+  while (index >= routine->opcodes.size) {
+    opcode = malloc(sizeof(dataflow_opcode_t));
+    memset(opcode, 0, sizeof(dataflow_opcode_t));
+    scarray_append(&routine->opcodes, opcode);
+  }
+
+  opcode = (dataflow_opcode_t *) scarray_get(&routine->opcodes, index);
+  opcode->id.routine_hash = routine_hash;
+  opcode->id.op_index = index;
+
+  *routine_out = routine;
+  *opcode_out = opcode;
+}
+
+static inline void initialize_sink(dataflow_opcode_t *opcode, dataflow_sink_type_t type)
+{
+  opcode->sink.id = opcode->id;
+  opcode->sink.type = type;
+}
+
+static inline void initialize_source(dataflow_opcode_t *opcode, dataflow_source_type_t type)
+{
+  opcode->source.id = opcode->id;
+  opcode->source.type = type;
+}
+
+void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
+{
+  dataflow_routine_t *routine;
+  dataflow_opcode_t *opcode;
+  zend_op *zop = &zops->opcodes[index];
+
+  initialize_opcode_index(routine_hash, index, &routine, &opcode);
+
+  initilize_dataflow_operand(&opcode->op1, zops, &zop->op1, zop->op1_type);
+  initilize_dataflow_operand(&opcode->op2, zops, &zop->op2, zop->op2_type);
+  initilize_dataflow_operand(&opcode->result, zops, &zop->result, zop->result_type);
+
+  switch (zop->opcode) {
+    case ZEND_ECHO:
+    case ZEND_PRINT:
+      opcode->sink.id = opcode->id;
+      opcode->sink.type = SINK_TYPE_OUTPUT;
+      break;
+    case ZEND_JMPZ:
+    case ZEND_JMPNZ:
+    case ZEND_JMPZNZ:
+    case ZEND_JMPZ_EX:
+    case ZEND_JMPNZ_EX:
+    case ZEND_BRK:
+    case ZEND_CONT:
+    case ZEND_GOTO:
+      initialize_sink(opcode, SINK_TYPE_EDGE);
+      break;
+    case ZEND_JMP_SET:
+      // dunno how this works
+      break;
+    case ZEND_COALESCE:
+      // dunno how this works
+      break;
+    case ZEND_INCLUDE_OR_EVAL:
+      if (zop->extended_value == ZEND_EVAL) // else handled in add_dataflow_include
+        initialize_sink(opcode, SINK_TYPE_CODE);
+      break;
+    case ZEND_DECLARE_CLASS:
+    case ZEND_DECLARE_INHERITED_CLASS:
+    case ZEND_DECLARE_INHERITED_CLASS_DELAYED:
+    case ZEND_DECLARE_FUNCTION:
+    case ZEND_ADD_INTERFACE:
+    case ZEND_ADD_TRAIT:
+      initialize_sink(opcode, SINK_TYPE_CODE);
+      break;
+    case ZEND_BIND_TRAITS:
+    case ZEND_FETCH_R:  /* fetch a superglobal */
+    case ZEND_FETCH_W:
+    case ZEND_FETCH_RW:
+    case ZEND_FETCH_IS:
+      if (zop->op2_type == IS_UNUSED) {
+        const char *superglobal_name = Z_STRVAL_P(zop->op1.zv);
+        if (superglobal_name != NULL) {
+          if (strcmp(superglobal_name, "_SESSION") == 0) {
+            initialize_source(opcode, SOURCE_TYPE_SESSION);
+            break;
+          } else if (strcmp(superglobal_name, "_REQUEST") == 0 ||
+                     strcmp(superglobal_name, "_GET") == 0 ||
+                     strcmp(superglobal_name, "_POST") == 0 ||
+                     strcmp(superglobal_name, "_COOKIE") == 0 ||
+                     strcmp(superglobal_name, "_FILES") == 0) {
+            initialize_source(opcode, SOURCE_TYPE_HTTP);
+            break;
+          } else if (strcmp(superglobal_name, "_ENV") == 0 ||
+                     strcmp(superglobal_name, "_SERVER") == 0) {
+            initialize_source(opcode, SOURCE_TYPE_SYSTEM);
+          }
+        }
+      }
+      break;
+    case ZEND_RECV:
+    case ZEND_RECV_VARIADIC:
+      initialize_source(opcode, SOURCE_TYPE_ARG);
+      break;
+    case ZEND_DECLARE_CONST:
+    case ZEND_BIND_GLOBAL:
+      initialize_sink(opcode, SINK_TYPE_GLOBAL);
+      break;
+  }
+}
+
+void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
+                        const char *routine_name)
+{
+  dataflow_routine_t *routine;
+  dataflow_opcode_t *opcode;
+  zend_op *zop = &zops->opcodes[index];
+
+  initialize_opcode_index(routine_hash, index, &routine, &opcode);
+
+  if (uses_return_value(zop)) {
+    if (is_db_source_function(NULL, routine_name))
+      initialize_source(opcode, SOURCE_TYPE_SQL);
+    else if (is_db_sink_function(NULL, routine_name))
+      initialize_sink(opcode, SINK_TYPE_SQL);
+    else if (is_file_source_function(routine_name))
+      initialize_source(opcode, SOURCE_TYPE_FILE);
+    else if (is_file_sink_function(routine_name))
+      initialize_sink(opcode, SINK_TYPE_FILE);
+    else if (is_system_source_function(routine_name))
+      initialize_source(opcode, SOURCE_TYPE_SYSTEM);
+    else if (is_system_sink_function(routine_name))
+      initialize_sink(opcode, SINK_TYPE_SYSTEM);
+  }
+}
+
+void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,
+                        const char *routine_name)
+{
+  dataflow_routine_t *routine;
+  dataflow_opcode_t *opcode;
+
+  initialize_opcode_index(routine_hash, index, &routine, &opcode);
+
+  opcode->sink.id.routine_hash = routine_hash;
+  opcode->sink.id.op_index = index;
+  opcode->sink.type = SINK_TYPE_CALL;
+  opcode->sink.call.type = DATAFLOW_CALL_TYPE_BY_NAME;
+  opcode->sink.call.call_by_name.name = routine_name;
+}
+
+void add_dataflow_map_assignment(uint routine_hash, uint index, zend_op_array *zops)
+{
+  dataflow_routine_t *routine;
+  dataflow_opcode_t *opcode;
+  zend_op *zop1 = &zops->opcodes[index];
+  zend_op *zop2 = &zops->opcodes[index+1];
+
+  initialize_opcode_index(routine_hash, index, &routine, &opcode);
+
+  if (zop1->op1_type == IS_UNUSED) {
+    opcode->map.value.type = DATAFLOW_VALUE_TYPE_THIS;
+    opcode->map.value.class = zops->scope; // do we need zend_op_array.this_var (index of CV)?
+  } else {
+    initilize_dataflow_operand(&opcode->map, zops, &zop1->op1, zop1->op1_type);
+  }
+  initilize_dataflow_operand(&opcode->key, zops, &zop1->op2, zop1->op2_type);
+  initilize_dataflow_operand(&opcode->value, zops, &zop2->op1, zop2->op1_type);
+}
+
+void add_dataflow_foreach_fetch(uint routine_hash, uint index, zend_op_array *zops)
+{
+  dataflow_routine_t *routine;
+  dataflow_opcode_t *opcode;
+  zend_op *zop1 = &zops->opcodes[index];
+  zend_op *zop2 = &zops->opcodes[index+1];
+
+  initialize_opcode_index(routine_hash, index, &routine, &opcode);
+
+  if (zop1->op1_type == IS_UNUSED) {
+    opcode->map.value.type = DATAFLOW_VALUE_TYPE_THIS;
+    opcode->map.value.class = zops->scope; // do we need zend_op_array.this_var (index of CV)?
+  } else {
+    initilize_dataflow_operand(&opcode->map, zops, &zop1->op1, zop1->op1_type);
+  }
+  initilize_dataflow_operand(&opcode->key, zops, &zop1->op2, zop1->op2_type);
+  initilize_dataflow_operand(&opcode->value, zops, &zop2->op1, zop2->op1_type);
+}
+
+void add_dataflow_include(uint routine_hash, uint index, zend_op_array *zops,
+                          const char *include_path, uint include_hash)
+{
+  dataflow_routine_t *routine;
+  dataflow_opcode_t *opcode;
+  dataflow_file_t *file = dataflow_file_list;
+  bool found = false;
+
+  initialize_opcode_index(routine_hash, index, &routine, &opcode);
+  initialize_source(opcode, SOURCE_TYPE_INCLUDE);
+  opcode->source.include.routine_hash = include_hash;
+
+  SPOT("Add static dataflow include %s\n", include_path);
+
+  while (file != NULL) {
+    if (strcmp(include_path, file->path) == 0) {
+      found = true;
+      break;
+    }
+    file = file->next;
+  }
+
+  if (found)
+    return;
+
+  file = malloc(sizeof(dataflow_file_t));
+  file->path = strdup(include_path);
+  file->analyzed = false;
+  file->next = dataflow_file_list;
+  dataflow_file_list = file;
+}
+
