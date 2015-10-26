@@ -110,6 +110,16 @@ typedef struct _dataflow_influence_t {
   struct _dataflow_influence_t *next;
 } dataflow_influence_t;
 
+typedef struct _dataflow_operand_id_t {
+  cfg_opcode_id_t opcode_id;
+  byte operand_index;
+} dataflow_operand_id_t;
+
+typedef struct _dataflow_predecessor_t {
+  dataflow_operand_id_t operand_id;
+  struct _dataflow_predecessor_t *next;
+} dataflow_predecessor_t;
+
 /*
 typedef enum _dataflow_const_type_t {
   DATAFLOW_CONST_LONG,
@@ -153,6 +163,7 @@ typedef struct _dataflow_value_t {
  */
 typedef struct _dataflow_operand_t {
   dataflow_value_t value;
+  dataflow_predecessor_t *predecessor;
   dataflow_influence_t *influence;
 } dataflow_operand_t;
 

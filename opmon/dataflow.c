@@ -1142,6 +1142,7 @@ bool is_system_sink_function(const char *name)
 typedef struct _dataflow_file_t {
   char *path;
   bool analyzed;
+  zend_op_array *zops;
   struct _dataflow_file_t *next;
 } dataflow_file_t;
 
@@ -1158,30 +1159,36 @@ static dataflow_file_t *dataflow_file_list = NULL;
 static dataflow_graph_t *dg = NULL;
 static dataflow_routine_t *assembling_routine = NULL;
 
-static int analyze_file_dataflow(zend_file_handle *file)
+static int analyze_file_dataflow(zend_file_handle *in, dataflow_file_t *out)
 {
-  zend_op_array *op_array;
   int retval = FAILURE;
 
-  SPOT("analyze_file_dataflow() for file %s\n", file->filename);
+  SPOT("analyze_file_dataflow() for file %s\n", in->filename);
 
   zend_try {
-    op_array = zend_compile_file(file, ZEND_INCLUDE TSRMLS_CC);
-    zend_destroy_file_handle(file TSRMLS_CC);
-
-    if (op_array) {
-      destroy_op_array(op_array TSRMLS_CC);
-      efree(op_array);
+    out->zops = zend_compile_file(in, ZEND_INCLUDE TSRMLS_CC);
+    zend_destroy_file_handle(in TSRMLS_CC);
+    if (out->zops != NULL)
       retval = SUCCESS;
-    }
   } zend_end_try();
 
   return retval;
 }
 
+static void link_operand_dataflow(dataflow_file_t *top_file)
+{
+  uint i;
+  zend_op *zop;
+
+  for (i = 0; i < top_file->zops->last; i++) {
+    switch (
+  }
+}
+
 int analyze_dataflow(zend_file_handle *file)
 {
   int retval;
+  dataflow_file_t top_file;
   dataflow_file_t *next_file;
 
   SPOT("static_dataflow() for file %s\n", file->filename);
@@ -1190,11 +1197,9 @@ int analyze_dataflow(zend_file_handle *file)
   dg->routines.hash_bits = 9;
   sctable_init(&dg->routines);
 
-  retval = analyze_file_dataflow(file);
-  if (retval != SUCCESS)
-    return retval;
+  retval = analyze_file_dataflow(file, &top_file);
 
-  while (true) {
+  while (retval == SUCCESS) {
     zend_file_handle file;
 
     next_file = dataflow_file_list;
@@ -1214,22 +1219,22 @@ int analyze_dataflow(zend_file_handle *file)
       continue; // allow bad includes
     }
 
-    retval = analyze_file_dataflow(&file);
-    if (retval != SUCCESS)
-      break;
-
-    /*
-    file.type = ZEND_HANDLE_FILENAME;
-    file.filename = file_path->path;
-    file.handle.fp = NULL;
-    file.opened_path = NULL;
-    file.free_filename = 0;
-    */
+    retval = analyze_file_dataflow(&file, next_file);
   }
 
+  link_operand_dataflow(&top_file);
+
+  if (top_file.zops != NULL) {
+    destroy_op_array(top_file.zops TSRMLS_CC);
+    efree(top_file.zops);
+  }
   next_file = dataflow_file_list;
   while (next_file != NULL) {
     dataflow_file_list = next_file->next;
+    if (next_file->zops != NULL) {
+      destroy_op_array(next_file->zops TSRMLS_CC);
+      efree(next_file->zops);
+    }
     free(next_file->path);
     free(next_file);
     next_file = dataflow_file_list;
@@ -1513,4 +1518,3 @@ void add_dataflow_include(uint routine_hash, uint index, zend_op_array *zops,
   file->next = dataflow_file_list;
   dataflow_file_list = file;
 }
-
