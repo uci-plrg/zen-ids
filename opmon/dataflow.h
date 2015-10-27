@@ -3,6 +3,14 @@
 
 #include "cfg.h"
 
+typedef enum _dataflow_operand_index_t {
+  DATAFLOW_OPERAND_RESULT,
+  DATAFLOW_OPERAND_1,
+  DATAFLOW_OPERAND_2,
+  DATAFLOW_OPERAND_SOURCE,
+  DATAFLOW_OPERAND_SINK
+} dataflow_operand_index_t;
+
 typedef struct _dataflow_call_by_name_t {
   const char *name;
 } dataflow_call_by_name_t;
@@ -42,6 +50,7 @@ typedef enum _dataflow_sink_type_t {
 
 typedef struct _dataflow_sink_t {
   cfg_opcode_id_t id;
+  dataflow_operand_index_t operand_index;
   dataflow_sink_type_t type;
   union {
     dataflow_call_t call;
@@ -112,7 +121,7 @@ typedef struct _dataflow_influence_t {
 
 typedef struct _dataflow_operand_id_t {
   cfg_opcode_id_t opcode_id;
-  byte operand_index;
+  dataflow_operand_index_t operand_index;
 } dataflow_operand_id_t;
 
 typedef struct _dataflow_predecessor_t {
