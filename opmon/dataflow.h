@@ -140,6 +140,7 @@ typedef struct _dataflow_const_t {
 typedef enum _dataflow_value_type_t {
   DATAFLOW_VALUE_TYPE_NONE,
   DATAFLOW_VALUE_TYPE_CONST,
+  DATAFLOW_VALUE_TYPE_JMP,
   DATAFLOW_VALUE_TYPE_VAR,
   DATAFLOW_VALUE_TYPE_THIS,
   DATAFLOW_VALUE_TYPE_TEMP,
@@ -151,6 +152,7 @@ typedef struct _dataflow_value_t {
   dataflow_value_type_t type;
   union {
     uint temp_id;
+    uint jmp_target;
     const char *var_name;
     zval *constant;
     zend_class_entry *class;
@@ -205,7 +207,7 @@ bool is_system_sink_function(const char *name);
 
 int analyze_dataflow(zend_file_handle *file);
 void destroy_dataflow_analysis();
-void add_dataflow_routine(uint routine_hash);
+void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops);
 void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops);
 void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
                         const char *routine_name);

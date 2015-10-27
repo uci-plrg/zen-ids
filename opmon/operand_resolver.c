@@ -1,5 +1,4 @@
 #include "php.h"
-#include "cfg.h"
 #include "cfg_handler.h"
 #include "compile_context.h"
 #include "lib/script_cfi_utils.h"

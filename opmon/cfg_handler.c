@@ -230,10 +230,9 @@ void destroy_cfg_handler()
 {
   if (request_state.edges != NULL) {
     request_edge_t *edge;
-    for (edge = (request_edge_t *) scarray_iterator_start(request_state.edge_pool);
-         edge != NULL; edge = (request_edge_t *) scarray_iterator_next()) {
+    scarray_iterator_t *i = scarray_iterator_start(request_state.edge_pool);
+    while ((edge = (request_edge_t *) scarray_iterator_next(i)) != NULL)
       free(edge);
-    }
     scarray_destroy(request_state.edge_pool);
     free(request_state.edge_pool);
     request_state.edge_pool = NULL;

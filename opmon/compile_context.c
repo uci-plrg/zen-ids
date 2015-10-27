@@ -277,7 +277,7 @@ void function_compiled(zend_op_array *op_array)
   if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled())
     reset_fcall_stack();
   if (is_dataflow_analysis())
-    add_dataflow_routine(fqn->function.hash);
+    add_dataflow_routine(fqn->unit.application, fqn->function.hash, op_array);
 
   for (i = 0; i < op_array->last; i++) {
     compiled_edge_target_t target;

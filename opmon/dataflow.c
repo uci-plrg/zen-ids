@@ -1,3 +1,4 @@
+#include "cfg.h"
 #include "compile_context.h"
 #include "dataflow.h"
 
@@ -1147,17 +1148,38 @@ typedef struct _dataflow_file_t {
 } dataflow_file_t;
 
 typedef struct _dataflow_graph_t {
-  sctable_t routines;
+  sctable_t routine_table;
+  scarray_t routine_list;
 } dataflow_graph_t;
 
 typedef struct _dataflow_routine_t {
+  application_t *app;
   uint routine_hash;
   scarray_t opcodes;
+  // zend_op_array *zops; // &droutine->zops->opcodes[dop->id.op_index],
 } dataflow_routine_t;
+
+typedef struct _dataflow_live_variable_t {
+  bool is_temp;
+  union {
+    uint temp_id;
+    const char *var_name;
+  };
+  dataflow_operand_id_t *src;
+} dataflow_live_variable_t;
+
+typedef struct _dataflow_link_pass_t {
+  bool complete;
+  dataflow_routine_t *droutine;
+  uint start_index;
+  scarray_t live_variables; // dataflow_live_variable_t *
+} dataflow_link_pass_t;
 
 static dataflow_file_t *dataflow_file_list = NULL;
 static dataflow_graph_t *dg = NULL;
 static dataflow_routine_t *assembling_routine = NULL;
+static scarray_t dataflow_link_worklist; // dataflow_link_pass_t *
+static bool dataflow_linking_complete;
 
 static int analyze_file_dataflow(zend_file_handle *in, dataflow_file_t *out)
 {
@@ -1175,14 +1197,195 @@ static int analyze_file_dataflow(zend_file_handle *in, dataflow_file_t *out)
   return retval;
 }
 
-static void link_operand_dataflow(dataflow_file_t *top_file)
+static inline dataflow_operand_t *get_dataflow_operand(dataflow_opcode_t *dop, uint index)
 {
-  uint i;
-  zend_op *zop;
-
-  for (i = 0; i < top_file->zops->last; i++) {
-    switch (
+  switch (index) {
+    case 0:
+      return &dop->result;
+    case 1:
+      return &dop->op1;
+    case 2:
+      return &dop->op2;
   }
+  return NULL;
+}
+
+static void link_operand(dataflow_opcode_t *dop, uint src_index, uint dst_index)
+{
+  dataflow_operand_t *src = get_dataflow_operand(dop, src_index);
+  dataflow_operand_t *dst = get_dataflow_operand(dop, dst_index);
+
+  switch (src->value.type) {
+    case DATAFLOW_VALUE_TYPE_NONE:
+    case DATAFLOW_VALUE_TYPE_CONST:
+    case DATAFLOW_VALUE_TYPE_JMP: // it's a sink, though
+    case DATAFLOW_VALUE_TYPE_INCLUDE:
+    case DATAFLOW_VALUE_TYPE_FCALL:
+      fprintf(opcode_dump_file, "Nothing to link for 0x%x:%d.(%d->%d)\n", dop->id.routine_hash,
+              dop->id.op_index, src_index, dst_index);
+      return; // nothing to link
+    case DATAFLOW_VALUE_TYPE_VAR:
+      fprintf(opcode_dump_file, "Link variable %s into 0x%x:%d.(%d->%d)\n", src->value.var_name,
+              dop->id.routine_hash, dop->id.op_index, src_index, dst_index);
+      break;
+    case DATAFLOW_VALUE_TYPE_THIS:
+      fprintf(opcode_dump_file, "Link $this into 0x%x:%d.(%d->%d)\n", dop->id.routine_hash,
+              dop->id.op_index, src_index, dst_index);
+      break;
+    case DATAFLOW_VALUE_TYPE_TEMP:
+      fprintf(opcode_dump_file, "Link temp #%d into 0x%x:%d.(%d->%d)\n", src->value.temp_id,
+              dop->id.routine_hash, dop->id.op_index, src_index, dst_index);
+      break;
+  }
+
+  dataflow_predecessor_t *p = malloc(sizeof(dataflow_predecessor_t));
+  p->next = dst->predecessor;
+  dst->predecessor = p;
+  //p->operand_id.opcode_id.routine_hash = (hash of op#src_index live sink);
+  //p->operand_id.opcode_id.op_index = (index of op#src_index live sink);
+  p->operand_id.operand_index = src_index;
+}
+
+static void copy_dataflow_variables(scarray_t *dst, scarray_t *src)
+{
+  dataflow_live_variable_t *var, *copy;
+  scarray_iterator_t *i;
+
+  i = scarray_iterator_start(src);
+  while ((var = (dataflow_live_variable_t *) scarray_iterator_next(i)) != NULL) {
+    copy = malloc(sizeof(dataflow_live_variable_t));
+    memcpy(copy, var, sizeof(dataflow_live_variable_t));
+    scarray_append(dst, copy);
+  }
+}
+
+static bool is_same_live_variable(dataflow_live_variable_t *first, dataflow_live_variable_t *second)
+{
+  if (first->is_temp != second->is_temp)
+    return false;
+  if (first->is_temp) {
+    if (first->temp_id != second->temp_id)
+      return false;
+  } else {
+    if (strcmp(first->var_name, second->var_name) != 0)
+      return false;
+  }
+  if (first->src->opcode_id.routine_hash != second->src->opcode_id.routine_hash)
+    return false;
+  if (first->src->opcode_id.op_index != second->src->opcode_id.op_index)
+    return false;
+  if (first->src->operand_index != second->src->operand_index)
+    return false;
+
+  return true;
+}
+
+static void prepare_dataflow_link_pass(dataflow_routine_t *droutine, uint start_index,
+                                       scarray_t *live_variables)
+{
+  scarray_iterator_t *w;
+  dataflow_link_pass_t *pass;
+
+  fprintf(opcode_dump_file, "Prepare dataflow link pass in 0x%x:%d\n",
+          droutine->routine_hash, start_index);
+
+  if (live_variables == NULL) {
+    live_variables = malloc(sizeof(scarray_t));
+    scarray_init(live_variables);
+  }
+
+  w = scarray_iterator_start(&dataflow_link_worklist);
+  while ((pass = (dataflow_link_pass_t *) scarray_iterator_next(w)) != NULL) {
+    if (pass->droutine->routine_hash == droutine->routine_hash && pass->start_index == start_index) {
+      bool found, modified_variables = false; // merge live variables
+      dataflow_live_variable_t *dst_var, *src_var;
+      scarray_iterator_t *dst, *src = scarray_iterator_start(live_variables);
+      while ((src_var = (dataflow_live_variable_t *) scarray_iterator_next(src)) != NULL) {
+        found = false;
+        dst = scarray_iterator_start(&pass->live_variables);
+        while ((dst_var = (dataflow_live_variable_t *) scarray_iterator_next(dst)) != NULL) {
+          if (is_same_live_variable(dst_var, src_var)) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          dst_var = malloc(sizeof(dataflow_live_variable_t));
+          memcpy(dst_var, src_var, sizeof(dataflow_live_variable_t));
+          scarray_append(&pass->live_variables, dst_var);
+          modified_variables = true;
+          dataflow_linking_complete = false;
+        }
+      }
+      if (modified_variables && pass->complete)
+        pass->complete = false;
+      break;
+    }
+  }
+  if (pass == NULL) {
+    pass = malloc(sizeof(dataflow_link_pass_t));
+    pass->droutine = droutine;
+    pass->start_index = start_index;
+    copy_dataflow_variables(&pass->live_variables, live_variables);
+    scarray_append(&dataflow_link_worklist, pass);
+  }
+}
+
+static void link_operand_dataflow(dataflow_link_pass_t *pass)
+{
+  bool end_pass = false;
+  dataflow_opcode_t *dop;
+  routine_cfg_t *croutine = cfg_routine_lookup(pass->droutine->app->cfg,
+                                               pass->droutine->routine_hash);
+  cfg_opcode_t *cop;
+  scarray_iterator_t *i;
+
+  fprintf(opcode_dump_file, "Starting inner dataflow link pass at %d\n", pass->start_index);
+
+  i = scarray_iterator_start_at(&pass->droutine->opcodes, pass->start_index);
+  while (!end_pass && (dop = (dataflow_opcode_t *) scarray_iterator_next(i)) != NULL) {
+    cop = (cfg_opcode_t *) routine_cfg_get_opcode(croutine, dop->id.op_index);
+
+    switch (cop->opcode) {
+      case ZEND_ADD:
+      case ZEND_SUB:
+      case ZEND_MUL:
+      case ZEND_DIV:
+      case ZEND_MOD:
+      case ZEND_POW:
+      case ZEND_SL:
+      case ZEND_SR:
+      case ZEND_BW_OR:
+      case ZEND_BW_AND:
+      case ZEND_BW_XOR:
+      case ZEND_BW_NOT:
+        link_operand(dop, 1, 0);
+        link_operand(dop, 2, 0);
+        break;
+      case ZEND_JMP:
+        prepare_dataflow_link_pass(pass->droutine, dop->op1.value.jmp_target,
+                                   &pass->live_variables);
+        end_pass = true;
+        break;
+      case ZEND_JMPZ:
+      case ZEND_JMPNZ:
+      case ZEND_JMPZNZ:
+      case ZEND_JMPZ_EX:
+      case ZEND_JMPNZ_EX:
+        prepare_dataflow_link_pass(pass->droutine, dop->op2.value.jmp_target,
+                                   &pass->live_variables);
+        break;
+      case ZEND_BRK:
+      case ZEND_CONT:
+      case ZEND_GOTO:
+        end_pass = true;
+        break;
+    }
+    if (end_pass)
+      break;
+  }
+  scarray_iterator_end(i);
+  pass->complete = true;
 }
 
 int analyze_dataflow(zend_file_handle *file)
@@ -1190,12 +1393,16 @@ int analyze_dataflow(zend_file_handle *file)
   int retval;
   dataflow_file_t top_file;
   dataflow_file_t *next_file;
+  dataflow_routine_t *droutine;
+  scarray_iterator_t *i;
 
   SPOT("static_dataflow() for file %s\n", file->filename);
 
   dg = malloc(sizeof(dataflow_graph_t));
-  dg->routines.hash_bits = 9;
-  sctable_init(&dg->routines);
+  dg->routine_table.hash_bits = 9;
+  sctable_init(&dg->routine_table);
+  scarray_init(&dg->routine_list);
+  scarray_init(&dataflow_link_worklist);
 
   retval = analyze_file_dataflow(file, &top_file);
 
@@ -1222,7 +1429,29 @@ int analyze_dataflow(zend_file_handle *file)
     retval = analyze_file_dataflow(&file, next_file);
   }
 
-  link_operand_dataflow(&top_file);
+  i = scarray_iterator_start(&dg->routine_list);
+  while ((droutine = (dataflow_routine_t *) scarray_iterator_next(i)) != NULL)
+    prepare_dataflow_link_pass(droutine, 0, NULL);
+  scarray_iterator_end(i);
+
+  dataflow_linking_complete = false;
+  while (!dataflow_linking_complete) {
+    fprintf(opcode_dump_file, "Starting outer dataflow link pass\n");
+    dataflow_linking_complete = true;
+    while (true) {
+      dataflow_link_pass_t *pass;
+      i = scarray_iterator_start(&dataflow_link_worklist);
+      while ((pass = (dataflow_link_pass_t *) scarray_iterator_next(i)) != NULL) {
+        if (!pass->complete)
+          break;
+      }
+      scarray_iterator_end(i);
+      if (pass == NULL)
+        break;
+      else
+        link_operand_dataflow(pass);
+    }
+  }
 
   if (top_file.zops != NULL) {
     destroy_op_array(top_file.zops TSRMLS_CC);
@@ -1249,36 +1478,41 @@ void destroy_dataflow_analysis()
     fclose(opcode_dump_file);
 
   if (dg != NULL) {
-    sctable_destroy(&dg->routines);
+    sctable_destroy(&dg->routine_table);
+    scarray_destroy(&dg->routine_list);
     free(dg);
   }
 }
 
-void add_dataflow_routine(uint routine_hash)
+void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops)
 {
   dataflow_routine_t *routine = malloc(sizeof(dataflow_routine_t));
+  routine->app = app;
   routine->routine_hash = routine_hash;
+  //routine->zops = zops;
   scarray_init(&routine->opcodes);
-  sctable_add(&dg->routines, routine_hash, routine);
+  sctable_add(&dg->routine_table, routine_hash, routine);
+
+  scarray_append(&dg->routine_list, routine);
 
   assembling_routine = routine;
 }
 
 static void initilize_dataflow_operand(dataflow_operand_t *operand, zend_op_array *zops,
-                                       znode_op *zop, zend_uchar type)
+                                       znode_op *znode, zend_uchar type)
 {
   switch (type) {
     case IS_CONST:
       operand->value.type = DATAFLOW_VALUE_TYPE_CONST;
-      operand->value.constant = zop->zv;
+      operand->value.constant = znode->zv;
       break;
     case IS_VAR:
     case IS_TMP_VAR:
       operand->value.type = DATAFLOW_VALUE_TYPE_TEMP;
-      operand->value.temp_id = (uint) (EX_VAR_TO_NUM(zop->var) - zops->last_var);
+      operand->value.temp_id = (uint) (EX_VAR_TO_NUM(znode->var) - zops->last_var);
       break;
     case IS_CV:
-      operand->value.var_name = zops->vars[EX_VAR_TO_NUM(zop->var)]->val;
+      operand->value.var_name = zops->vars[EX_VAR_TO_NUM(znode->var)]->val;
       if (strcmp("this", operand->value.var_name) == 0) // maybe...?
         operand->value.type = DATAFLOW_VALUE_TYPE_THIS;
       else
@@ -1299,7 +1533,7 @@ static void initialize_opcode_index(uint routine_hash, uint index, dataflow_rout
   if (assembling_routine != NULL && assembling_routine->routine_hash == routine_hash)
     routine = assembling_routine;
   else
-    routine = sctable_lookup(&dg->routines, routine_hash);
+    routine = sctable_lookup(&dg->routine_table, routine_hash);
 
   while (index >= routine->opcodes.size) {
     opcode = malloc(sizeof(dataflow_opcode_t));
@@ -1335,9 +1569,24 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
 
   initialize_opcode_index(routine_hash, index, &routine, &opcode);
 
-  initilize_dataflow_operand(&opcode->op1, zops, &zop->op1, zop->op1_type);
-  initilize_dataflow_operand(&opcode->op2, zops, &zop->op2, zop->op2_type);
-  initilize_dataflow_operand(&opcode->result, zops, &zop->result, zop->result_type);
+  switch (zop->opcode) {
+    case ZEND_JMP:
+      opcode->op1.value.type = DATAFLOW_VALUE_TYPE_JMP;
+      opcode->op1.value.jmp_target = (uint) (zop->op1.jmp_addr - zops->opcodes);
+      break;
+    case ZEND_JMPZ:
+    case ZEND_JMPNZ:
+    case ZEND_JMPZNZ:
+    case ZEND_JMPZ_EX:
+    case ZEND_JMPNZ_EX:
+      opcode->op2.value.type = DATAFLOW_VALUE_TYPE_JMP;
+      opcode->op2.value.jmp_target = (uint) (zop->op2.jmp_addr - zops->opcodes);
+      break;
+    default:
+      initilize_dataflow_operand(&opcode->op1, zops, &zop->op1, zop->op1_type);
+      initilize_dataflow_operand(&opcode->op2, zops, &zop->op2, zop->op2_type);
+      initilize_dataflow_operand(&opcode->result, zops, &zop->result, zop->result_type);
+  }
 
   switch (zop->opcode) {
     case ZEND_ECHO:
