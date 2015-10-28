@@ -1214,18 +1214,39 @@ static inline dataflow_operand_t *get_dataflow_operand(dataflow_opcode_t *dop,
   }
 }
 
-static dataflow_live_variable_t *lookup_live_named_variable(scarray_t *live_variables,
+static dataflow_live_variable_t *lookup_live_named_variable(scarray_t *live_variables, uint *index,
                                                             const char *var_name)
 {
+  uint i;
+  dataflow_live_variable_t *var;
+
+  for (i = *index; i < live_variables->size; i++) {
+    var = (dataflow_live_variable_t *) live_variables->data[i];
+    if (!var->is_temp && strcmp(var->var_name, var_name) == 0) {
+      *index = i + 1;
+      return var;
+    }
+  }
   return NULL;
 }
 
-static dataflow_live_variable_t *lookup_live_temp_variable(scarray_t *live_variables, uint temp_id)
+static dataflow_live_variable_t *lookup_live_temp_variable(scarray_t *live_variables, uint *index,
+                                                           uint temp_id)
 {
+  uint i;
+  dataflow_live_variable_t *var;
+
+  for (i = *index; i < live_variables->size; i++) {
+    var = (dataflow_live_variable_t *) live_variables->data[i];
+    if (var->is_temp && var->temp_id == temp_id) {
+      *index = i + 1;
+      return var;
+    }
+  }
   return NULL;
 }
 
-static dataflow_live_variable_t *lookup_live_variable(scarray_t *live_variables,
+static dataflow_live_variable_t *lookup_live_variable(scarray_t *live_variables, uint *index,
                                                       dataflow_operand_t *doperand)
 {
   dataflow_live_variable_t *var;
@@ -1238,17 +1259,87 @@ static dataflow_live_variable_t *lookup_live_variable(scarray_t *live_variables,
     case DATAFLOW_VALUE_TYPE_FCALL:
       return NULL; // nothing to link
     case DATAFLOW_VALUE_TYPE_VAR:
-      var = lookup_live_named_variable(live_variables, doperand->value.var_name);
+      var = lookup_live_named_variable(live_variables, index, doperand->value.var_name);
       break;
     case DATAFLOW_VALUE_TYPE_THIS:
-      var = lookup_live_named_variable(live_variables, "this");
+      var = lookup_live_named_variable(live_variables, index, "this");
       break;
     case DATAFLOW_VALUE_TYPE_TEMP:
-      var = lookup_live_temp_variable(live_variables, doperand->value.temp_id);
+      var = lookup_live_temp_variable(live_variables, index, doperand->value.temp_id);
       break;
   }
 
   return var;
+}
+
+static inline bool is_same_opcode_id(cfg_opcode_id_t *first, cfg_opcode_id_t *second)
+{
+  return first->routine_hash == second->routine_hash && first->op_index == second->op_index;
+}
+
+static inline bool is_same_operand_id(dataflow_operand_id_t *first, dataflow_operand_id_t *second)
+{
+  return is_same_opcode_id(&first->opcode_id, &second->opcode_id) &&
+         first->operand_index == second->operand_index;
+}
+
+static void get_var_name(dataflow_operand_t *doperand, char *var_name, uint max)
+{
+  switch (doperand->value.type) {
+    case DATAFLOW_VALUE_TYPE_VAR:
+      strncpy(var_name, doperand->value.var_name, max);
+      break;
+    case DATAFLOW_VALUE_TYPE_THIS:
+      strncpy(var_name, DATAFLOW_VAR_NAME_THIS, max);
+      break;
+    case DATAFLOW_VALUE_TYPE_TEMP:
+      snprintf(var_name, max, "#%d", doperand->value.temp_id);
+      break;
+    default: /* nothing */;
+  }
+}
+
+static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop,
+                               dataflow_operand_t *dst, dataflow_operand_index_t dst_index)
+{
+  char var_name[256];
+  uint lookup_index = 0;
+  dataflow_live_variable_t *dst_var;
+  bool existing_dst_var = false, found_any = false;
+
+  get_var_name(dst, var_name, 256);
+  while ((dst_var = lookup_live_variable(live_variables, &lookup_index, dst)) != NULL) {
+    if (is_same_opcode_id(&dst_var->src.opcode_id, &dop->id)) {
+      existing_dst_var = true;
+      break;
+    }
+    scarray_remove(live_variables, lookup_index - 1 /* kind of hackish */);
+    found_any = true;
+
+    fprintf(opcode_dump_file, "Clobber variable '%s' at 0x%x:%d.%d with 0x%x:%d.%d\n",
+            var_name, dst_var->src.opcode_id.routine_hash,
+            dst_var->src.opcode_id.op_index, dst_var->src.operand_index,
+            dop->id.routine_hash, dop->id.op_index, dst_index);
+  }
+
+  if (!existing_dst_var) {
+    if (!found_any)
+      fprintf(opcode_dump_file, "Nothing clobbered for var '%s'\n", var_name);
+
+    dst_var = malloc(sizeof(dataflow_live_variable_t));
+    dst_var->is_temp = (dst->value.type == DATAFLOW_VALUE_TYPE_TEMP);
+    if (dst_var->is_temp) {
+      dst_var->temp_id = dst->value.temp_id;
+    } else {
+      if (dst->value.type == DATAFLOW_VALUE_TYPE_THIS)
+        dst_var->var_name = DATAFLOW_VAR_NAME_THIS;
+      else
+        dst_var->var_name = dst->value.var_name;
+    }
+    dst_var->src.opcode_id = dop->id;
+    dst_var->src.operand_index = dst_index;
+    scarray_append(live_variables, dst_var);
+  }
 }
 
 static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
@@ -1265,17 +1356,22 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
     dst->predecessor = p;
     p->operand_id.opcode_id = dop->id;
     p->operand_id.operand_index = src_index;
-  } else if (dst_index == DATAFLOW_OPERAND_SINK) {
-    fprintf(opcode_dump_file, "Link operand 0x%x:%d.%d into sink of type %d\n",
-            dop->id.routine_hash, dop->id.op_index, dst_index, dop->sink.type);
 
-    dop->sink.operand_index = src_index;
+    assign_destination(live_variables, dop, dst, dst_index);
+  } else if (dst_index == DATAFLOW_OPERAND_SINK) {
+    if (dop->sink.operand_index != src_index) {
+      fprintf(opcode_dump_file, "Link operand 0x%x:%d.%d into sink of type %d\n",
+              dop->id.routine_hash, dop->id.op_index, src_index, dop->sink.type);
+      dop->sink.operand_index = src_index;
+    }
   } else {
-    dataflow_predecessor_t *p = malloc(sizeof(dataflow_predecessor_t));
+    uint lookup_index = 0;
+    char var_name[256];
+    bool existing_predecessor, found_any;
     dataflow_operand_t *src = get_dataflow_operand(dop, src_index);
     dataflow_operand_t *dst = get_dataflow_operand(dop, dst_index);
-    dataflow_live_variable_t *src_var = lookup_live_variable(live_variables, src);
-    dataflow_live_variable_t *dst_var = lookup_live_variable(live_variables, dst);
+    dataflow_live_variable_t *src_var;
+    dataflow_predecessor_t *p;
 
     switch (src->value.type) {
       case DATAFLOW_VALUE_TYPE_NONE:
@@ -1287,52 +1383,55 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
                 dop->id.op_index, src_index, dst_index);
         break;
       case DATAFLOW_VALUE_TYPE_VAR:
-        if (src_var == NULL) {
-          fprintf(opcode_dump_file, "Can't find var '%s'\n", src->value.var_name);
-        } else {
-          fprintf(opcode_dump_file, "Link variable '%s' into 0x%x:%d.(%d->%d)\n", src->value.var_name,
-                  dop->id.routine_hash, dop->id.op_index, src_index, dst_index);
-        }
-        break;
       case DATAFLOW_VALUE_TYPE_THIS:
-        if (src_var == NULL) {
-          fprintf(opcode_dump_file, "Can't find var 'this'\n");
-        } else {
-          fprintf(opcode_dump_file, "Link $this into 0x%x:%d.(%d->%d)\n", dop->id.routine_hash,
-                  dop->id.op_index, src_index, dst_index);
-        }
-        break;
       case DATAFLOW_VALUE_TYPE_TEMP:
-        if (src_var == NULL) {
-          fprintf(opcode_dump_file, "Can't find temp var #%d\n", src->value.temp_id);
-        } else {
-          fprintf(opcode_dump_file, "Link temp #%d into 0x%x:%d.(%d->%d)\n", src->value.temp_id,
-                  dop->id.routine_hash, dop->id.op_index, src_index, dst_index);
+        found_any = false;
+        get_var_name(src, var_name, 256);
+        while ((src_var = lookup_live_variable(live_variables, &lookup_index, src)) != NULL) {
+          found_any = true;
+          existing_predecessor = false;
+          p = dst->predecessor;
+          while (p != NULL) {
+            if (is_same_operand_id(&p->operand_id, &src_var->src)) {
+              existing_predecessor = true;
+              break;
+            }
+            p = p->next;
+          }
+          if (!existing_predecessor) {
+            p = malloc(sizeof(dataflow_predecessor_t));
+            p->next = dst->predecessor;
+            dst->predecessor = p;
+            p->operand_id = src_var->src;
+
+            fprintf(opcode_dump_file, "Link variable '%s': 0x%x:%d.%d -> 0x%x:%d.%d\n",
+                    var_name, src_var->src.opcode_id.routine_hash,
+                    src_var->src.opcode_id.op_index, src_var->src.operand_index,
+                    dop->id.routine_hash, dop->id.op_index, dst_index);
+          }
         }
+        if (!found_any)
+          fprintf(opcode_dump_file, "Can't find var '%s'\n", var_name);
         break;
     }
 
-    if (src_var != NULL) {
-      p->next = dst->predecessor;
-      dst->predecessor = p;
-      p->operand_id = src_var->src;
-    }
+    assign_destination(live_variables, dop, dst, dst_index);
+  }
+}
 
-    if (dst_var == NULL) {
-      dst_var = malloc(sizeof(dataflow_live_variable_t));
-      dst_var->is_temp = (dst->value.type == DATAFLOW_VALUE_TYPE_TEMP);
-      if (dst_var->is_temp) {
-        dst_var->temp_id = dst->value.temp_id;
-      } else {
-        if (dst->value.type == DATAFLOW_VALUE_TYPE_THIS)
-          dst_var->var_name = DATAFLOW_VAR_NAME_THIS;
-        else
-          dst_var->var_name = dst->value.var_name;
-      }
-      scarray_append(live_variables, dst_var);
-    }
-    dst_var->src.opcode_id = dop->id;
-    dst_var->src.operand_index = dst_index;
+static void remove_live_variable(scarray_t *live_variables, dataflow_operand_t *doperand)
+{
+  char var_name[256];
+  uint lookup_index = 0;
+  dataflow_live_variable_t *dst_var;
+
+  get_var_name(doperand, var_name, 256);
+  while ((dst_var = lookup_live_variable(live_variables, &lookup_index, doperand)) != NULL) {
+    scarray_remove(live_variables, lookup_index - 1 /* kind of hackish */);
+
+    fprintf(opcode_dump_file, "Remove variable '%s' at 0x%x:%d.%d\n",
+            var_name, dst_var->src.opcode_id.routine_hash,
+            dst_var->src.opcode_id.op_index, dst_var->src.operand_index);
   }
 }
 
@@ -1414,6 +1513,8 @@ static void prepare_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
   }
   if (pass == NULL) {
     pass = malloc(sizeof(dataflow_link_pass_t));
+    memset(pass, 0, sizeof(dataflow_link_pass_t));
+    scarray_init(&pass->live_variables);
     pass->droutine = droutine;
     pass->start_index = start_index;
     copy_dataflow_variables(&pass->live_variables, live_variables);
@@ -1457,8 +1558,8 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_POST_INC_OBJ:
       case ZEND_POST_DEC_OBJ:
         link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_1);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_1); /* FT */
-      case ZEND_ADD:
+        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_1);
+      case ZEND_ADD: /* FT */
       case ZEND_SUB:
       case ZEND_MUL:
       case ZEND_DIV:
@@ -1479,8 +1580,17 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_IS_NOT_EQUAL:
       case ZEND_IS_SMALLER:
       case ZEND_IS_SMALLER_OR_EQUAL:
-        link_operand(&pass->live_variables, dop, 2, 0); /* FT */
-      case ZEND_TYPE_CHECK: /* check metadata consistency for op1 */
+      case ZEND_CASE:
+      case ZEND_FETCH_DIM_R: /* {1.2} => {result} */
+      case ZEND_FETCH_DIM_W:
+      case ZEND_FETCH_DIM_RW:
+      case ZEND_FETCH_DIM_IS:
+      case ZEND_FETCH_OBJ_R:
+      case ZEND_FETCH_OBJ_W:
+      case ZEND_FETCH_OBJ_RW:
+      case ZEND_FETCH_OBJ_IS:
+        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT);
+      case ZEND_TYPE_CHECK: /* FT */
       case ZEND_DEFINED:
         link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT);
         break;
@@ -1490,6 +1600,38 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_POST_DEC:
         link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_1);
         link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT);
+        break;
+      case ZEND_FETCH_UNSET:
+        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT);
+        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT);
+        /* also unsets {1.2} */
+        break;
+      /****************** sources *****************/
+      case ZEND_FETCH_R:  /* fetch a superglobal */
+      case ZEND_FETCH_W:
+      case ZEND_FETCH_RW:
+      case ZEND_FETCH_IS:
+        if (dop->op1.value.type != DATAFLOW_VALUE_TYPE_NONE) {
+          if (dop->source.id.routine_hash != 0)
+            link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_SOURCE, DATAFLOW_OPERAND_RESULT);
+          else
+            link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT);
+        } else {
+          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT);
+          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT);
+        }
+        break;
+      /****************** sinks *****************/
+      case ZEND_PRINT:
+        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT);
+      case ZEND_ECHO:
+        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK);
+        break;
+      case ZEND_FREE:
+        remove_live_variable(&pass->live_variables, &dop->op1);
+        break;
+      /****************** branches *****************/
+      case ZEND_INCLUDE_OR_EVAL: // ???
         break;
       case ZEND_JMP:
         prepare_dataflow_link_pass(pass->droutine, dop->op1.value.jmp_target,
@@ -1508,8 +1650,6 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_CONT:
       case ZEND_GOTO:
         end_pass = true;
-        break;
-      case ZEND_INCLUDE_OR_EVAL: // ???
         break;
     }
     if (end_pass)

@@ -42,6 +42,14 @@ void *scarray_get(scarray_t *a, uint index)
   return a->data[index];
 }
 
+void scarray_remove(scarray_t *a, uint index)
+{
+  a->size--;
+
+  if (index < (a->size - 1))
+    memcpy(&a->data[index], &a->data[index+1], (a->size - index) * sizeof(void *));
+}
+
 scarray_iterator_t *scarray_iterator_start(scarray_t *a)
 {
   scarray_iterator_t *iterator = malloc(sizeof(scarray_iterator_t));

@@ -4,9 +4,12 @@
 #include "cfg.h"
 
 typedef enum _dataflow_operand_index_t {
-  DATAFLOW_OPERAND_RESULT,
+  DATAFLOW_OPERAND_RESULT, /* needs to be first (zero) to make sink.operand_index default to N/A */
+  DATAFLOW_OPERAND_VALUE = DATAFLOW_OPERAND_RESULT,
   DATAFLOW_OPERAND_1,
+  DATAFLOW_OPERAND_MAP = DATAFLOW_OPERAND_1,
   DATAFLOW_OPERAND_2,
+  DATAFLOW_OPERAND_KEY = DATAFLOW_OPERAND_2,
   DATAFLOW_OPERAND_SOURCE,
   DATAFLOW_OPERAND_SINK
 } dataflow_operand_index_t;
