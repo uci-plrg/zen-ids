@@ -49,6 +49,7 @@ typedef enum _dataflow_sink_type_t {
   SINK_TYPE_CLASS_HIERARCHY,  /* add subclass, method, interface, trait */
   SINK_TYPE_INCLUDE,          /* include() or require() */
   SINK_TYPE_GLOBAL,           /* globally defined variables and constants */
+  SINK_TYPE_EXIT_CODE,        /* the process exit code */
 } dataflow_sink_type_t;
 
 typedef struct _dataflow_sink_t {
