@@ -3,6 +3,7 @@
 #include "dataflow.h"
 
 #define DATAFLOW_VAR_NAME_THIS "this"
+#define DATAFLOW_VAR_NAME_MISSING "<missing>"
 
 static FILE *opcode_dump_file = NULL;
 
@@ -1176,11 +1177,18 @@ typedef struct _dataflow_link_pass_t {
   scarray_t live_variables; // dataflow_live_variable_t *
 } dataflow_link_pass_t;
 
+typedef struct _source_propagation_pass_t {
+  bool complete;
+  dataflow_routine_t *droutine;
+  uint start_index;
+} source_propagation_pass_t;
+
 static dataflow_file_t *dataflow_file_list = NULL;
 static dataflow_graph_t *dg = NULL;
 static dataflow_routine_t *assembling_routine = NULL;
 static scarray_t dataflow_link_worklist; // dataflow_link_pass_t *
-static bool dataflow_linking_complete;
+// static scarray_t source_propagation_worklist; // source_propagation_pass_t */
+static bool dataflow_linking_complete, source_propagation_complete;
 
 static int analyze_file_dataflow(zend_file_handle *in, dataflow_file_t *out)
 {
@@ -1332,8 +1340,12 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
     } else {
       if (dst->value.type == DATAFLOW_VALUE_TYPE_THIS)
         dst_var->var_name = DATAFLOW_VAR_NAME_THIS;
-      else
-        dst_var->var_name = dst->value.var_name;
+      else {
+        if (dst->value.var_name == NULL)
+          dst_var->var_name = DATAFLOW_VAR_NAME_MISSING;
+        else
+          dst_var->var_name = dst->value.var_name;
+      }
     }
     dst_var->src.opcode_id = dop->id;
     dst_var->src.operand_index = dst_index;
@@ -1351,10 +1363,10 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
     fprintf(opcode_dump_file, "Link source type %d into 0x%x:%d.%d\n", dop->source.type,
             dop->id.routine_hash, dop->id.op_index, dst_index);
 
-    p->next = dst->predecessor;
-    dst->predecessor = p;
     p->operand_id.opcode_id = dop->id;
     p->operand_id.operand_index = src_index;
+    p->next = dst->predecessor;
+    dst->predecessor = p;
 
     assign_destination(live_variables, dop, dst, dst_index);
   } else if (dst_index == DATAFLOW_OPERAND_SINK) {
@@ -1482,6 +1494,7 @@ static void prepare_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
     scarray_init(live_variables);
   }
 
+  /* if the pass is already prepared, merge in the `live_variables` */
   w = scarray_iterator_start(&dataflow_link_worklist);
   while ((pass = (dataflow_link_pass_t *) scarray_iterator_next(w)) != NULL) {
     if (pass->droutine->routine_hash == droutine->routine_hash && pass->start_index == start_index) {
@@ -1510,6 +1523,8 @@ static void prepare_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
       break;
     }
   }
+
+  /* pass is not prepared yet, so prepare a new one now */
   if (pass == NULL) {
     pass = malloc(sizeof(dataflow_link_pass_t));
     memset(pass, 0, sizeof(dataflow_link_pass_t));
@@ -1520,6 +1535,19 @@ static void prepare_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
     scarray_append(&dataflow_link_worklist, pass);
   }
 }
+
+/*
+void reset_dataflow_link_passes()
+{
+  scarray_iterator_t *w;
+  dataflow_link_pass_t *pass;
+
+  w = scarray_iterator_start(&dataflow_link_worklist);
+  while ((pass = (dataflow_link_pass_t *) scarray_iterator_next(w)) != NULL) {
+    pass->complete = false;
+  }
+}
+*/
 
 static void link_operand_dataflow(dataflow_link_pass_t *pass)
 {
@@ -1781,13 +1809,78 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
   pass->complete = true;
 }
 
+void propagate_one_source(dataflow_operand_t *dst_operand, dataflow_source_t *source)
+{
+  dataflow_influence_t *dst_influence = dst_operand->influence;
+
+  while (dst_influence != NULL) {
+    if (is_same_opcode_id(&dst_influence->source.id, &source->id))
+      return;
+    dst_influence = dst_influence->next;
+  }
+
+  dst_influence = malloc(sizeof(dataflow_influence_t));
+  dst_influence->source = *source;
+  dst_influence->next = dst_operand->influence;
+  dst_operand->influence = dst_influence;
+
+  source_propagation_complete = false;
+}
+
+void propagate_operand_source_dataflow(dataflow_opcode_t *dst_op, dataflow_operand_t *dst_operand)
+{
+  dataflow_opcode_t *src_op;
+  dataflow_routine_t *src_routine;
+  dataflow_operand_t *src_operand;
+  dataflow_influence_t *src_influence;
+  dataflow_predecessor_t *p = dst_operand->predecessor;
+
+  while (p != NULL) {
+    if (p->operand_id.operand_index == DATAFLOW_OPERAND_SOURCE) {
+      src_op = dst_op; /* invariant (for now--but if this ever changes, do a lookup here) */
+      propagate_one_source(dst_operand, &src_op->source);
+    } else {
+      src_routine = sctable_lookup(&dg->routine_table, p->operand_id.opcode_id.routine_hash);
+      src_op = (dataflow_opcode_t *) &src_routine->opcodes.data[p->operand_id.opcode_id.op_index];
+      src_operand = get_dataflow_operand(src_op, p->operand_id.operand_index);
+
+      src_influence = src_operand->influence;
+      while (src_influence != NULL) {
+        propagate_one_source(dst_operand, &src_influence->source);
+        src_influence = src_influence->next;
+      }
+    }
+    p = p->next;
+  }
+}
+
+void propagate_source_dataflow(dataflow_link_pass_t *pass)
+{
+  // bool end_pass = false; // needed?
+  dataflow_opcode_t *dop;
+  scarray_iterator_t *i;
+
+  fprintf(opcode_dump_file, "Starting inner source propagation pass at %d\n", pass->start_index);
+
+  i = scarray_iterator_start_at(&pass->droutine->opcodes, pass->start_index);
+  while (/* !end_pass && */ (dop = (dataflow_opcode_t *) scarray_iterator_next(i)) != NULL) {
+    propagate_operand_source_dataflow(dop, &dop->op1);
+    propagate_operand_source_dataflow(dop, &dop->op2);
+    propagate_operand_source_dataflow(dop, &dop->result);
+  }
+  scarray_iterator_end(i);
+
+  // pass->complete = true;
+}
+
 int analyze_dataflow(zend_file_handle *file)
 {
   int retval;
+  scarray_iterator_t *i;
+  dataflow_link_pass_t *pass;
   dataflow_file_t top_file;
   dataflow_file_t *next_file;
   dataflow_routine_t *droutine;
-  scarray_iterator_t *i;
 
   SPOT("static_dataflow() for file %s\n", file->filename);
 
@@ -1832,7 +1925,6 @@ int analyze_dataflow(zend_file_handle *file)
     fprintf(opcode_dump_file, "Starting outer dataflow link pass\n");
     dataflow_linking_complete = true;
     while (true) {
-      dataflow_link_pass_t *pass;
       i = scarray_iterator_start(&dataflow_link_worklist);
       while ((pass = (dataflow_link_pass_t *) scarray_iterator_next(i)) != NULL) {
         if (!pass->complete)
@@ -1844,6 +1936,23 @@ int analyze_dataflow(zend_file_handle *file)
       else
         link_operand_dataflow(pass);
     }
+  }
+
+  /*
+  i = scarray_iterator_start(&dg->routine_list);
+  while ((droutine = (dataflow_routine_t *) scarray_iterator_next(i)) != NULL)
+    prepare_source_propagation_pass(droutine, 0, NULL);
+  scarray_iterator_end(i);
+  */
+
+  source_propagation_complete = false;
+  //reset_dataflow_link_passes(); // ignoring completeness of individual passes for now
+  while (!source_propagation_complete) {
+    fprintf(opcode_dump_file, "Starting outer source propagation pass\n");
+    source_propagation_complete = true;
+    i = scarray_iterator_start(&dataflow_link_worklist);
+    while ((pass = (dataflow_link_pass_t *) scarray_iterator_next(i)) != NULL)
+      propagate_source_dataflow(pass);
   }
 
   if (top_file.zops != NULL) {
