@@ -1157,7 +1157,7 @@ typedef struct _dataflow_graph_t {
 typedef struct _dataflow_routine_t {
   application_t *app;
   uint routine_hash;
-  scarray_t opcodes;
+  scarray_t opcodes; /* dataflow_opcode_t * */
   // zend_op_array *zops; // &droutine->zops->opcodes[dop->id.op_index],
 } dataflow_routine_t;
 
@@ -1353,36 +1353,55 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
   }
 }
 
+static bool add_predecessor(dataflow_predecessor_t **predecessor, cfg_opcode_id_t *op_id,
+                            dataflow_operand_index_t op_index)
+{
+  bool existing_predecessor = false;
+  dataflow_predecessor_t *p = *predecessor;
+
+  while (p != NULL) {
+    if (is_same_opcode_id(&p->operand_id.opcode_id, op_id) &&
+        p->operand_id.operand_index == op_index) {
+      existing_predecessor = true;
+      break;
+    }
+    p = p->next;
+  }
+  if (!existing_predecessor) {
+    dataflow_predecessor_t *p = malloc(sizeof(dataflow_predecessor_t));
+    p->operand_id.opcode_id = *op_id;
+    p->operand_id.operand_index = op_index;
+    p->next = *predecessor;
+    *predecessor = p;
+    return true;
+  }
+  return false;
+}
+
 static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
                          dataflow_operand_index_t src_index, dataflow_operand_index_t dst_index)
 {
   if (src_index == DATAFLOW_OPERAND_SOURCE) {
-    dataflow_predecessor_t *p = malloc(sizeof(dataflow_predecessor_t));
     dataflow_operand_t *dst = get_dataflow_operand(dop, dst_index);
 
-    fprintf(opcode_dump_file, "Link source type %d into 0x%x:%d.%d\n", dop->source.type,
-            dop->id.routine_hash, dop->id.op_index, dst_index);
-
-    p->operand_id.opcode_id = dop->id;
-    p->operand_id.operand_index = src_index;
-    p->next = dst->predecessor;
-    dst->predecessor = p;
+    if (add_predecessor(&dst->predecessor, &dop->id, src_index)) {
+      fprintf(opcode_dump_file, "Link source type %d into 0x%x:%d.%d\n", dop->source.type,
+              dop->id.routine_hash, dop->id.op_index, dst_index);
+    }
 
     assign_destination(live_variables, dop, dst, dst_index);
   } else if (dst_index == DATAFLOW_OPERAND_SINK) {
-    if (dop->sink.operand_index != src_index) {
+    if (add_predecessor(&dop->sink.predecessor, &dop->id, src_index)) {
       fprintf(opcode_dump_file, "Link operand 0x%x:%d.%d into sink of type %d\n",
               dop->id.routine_hash, dop->id.op_index, src_index, dop->sink.type);
-      dop->sink.operand_index = src_index;
     }
   } else {
     uint lookup_index = 0;
     char var_name[256];
-    bool existing_predecessor, found_any;
+    bool found_any;
     dataflow_operand_t *src = get_dataflow_operand(dop, src_index);
     dataflow_operand_t *dst = get_dataflow_operand(dop, dst_index);
     dataflow_live_variable_t *src_var;
-    dataflow_predecessor_t *p;
 
     switch (src->value.type) {
       case DATAFLOW_VALUE_TYPE_NONE:
@@ -1400,21 +1419,8 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
         get_var_name(src, var_name, 256);
         while ((src_var = lookup_live_variable(live_variables, &lookup_index, src)) != NULL) {
           found_any = true;
-          existing_predecessor = false;
-          p = dst->predecessor;
-          while (p != NULL) {
-            if (is_same_operand_id(&p->operand_id, &src_var->src)) {
-              existing_predecessor = true;
-              break;
-            }
-            p = p->next;
-          }
-          if (!existing_predecessor) {
-            p = malloc(sizeof(dataflow_predecessor_t));
-            p->next = dst->predecessor;
-            dst->predecessor = p;
-            p->operand_id = src_var->src;
-
+          if (add_predecessor(&dst->predecessor, &src_var->src.opcode_id,
+                              src_var->src.operand_index)) {
             fprintf(opcode_dump_file, "Link variable '%s': 0x%x:%d.%d -> 0x%x:%d.%d\n",
                     var_name, src_var->src.opcode_id.routine_hash,
                     src_var->src.opcode_id.op_index, src_var->src.operand_index,
@@ -1809,49 +1815,58 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
   pass->complete = true;
 }
 
-void propagate_one_source(dataflow_operand_t *dst_operand, dataflow_source_t *source)
+bool propagate_one_source(dataflow_influence_t **influence, dataflow_source_t *source)
 {
-  dataflow_influence_t *dst_influence = dst_operand->influence;
+  dataflow_influence_t *dst_influence = *influence;
 
   while (dst_influence != NULL) {
     if (is_same_opcode_id(&dst_influence->source.id, &source->id))
-      return;
+      return false;
     dst_influence = dst_influence->next;
   }
 
   dst_influence = malloc(sizeof(dataflow_influence_t));
   dst_influence->source = *source;
-  dst_influence->next = dst_operand->influence;
-  dst_operand->influence = dst_influence;
+  dst_influence->next = *influence;
+  *influence = dst_influence;
 
   source_propagation_complete = false;
+  return true;
 }
 
-void propagate_operand_source_dataflow(dataflow_opcode_t *dst_op, dataflow_operand_t *dst_operand)
+bool propagate_operand_source_dataflow(dataflow_opcode_t *dst_op,
+                                       dataflow_predecessor_t **dst_predecessor,
+                                       dataflow_influence_t **dst_influence)
 {
+  bool propagated = false;
   dataflow_opcode_t *src_op;
   dataflow_routine_t *src_routine;
   dataflow_operand_t *src_operand;
   dataflow_influence_t *src_influence;
-  dataflow_predecessor_t *p = dst_operand->predecessor;
+  dataflow_predecessor_t *p = *dst_predecessor;
 
   while (p != NULL) {
     if (p->operand_id.operand_index == DATAFLOW_OPERAND_SOURCE) {
       src_op = dst_op; /* invariant (for now--but if this ever changes, do a lookup here) */
-      propagate_one_source(dst_operand, &src_op->source);
+      propagated |= propagate_one_source(dst_influence, &src_op->source);
     } else {
       src_routine = sctable_lookup(&dg->routine_table, p->operand_id.opcode_id.routine_hash);
-      src_op = (dataflow_opcode_t *) &src_routine->opcodes.data[p->operand_id.opcode_id.op_index];
+      src_op = (dataflow_opcode_t *) src_routine->opcodes.data[p->operand_id.opcode_id.op_index];
       src_operand = get_dataflow_operand(src_op, p->operand_id.operand_index);
 
       src_influence = src_operand->influence;
       while (src_influence != NULL) {
-        propagate_one_source(dst_operand, &src_influence->source);
+        if (propagate_one_source(dst_influence, &src_influence->source)) {
+          propagated = true;
+          fprintf(opcode_dump_file, "Propagated source at #%d from #%d to #%d\n",
+                  src_influence->source.id.op_index, src_op->id.op_index, dst_op->id.op_index);
+        }
         src_influence = src_influence->next;
       }
     }
     p = p->next;
   }
+  return propagated;
 }
 
 void propagate_source_dataflow(dataflow_link_pass_t *pass)
@@ -1864,9 +1879,13 @@ void propagate_source_dataflow(dataflow_link_pass_t *pass)
 
   i = scarray_iterator_start_at(&pass->droutine->opcodes, pass->start_index);
   while (/* !end_pass && */ (dop = (dataflow_opcode_t *) scarray_iterator_next(i)) != NULL) {
-    propagate_operand_source_dataflow(dop, &dop->op1);
-    propagate_operand_source_dataflow(dop, &dop->op2);
-    propagate_operand_source_dataflow(dop, &dop->result);
+    propagate_operand_source_dataflow(dop, &dop->op1.predecessor, &dop->op1.influence);
+    propagate_operand_source_dataflow(dop, &dop->op2.predecessor, &dop->op2.influence);
+    propagate_operand_source_dataflow(dop, &dop->result.predecessor, &dop->result.influence);
+    if (propagate_operand_source_dataflow(dop, &dop->sink.predecessor, &dop->sink.influence)) {
+      fprintf(opcode_dump_file, "Propagated at least one source to sink at op #%d\n",
+              dop->id.op_index);
+    }
   }
   scarray_iterator_end(i);
 
@@ -2091,6 +2110,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
   }
 
   switch (zop->opcode) {
+    // where do these happen? SOURCE_TYPE_FILE|SOURCE_TYPE_SQL|SOURCE_TYPE_SYSTEM (via fcall)
     case ZEND_ECHO:
     case ZEND_PRINT:
       initialize_sink(opcode, SINK_TYPE_OUTPUT);

@@ -14,6 +14,16 @@ typedef enum _dataflow_operand_index_t {
   DATAFLOW_OPERAND_SINK
 } dataflow_operand_index_t;
 
+typedef struct _dataflow_operand_id_t {
+  cfg_opcode_id_t opcode_id;
+  dataflow_operand_index_t operand_index;
+} dataflow_operand_id_t;
+
+typedef struct _dataflow_predecessor_t {
+  dataflow_operand_id_t operand_id;
+  struct _dataflow_predecessor_t *next;
+} dataflow_predecessor_t;
+
 typedef struct _dataflow_call_by_name_t {
   const char *name;
 } dataflow_call_by_name_t;
@@ -28,6 +38,34 @@ typedef struct _dataflow_call_t {
     dataflow_call_by_name_t call_by_name;
   };
 } dataflow_call_t;
+
+typedef struct _dataflow_source_include_t {
+  uint routine_hash;
+} dataflow_source_include_t;
+
+typedef enum _dataflow_source_type_t {
+  SOURCE_TYPE_NONE,      /* no source here */
+  SOURCE_TYPE_INCLUDE,   /* include or require */ // kinda wonky having this in sources
+  SOURCE_TYPE_HTTP,      /* HTTP parameters and cookies */
+  SOURCE_TYPE_SESSION,   /* session variables */
+  SOURCE_TYPE_SQL,       /* database query results */
+  SOURCE_TYPE_FILE,      /* file access such as fread() */
+  SOURCE_TYPE_SYSTEM,    /* server and environment configuration */
+  SOURCE_TYPE_ARG,       /* function argument */
+} dataflow_source_type_t;
+
+typedef struct _dataflow_source_t {
+  cfg_opcode_id_t id;
+  dataflow_source_type_t type;
+  union {
+    dataflow_source_include_t include;
+  };
+} dataflow_source_t;
+
+typedef struct _dataflow_influence_t {
+  dataflow_source_t source;
+  struct _dataflow_influence_t *next;
+} dataflow_influence_t;
 
 typedef enum _dataflow_sink_type_t {
   SINK_TYPE_NONE,             /* no sink here */
@@ -54,35 +92,13 @@ typedef enum _dataflow_sink_type_t {
 
 typedef struct _dataflow_sink_t {
   cfg_opcode_id_t id;
-  dataflow_operand_index_t operand_index;
+  dataflow_predecessor_t *predecessor;
+  dataflow_influence_t *influence;
   dataflow_sink_type_t type;
   union {
     dataflow_call_t call;
   };
 } dataflow_sink_t;
-
-typedef struct _dataflow_source_include_t {
-  uint routine_hash;
-} dataflow_source_include_t;
-
-typedef enum _dataflow_source_type_t {
-  SOURCE_TYPE_INCLUDE,   /* include or require */ // kinda wonky having this in sources
-  SOURCE_TYPE_HTTP,      /* HTTP parameters and cookies */
-  SOURCE_TYPE_SESSION,   /* session variables */
-  SOURCE_TYPE_SQL,       /* database query results */
-  SOURCE_TYPE_FILE,      /* file access such as fread() */
-  SOURCE_TYPE_SYSTEM,    /* server and environment configuration */
-  SOURCE_TYPE_ARG,       /* function argument */
-  SOURCE_TYPE_NONE,      /* no source here */
-} dataflow_source_type_t;
-
-typedef struct _dataflow_source_t {
-  cfg_opcode_id_t id;
-  dataflow_source_type_t type;
-  union {
-    dataflow_source_include_t include;
-  };
-} dataflow_source_t;
 
 typedef union _sink_identifier_t {
   const char *call_target;
@@ -117,21 +133,6 @@ typedef enum _dataflow_source_scope_t {
   DATAFLOW_SOURCE_SCOPE_GLOBAL,
 } dataflow_source_scope_t;
 */
-
-typedef struct _dataflow_influence_t {
-  dataflow_source_t source;
-  struct _dataflow_influence_t *next;
-} dataflow_influence_t;
-
-typedef struct _dataflow_operand_id_t {
-  cfg_opcode_id_t opcode_id;
-  dataflow_operand_index_t operand_index;
-} dataflow_operand_id_t;
-
-typedef struct _dataflow_predecessor_t {
-  dataflow_operand_id_t operand_id;
-  struct _dataflow_predecessor_t *next;
-} dataflow_predecessor_t;
 
 /*
 typedef enum _dataflow_const_type_t {
