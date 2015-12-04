@@ -18,17 +18,19 @@ function usage() {
 
 php_bin="php"
 
-while getopts "ls:do:wk:D" option
+while getopts "ls:do:wk:D:q:" option
 do
   case $option in
     l) php_options="$php_options -l";;
-    D) php_options="$php_options -D";;
+    D) php_options="$php_options -D";
+       php_bin="php-cgi";
+       export OPMON_OPCODE_DUMP="$OPTARG";; # cannot set by variable in the invocation command
     s) static_analysis="$OPTARG";
        export OPMON_STATIC_ANALYSIS="$OPTARG";;
     d) debug=true;;
-    o) export OPMON_OPCODE_DUMP="$OPTARG";;
     w) php_bin="php-cgi";;
     k) php_options="$php_options -k $OPTARG";;
+    q) export QUERY_STRING="$OPTARG";;
   esac
 done
 
