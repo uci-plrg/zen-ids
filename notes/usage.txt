@@ -1,0 +1,30 @@
+
+PHP Variants
+------------
+
+1. CLI: "bin/php source.php" or "sphp source.php"
+2. CGI: "bin/php-cgi source.php" or "sphp -w source.php"
+   · HTTP Query: specify in the environment with QUERY_STRING, or use "sphp -q <query>"
+
+
+Opmon Options
+-------------
+
+1. Dataflow Analysis: "OPMON_OPCODE_DUMP=<opcode-dump-path> bin/php-cgi -D source.php"
+   · Similarly: "sphp -D <opcode-dump-path> source.php"
+   · Note that the dataflow analysis does not execute the script
+2. Debug: "sphp -d [opts] source.php"
+   · Breakpoints in opmon will be unrecognized until extensions are loaded, which
+     is complete before the invocation of zend_collect_module_handlers().
+
+
+
+Log Files
+---------
+
+Logs are written to $PHP_DATASET_DIR in a timestamp-based path. The easy way to
+view logs is to use the script "select-run", which takes arguments for the nth
+most recent logfile, directory, etc. For example, using alias "sr":
+
+    · "less $(sr -l 1)" to view the most recent log file
+

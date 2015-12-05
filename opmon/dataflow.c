@@ -1400,6 +1400,9 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
                          dataflow_operand_index_t src_index, dataflow_operand_index_t dst_index,
                          bool commit)
 {
+  char var_name[256];
+  uint lookup_index = 0;
+
   //fprintf(opcode_dump_file, "   [ link_operand %d.(%d->%d)) ]\n",
   //        dop->id.op_index, src_index, dst_index);
 
@@ -1414,13 +1417,26 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
     if (commit)
       assign_destination(live_variables, dop, dst, dst_index);
   } else if (dst_index == DATAFLOW_OPERAND_SINK) {
+    dataflow_operand_t *src = get_dataflow_operand(dop, src_index);
+    dataflow_live_variable_t *src_var;
+
+    switch (src->value.type) {
+      case DATAFLOW_VALUE_TYPE_VAR:
+      case DATAFLOW_VALUE_TYPE_THIS:
+      case DATAFLOW_VALUE_TYPE_TEMP:
+        get_var_name(src, var_name, 256);
+        //fprintf(opcode_dump_file, "   [ searching live variables for %s (in operand %d.(%d->%d)) ]\n",
+        //        var_name, dop->id.op_index, src_index, dst_index);
+        while ((src_var = lookup_live_variable(live_variables, &lookup_index, src)) != NULL)
+          add_predecessor(&src->predecessor, &src_var->src.opcode_id, src_var->src.operand_index);
+      default: /*no*/;
+    }
+
     if (add_predecessor(&dop->sink.predecessor, &dop->id, src_index)) {
       fprintf(opcode_dump_file, "Link operand 0x%x:%d.%d into sink of type %d\n",
               dop->id.routine_hash, dop->id.op_index, src_index, dop->sink.type);
     }
   } else {
-    uint lookup_index = 0;
-    char var_name[256];
     bool found_any;
     dataflow_operand_t *src = get_dataflow_operand(dop, src_index);
     dataflow_operand_t *dst = get_dataflow_operand(dop, dst_index);
@@ -1445,6 +1461,7 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
         //        var_name, dop->id.op_index, src_index, dst_index);
         while ((src_var = lookup_live_variable(live_variables, &lookup_index, src)) != NULL) {
           found_any = true;
+          // add_predecessor(&src->predecessor, &src_var->src.opcode_id, src_var->src.operand_index);
           if (add_predecessor(&dst->predecessor, &src_var->src.opcode_id,
                               src_var->src.operand_index)) {
             fprintf(opcode_dump_file, "Link variable '%s': 0x%x:%d.%c -%d-> 0x%x:%d.%c\n",
@@ -1461,7 +1478,7 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
     }
 
     if (commit)
-      assign_destination(live_variables, dop, dst, dst_index); // dst->value.type is wrong for ZEND_FE_FETCH (both ops)
+      assign_destination(live_variables, dop, dst, dst_index);
   }
 }
 
@@ -1892,13 +1909,8 @@ bool propagate_operand_source_dataflow(dataflow_opcode_t *dst_op,
       while (src_influence != NULL) {
         if (propagate_one_source(dst_influence, &src_influence->source)) {
           propagated = true;
-          if (dst_op->sink.type == SINK_TYPE_NONE) {
-            fprintf(opcode_dump_file, "[%s] Propagated source at #%d from #%d to #%d\n", tag,
-                    src_influence->source.id.op_index, src_op->id.op_index, dst_op->id.op_index);
-          } else {
-            fprintf(opcode_dump_file, "[%s] Propagated source at #%d from #%d to sink #%d\n", tag,
-                    src_influence->source.id.op_index, src_op->id.op_index, dst_op->id.op_index);
-          }
+          fprintf(opcode_dump_file, "[%s] Propagated source at #%d from #%d to #%d\n", tag,
+                  src_influence->source.id.op_index, src_op->id.op_index, dst_op->id.op_index);
         }
         src_influence = src_influence->next;
       }
