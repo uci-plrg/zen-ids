@@ -1151,7 +1151,7 @@ typedef struct _dataflow_file_t {
 
 typedef struct _dataflow_graph_t {
   sctable_t routine_table;
-  scarray_t routine_list;
+  scarray_t routine_list; // N.B.: the routine_list does not contain include/require routines
 } dataflow_graph_t;
 
 typedef struct _dataflow_routine_t {
@@ -1174,6 +1174,8 @@ typedef struct _dataflow_link_pass_t {
   bool complete;
   dataflow_routine_t *droutine;
   uint start_index;
+  dataflow_routine_t *resume_droutine;
+  uint resume_index;
   scarray_t live_variables; // dataflow_live_variable_t *
 } dataflow_link_pass_t;
 
@@ -1188,6 +1190,7 @@ static dataflow_graph_t *dg = NULL;
 static dataflow_routine_t *assembling_routine = NULL;
 static scarray_t dataflow_link_worklist; // dataflow_link_pass_t *
 // static scarray_t source_propagation_worklist; // source_propagation_pass_t */
+static bool analyzing_include = false;
 static bool dataflow_linking_complete, source_propagation_complete;
 
 static int analyze_file_dataflow(zend_file_handle *in, dataflow_file_t *out)
@@ -1532,7 +1535,7 @@ static bool is_same_live_variable(dataflow_live_variable_t *first, dataflow_live
   return true;
 }
 
-static void prepare_dataflow_link_pass(dataflow_routine_t *droutine, uint start_index,
+static void enqueue_dataflow_link_pass(dataflow_routine_t *droutine, uint start_index,
                                        scarray_t *live_variables)
 {
   scarray_iterator_t *w;
@@ -1586,6 +1589,27 @@ static void prepare_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
     copy_dataflow_variables(&pass->live_variables, live_variables);
     scarray_append(&dataflow_link_worklist, pass);
   }
+}
+
+// copy the `live_variables` and schedule this pass to resume at `i` in this pass
+static void enqueue_dataflow_link_include_pass(dataflow_routine_t *included_routine,
+                                               dataflow_routine_t *resume_routine,
+                                               uint resume_index,
+                                               scarray_t *incoming_live_variables)
+{
+  dataflow_link_pass_t *pass = malloc(sizeof(dataflow_link_pass_t));
+
+  fprintf(opcode_dump_file, "Prepare dataflow link pass for include 0x%x resuming at 0x%x:%d\n",
+          included_routine->routine_hash, resume_routine->routine_hash, resume_index);
+
+  memset(pass, 0, sizeof(dataflow_link_pass_t));
+  scarray_init(&pass->live_variables);
+  pass->droutine = included_routine;
+  pass->start_index = 0;
+  pass->resume_droutine = resume_routine;
+  pass->resume_index = resume_index;
+  copy_dataflow_variables(&pass->live_variables, incoming_live_variables);
+  scarray_append(&dataflow_link_worklist, pass);
 }
 
 /*
@@ -1785,7 +1809,7 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
         break;
       /****************** branches *****************/
       case ZEND_JMP:
-        prepare_dataflow_link_pass(pass->droutine, dop->op1.value.jmp_target,
+        enqueue_dataflow_link_pass(pass->droutine, dop->op1.value.jmp_target,
                                    &pass->live_variables);
         end_pass = true;
         break;
@@ -1794,7 +1818,7 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_JMPZNZ:
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
-        prepare_dataflow_link_pass(pass->droutine, dop->op2.value.jmp_target,
+        enqueue_dataflow_link_pass(pass->droutine, dop->op2.value.jmp_target,
                                    &pass->live_variables);
         break;
       case ZEND_BRK:
@@ -1819,9 +1843,28 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
         // else if (is_system_sink_function(id.call_target)) /* {fcall-stack} => {system,opline,result} */
         // else                                              /* {fcall-stack} =d=> {opline,result} */
         break;
-      case ZEND_INCLUDE_OR_EVAL: // ???
-        // if (op->extended_value == ZEND_EVAL) /* {1} =d=> {code,opline} */
-        // else                                 /* {1} =d=> {opline}, {file} =d=> {code} */
+      case ZEND_INCLUDE_OR_EVAL:
+        switch (cop->extended_value) {
+          case ZEND_EVAL: /* {1} =d=> {code,opline} */
+            break;
+          case ZEND_INCLUDE:
+          case ZEND_REQUIRE: {
+            dataflow_routine_t *included_routine = sctable_lookup(&dg->routine_table,
+                                                                  dop->source.include.routine_hash);
+            dataflow_link_pass_t include_pass = { false, included_routine, 0, NULL, 0,
+                                                  pass->live_variables };
+            link_operand_dataflow(&include_pass);
+            pass->live_variables = include_pass.live_variables;
+          } break;
+          case ZEND_INCLUDE_ONCE: /* ??? {1} =d=> {opline}, {file} =d=> {code} */
+          case ZEND_REQUIRE_ONCE: {
+            uint resume_index = scarray_iterator_index(&pass->droutine->opcodes, i);
+            dataflow_routine_t *included_routine = sctable_lookup(&dg->routine_table,
+                                                                  dop->source.include.routine_hash);
+            enqueue_dataflow_link_include_pass(included_routine, pass->droutine,
+                                               resume_index, &pass->live_variables);
+          } break;
+        }
         break;
       case ZEND_THROW: /* {1} =d=> {fast-ret,thrown} */
         break;
@@ -1863,7 +1906,16 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       break;
   }
   scarray_iterator_end(i);
-  pass->complete = true;
+
+  if (pass->resume_droutine == NULL) {
+    pass->complete = true;
+  } else {
+    pass->droutine = pass->resume_droutine;
+    pass->start_index = pass->resume_index;
+    pass->resume_droutine = NULL;
+    pass->resume_index = 0;
+    link_operand_dataflow(pass);
+  }
 }
 
 bool propagate_one_source(dataflow_influence_t **influence, dataflow_source_t *source)
@@ -1909,8 +1961,10 @@ bool propagate_operand_source_dataflow(dataflow_opcode_t *dst_op,
       while (src_influence != NULL) {
         if (propagate_one_source(dst_influence, &src_influence->source)) {
           propagated = true;
-          fprintf(opcode_dump_file, "[%s] Propagated source at #%d from #%d to #%d\n", tag,
-                  src_influence->source.id.op_index, src_op->id.op_index, dst_op->id.op_index);
+          fprintf(opcode_dump_file, "[%s] Propagated source at 0x%x:%d from 0x%x:%d to 0x%x:%d\n",
+                  tag, src_influence->source.id.routine_hash, src_influence->source.id.op_index,
+                  src_op->id.routine_hash, src_op->id.op_index,
+                  dst_op->id.routine_hash, dst_op->id.op_index);
         }
         src_influence = src_influence->next;
       }
@@ -1925,17 +1979,29 @@ void propagate_source_dataflow(dataflow_link_pass_t *pass)
   // bool end_pass = false; // needed?
   dataflow_opcode_t *dop;
   scarray_iterator_t *i;
+  routine_cfg_t *croutine = cfg_routine_lookup(pass->droutine->app->cfg,
+                                               pass->droutine->routine_hash);
 
-  fprintf(opcode_dump_file, "Starting inner source propagation pass at %d\n", pass->start_index);
+  fprintf(opcode_dump_file, "Starting inner source propagation pass at 0x%x:%d\n",
+          pass->droutine->routine_hash, pass->start_index);
 
   i = scarray_iterator_start_at(&pass->droutine->opcodes, pass->start_index);
   while (/* !end_pass && */ (dop = (dataflow_opcode_t *) scarray_iterator_next(i)) != NULL) {
+    cfg_opcode_t *cop = (cfg_opcode_t *) routine_cfg_get_opcode(croutine, dop->id.op_index);
+    if (cop->opcode == ZEND_INCLUDE_OR_EVAL &&
+        (cop->extended_value == ZEND_INCLUDE || cop->extended_value == ZEND_REQUIRE)) {
+        dataflow_routine_t *included_routine = sctable_lookup(&dg->routine_table,
+                                                              dop->source.include.routine_hash);
+        dataflow_link_pass_t include_pass = { false, included_routine, 0, NULL, 0,
+                                              pass->live_variables };
+        propagate_source_dataflow(&include_pass);
+    }
     propagate_operand_source_dataflow(dop, &dop->op1.predecessor, &dop->op1.influence, "op1");
     propagate_operand_source_dataflow(dop, &dop->op2.predecessor, &dop->op2.influence, "op2");
     propagate_operand_source_dataflow(dop, &dop->result.predecessor, &dop->result.influence, "result");
     if (propagate_operand_source_dataflow(dop, &dop->sink.predecessor, &dop->sink.influence, "sink")) {
-      fprintf(opcode_dump_file, "Propagated at least one source to sink at op #%d\n",
-              dop->id.op_index);
+      fprintf(opcode_dump_file, "Propagated at least one source to sink at op 0x%x:%d\n",
+              pass->droutine->routine_hash, dop->id.op_index);
     }
   }
   scarray_iterator_end(i);
@@ -1961,6 +2027,7 @@ int analyze_dataflow(zend_file_handle *file)
   scarray_init(&dataflow_link_worklist);
 
   retval = analyze_file_dataflow(file, &top_file);
+  analyzing_include = true; // all other files must be includes
 
   while (retval == SUCCESS) {
     zend_file_handle file;
@@ -1987,7 +2054,7 @@ int analyze_dataflow(zend_file_handle *file)
 
   i = scarray_iterator_start(&dg->routine_list);
   while ((droutine = (dataflow_routine_t *) scarray_iterator_next(i)) != NULL)
-    prepare_dataflow_link_pass(droutine, 0, NULL);
+    enqueue_dataflow_link_pass(droutine, 0, NULL);
   scarray_iterator_end(i);
 
   dataflow_linking_complete = false;
@@ -2056,7 +2123,8 @@ void destroy_dataflow_analysis()
   }
 }
 
-void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops)
+void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops,
+                          bool is_function)
 {
   dataflow_routine_t *routine = malloc(sizeof(dataflow_routine_t));
   routine->app = app;
@@ -2065,7 +2133,8 @@ void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *
   scarray_init(&routine->opcodes);
   sctable_add(&dg->routine_table, routine_hash, routine);
 
-  scarray_append(&dg->routine_list, routine);
+  if (is_function || !analyzing_include)
+    scarray_append(&dg->routine_list, routine);
 
   assembling_routine = routine;
 }

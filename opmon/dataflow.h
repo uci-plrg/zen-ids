@@ -221,7 +221,8 @@ bool is_system_sink_function(const char *name);
 
 int analyze_dataflow(zend_file_handle *file);
 void destroy_dataflow_analysis();
-void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops);
+void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops,
+                          bool is_function);
 void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops);
 void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
                         const char *routine_name);

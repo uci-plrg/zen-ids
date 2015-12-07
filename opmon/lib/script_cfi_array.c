@@ -79,6 +79,14 @@ void *scarray_iterator_next(scarray_iterator_t *iterator)
   return item;
 }
 
+uint scarray_iterator_index(scarray_t *a, scarray_iterator_t *i)
+{
+  if (i->item > a->data && i->item < (a->data + a->size))
+    return (uint) (i->item - a->data);
+  else
+    return SCARRAY_ERROR_INVALID_ELEMENT;
+}
+
 void scarray_iterator_end(scarray_iterator_t *iterator)
 {
   free(iterator);

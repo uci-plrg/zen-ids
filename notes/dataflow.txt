@@ -67,6 +67,17 @@
     -> rare for these ops to be statically determinate
     -> may hypothesize a particular value and then proceed with analysis
 
+
+ === dataflow propagation
+
+  · Functions:
+    · collect input variables from all call sites
+    · when new inputs are found, repeat the function's link pass (but bound recursion)
+  · Includes:
+    · link inline every time
+    · prepare separate pass for include_once/require_once
+
+
  === things to model
 
   · SQL:
