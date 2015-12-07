@@ -1176,7 +1176,7 @@ typedef struct _dataflow_link_pass_t {
   uint start_index;
   dataflow_routine_t *resume_droutine;
   uint resume_index;
-  scarray_t live_variables; // dataflow_live_variable_t *
+  scarray_t *live_variables; // dataflow_live_variable_t *
 } dataflow_link_pass_t;
 
 typedef struct _source_propagation_pass_t {
@@ -1337,41 +1337,43 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
   while ((dst_var = lookup_live_variable(live_variables, &lookup_index, dst)) != NULL) {
     if (is_same_opcode_id(&dst_var->src.opcode_id, &dop->id)) {
       existing_dst_var = true;
-      break;
-    }
-    scarray_remove(live_variables, lookup_index - 1 /* kind of hackish */);
-    found_any = true;
-
-    fprintf(opcode_dump_file, "Clobber variable '%s' at 0x%x:%d.%c with 0x%x:%d.%c\n",
-            var_name, dst_var->src.opcode_id.routine_hash,
-            dst_var->src.opcode_id.op_index, get_operand_index_code(dst_var->src.operand_index),
-            dop->id.routine_hash, dop->id.op_index, get_operand_index_code(dst_index));
-  }
-
-  if (!existing_dst_var) {
-    if (!found_any) {
-      fprintf(opcode_dump_file, "Nothing clobbered for var '%s' (%d.%c)\n", var_name,
-              dop->id.op_index, get_operand_index_code(dst_index));
-    }
-
-    dst_var = malloc(sizeof(dataflow_live_variable_t));
-    dst_var->is_temp = (dst->value.type == DATAFLOW_VALUE_TYPE_TEMP);
-    if (dst_var->is_temp) {
-      dst_var->temp_id = dst->value.temp_id;
     } else {
-      if (dst->value.type == DATAFLOW_VALUE_TYPE_THIS)
-        dst_var->var_name = DATAFLOW_VAR_NAME_THIS;
-      else {
-        if (dst->value.var_name == NULL)
-          dst_var->var_name = DATAFLOW_VAR_NAME_MISSING;
-        else
-          dst_var->var_name = dst->value.var_name;
-      }
+      scarray_remove(live_variables, lookup_index - 1 /* kind of hackish */);
+      found_any = true;
+
+      fprintf(opcode_dump_file, "Clobber variable '%s' at 0x%x:%d.%c with 0x%x:%d.%c\n",
+              var_name, dst_var->src.opcode_id.routine_hash,
+              dst_var->src.opcode_id.op_index, get_operand_index_code(dst_var->src.operand_index),
+              dop->id.routine_hash, dop->id.op_index, get_operand_index_code(dst_index));
     }
-    dst_var->src.opcode_id = dop->id;
-    dst_var->src.operand_index = dst_index;
-    scarray_append(live_variables, dst_var);
   }
+
+  if (existing_dst_var)
+    return;
+
+  if (!found_any) {
+    fprintf(opcode_dump_file, "Nothing clobbered for var '%s' (%d.%c)\n", var_name,
+            dop->id.op_index, get_operand_index_code(dst_index));
+  }
+
+  dst_var = malloc(sizeof(dataflow_live_variable_t));
+  memset(dst_var, 0, sizeof(dataflow_live_variable_t));
+  dst_var->is_temp = (dst->value.type == DATAFLOW_VALUE_TYPE_TEMP);
+  if (dst_var->is_temp) {
+    dst_var->temp_id = dst->value.temp_id;
+  } else {
+    if (dst->value.type == DATAFLOW_VALUE_TYPE_THIS)
+      dst_var->var_name = DATAFLOW_VAR_NAME_THIS;
+    else {
+      if (dst->value.var_name == NULL)
+        dst_var->var_name = DATAFLOW_VAR_NAME_MISSING;
+      else
+        dst_var->var_name = dst->value.var_name;
+    }
+  }
+  dst_var->src.opcode_id = dop->id;
+  dst_var->src.operand_index = dst_index;
+  scarray_append(live_variables, dst_var);
 }
 
 static bool add_predecessor(dataflow_predecessor_t **predecessor, cfg_opcode_id_t *op_id,
@@ -1558,7 +1560,7 @@ static void enqueue_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
       scarray_iterator_t *dst, *src = scarray_iterator_start(live_variables);
       while ((src_var = (dataflow_live_variable_t *) scarray_iterator_next(src)) != NULL) {
         found = false;
-        dst = scarray_iterator_start(&pass->live_variables);
+        dst = scarray_iterator_start(pass->live_variables);
         while ((dst_var = (dataflow_live_variable_t *) scarray_iterator_next(dst)) != NULL) {
           if (is_same_live_variable(dst_var, src_var)) {
             found = true;
@@ -1568,7 +1570,7 @@ static void enqueue_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
         if (!found) {
           dst_var = malloc(sizeof(dataflow_live_variable_t));
           memcpy(dst_var, src_var, sizeof(dataflow_live_variable_t));
-          scarray_append(&pass->live_variables, dst_var);
+          scarray_append(pass->live_variables, dst_var);
           modified_variables = true;
           dataflow_linking_complete = false;
         }
@@ -1583,15 +1585,15 @@ static void enqueue_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
   if (pass == NULL) {
     pass = malloc(sizeof(dataflow_link_pass_t));
     memset(pass, 0, sizeof(dataflow_link_pass_t));
-    scarray_init(&pass->live_variables);
+    pass->live_variables = malloc(sizeof(scarray_t));
+    scarray_init(pass->live_variables);
     pass->droutine = droutine;
     pass->start_index = start_index;
-    copy_dataflow_variables(&pass->live_variables, live_variables);
+    copy_dataflow_variables(pass->live_variables, live_variables);
     scarray_append(&dataflow_link_worklist, pass);
   }
 }
 
-// copy the `live_variables` and schedule this pass to resume at `i` in this pass
 static void enqueue_dataflow_link_include_pass(dataflow_routine_t *included_routine,
                                                dataflow_routine_t *resume_routine,
                                                uint resume_index,
@@ -1603,12 +1605,13 @@ static void enqueue_dataflow_link_include_pass(dataflow_routine_t *included_rout
           included_routine->routine_hash, resume_routine->routine_hash, resume_index);
 
   memset(pass, 0, sizeof(dataflow_link_pass_t));
-  scarray_init(&pass->live_variables);
   pass->droutine = included_routine;
   pass->start_index = 0;
   pass->resume_droutine = resume_routine;
   pass->resume_index = resume_index;
-  copy_dataflow_variables(&pass->live_variables, incoming_live_variables);
+  pass->live_variables = malloc(sizeof(scarray_t));
+  scarray_init(pass->live_variables);
+  copy_dataflow_variables(pass->live_variables, incoming_live_variables);
   scarray_append(&dataflow_link_worklist, pass);
 }
 
@@ -1634,7 +1637,8 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
   cfg_opcode_t *cop;
   scarray_iterator_t *i;
 
-  fprintf(opcode_dump_file, "Starting inner dataflow link pass at %d\n", pass->start_index);
+  fprintf(opcode_dump_file, "Starting inner dataflow link pass 0x%x:%d\n",
+          pass->droutine->routine_hash, pass->start_index);
 
   i = scarray_iterator_start_at(&pass->droutine->opcodes, pass->start_index);
   while (!end_pass && (dop = (dataflow_opcode_t *) scarray_iterator_next(i)) != NULL) {
@@ -1657,9 +1661,9 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_PRE_DEC_OBJ:
       case ZEND_POST_INC_OBJ:
       case ZEND_POST_DEC_OBJ:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_1, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_1, false);
       case ZEND_ASSIGN: /* FT */
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_1, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_1, true);
       case ZEND_ADD: /* FT */
       case ZEND_SUB:
       case ZEND_MUL:
@@ -1695,52 +1699,52 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_FETCH_OBJ_UNSET:
       case ZEND_ADD_VAR:
       case ZEND_ADD_STRING:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
       case ZEND_TYPE_CHECK: /* FT */
       case ZEND_DEFINED:
       case ZEND_CAST:
       case ZEND_QM_ASSIGN: /* ? */
       case ZEND_STRLEN:
       case ZEND_FE_RESET:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_BOOL:
       case ZEND_BOOL_NOT:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_ASSIGN_REF:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_1, false);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_1, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_ASSIGN_OBJ:
       case ZEND_ASSIGN_DIM: /* ignoring key for now */
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_VALUE, DATAFLOW_OPERAND_MAP, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_VALUE, DATAFLOW_OPERAND_MAP, true);
         break;
       case ZEND_ADD_CHAR:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_RESULT, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_RESULT, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_ADD_ARRAY_ELEMENT:
         // if (op->op2_type != IS_UNUSED) /* when modelled, use the key in this case */
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_FE_FETCH:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_MAP, DATAFLOW_OPERAND_KEY, true);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_MAP, DATAFLOW_OPERAND_VALUE, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_MAP, DATAFLOW_OPERAND_KEY, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_MAP, DATAFLOW_OPERAND_VALUE, true);
         break;
       case ZEND_CLONE: /* also {1} => {opline} (potentially calls a clone() function) */
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_PRE_INC:
       case ZEND_PRE_DEC:
       case ZEND_POST_INC:
       case ZEND_POST_DEC:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_1, false);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_1, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_FETCH_UNSET:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, false);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, true);
         /* also unsets {1.2} */
         break;
       case ZEND_UNSET_VAR:
@@ -1751,13 +1755,13 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
           break; /* {} => {1.2}, which is not modelled yet */
       case ZEND_ISSET_ISEMPTY_VAR:
         if (dop->op2.value.type != DATAFLOW_VALUE_TYPE_NONE)
-          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+          link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_ISSET_ISEMPTY_DIM_OBJ:
       case ZEND_ISSET_ISEMPTY_PROP_OBJ:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, false);
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, true);
         break;
       /****************** sources *****************/
       case ZEND_FETCH_R:  /* fetch a superglobal */
@@ -1766,33 +1770,33 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_FETCH_IS:
         if (dop->op1.value.type != DATAFLOW_VALUE_TYPE_NONE) {
           if (dop->source.id.routine_hash != 0)
-            link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_SOURCE, DATAFLOW_OPERAND_RESULT, true);
+            link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_SOURCE, DATAFLOW_OPERAND_RESULT, true);
           else
-            link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+            link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         } else {
-          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
-          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+          link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
+          link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         }
         break;
       case ZEND_RECV:
       case ZEND_RECV_VARIADIC:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_SOURCE, DATAFLOW_OPERAND_RESULT, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_SOURCE, DATAFLOW_OPERAND_RESULT, true);
         break;
       /****************** sinks *****************/
       case ZEND_PRINT:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, false);
       case ZEND_ECHO:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
         break;
       case ZEND_FREE:
-        remove_live_variable(&pass->live_variables, &dop->op1);
+        remove_live_variable(pass->live_variables, &dop->op1);
         break;
       case ZEND_ADD_INTERFACE: /* also {2.zv+1} => {code} */
       case ZEND_ADD_TRAIT:     /* also {2.zv+1} => {code} */
       case ZEND_DECLARE_INHERITED_CLASS_DELAYED:
       case ZEND_DECLARE_CONST:
       case ZEND_BIND_GLOBAL:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_SINK, false);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_SINK, false);
       case ZEND_SEND_VAL: /* FT */
       case ZEND_SEND_VAL_EX:
       case ZEND_SEND_VAR:
@@ -1803,14 +1807,14 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_DECLARE_CLASS:
       case ZEND_DECLARE_INHERITED_CLASS:
       case ZEND_BIND_TRAITS:
-        link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
         break;
       case ZEND_DECLARE_FUNCTION: /* {compiler} =i=> {code} */
         break;
       /****************** branches *****************/
       case ZEND_JMP:
         enqueue_dataflow_link_pass(pass->droutine, dop->op1.value.jmp_target,
-                                   &pass->live_variables);
+                                   pass->live_variables);
         end_pass = true;
         break;
       case ZEND_JMPZ:
@@ -1819,7 +1823,7 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
         enqueue_dataflow_link_pass(pass->droutine, dop->op2.value.jmp_target,
-                                   &pass->live_variables);
+                                   pass->live_variables);
         break;
       case ZEND_BRK:
       case ZEND_CONT:
@@ -1854,7 +1858,6 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
             dataflow_link_pass_t include_pass = { false, included_routine, 0, NULL, 0,
                                                   pass->live_variables };
             link_operand_dataflow(&include_pass);
-            pass->live_variables = include_pass.live_variables;
           } break;
           case ZEND_INCLUDE_ONCE: /* ??? {1} =d=> {opline}, {file} =d=> {code} */
           case ZEND_REQUIRE_ONCE: {
@@ -1862,7 +1865,7 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
             dataflow_routine_t *included_routine = sctable_lookup(&dg->routine_table,
                                                                   dop->source.include.routine_hash);
             enqueue_dataflow_link_include_pass(included_routine, pass->droutine,
-                                               resume_index, &pass->live_variables);
+                                               resume_index, pass->live_variables);
           } break;
         }
         break;
@@ -1880,20 +1883,20 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
         if (dop->op1.value.type == DATAFLOW_VALUE_TYPE_NONE)
           break; /* {} => {opline} */
         else
-          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
+          link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
           /* also {} =d=> {opline} */
         break;
       case ZEND_JMP_SET: /* nop if op1 is false, but can't see from here */
         if (dop->op1.value.type != DATAFLOW_VALUE_TYPE_CONST ||
             dop->op1.value.constant->u1.v.type != IS_FALSE) {
-          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+          link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
           /* also {1} => {opline} */
         }
         break;
       case ZEND_COALESCE: /* nop if op1 is null, but can't see from here */
         if (dop->op1.value.type != DATAFLOW_VALUE_TYPE_CONST ||
             dop->op1.value.constant->u1.v.type != IS_NULL) {
-          link_operand(&pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+          link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
           /* also {1} => {opline} */
         }
         break;
@@ -1907,15 +1910,12 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
   }
   scarray_iterator_end(i);
 
-  if (pass->resume_droutine == NULL) {
-    pass->complete = true;
-  } else {
-    pass->droutine = pass->resume_droutine;
-    pass->start_index = pass->resume_index;
-    pass->resume_droutine = NULL;
-    pass->resume_index = 0;
-    link_operand_dataflow(pass);
+  if (pass->resume_droutine != NULL) {
+    dataflow_link_pass_t resume_pass = { false, pass->resume_droutine, pass->resume_index, NULL, 0,
+                                         pass->live_variables };
+    link_operand_dataflow(&resume_pass);
   }
+  pass->complete = true;
 }
 
 bool propagate_one_source(dataflow_influence_t **influence, dataflow_source_t *source)
@@ -1988,13 +1988,18 @@ void propagate_source_dataflow(dataflow_link_pass_t *pass)
   i = scarray_iterator_start_at(&pass->droutine->opcodes, pass->start_index);
   while (/* !end_pass && */ (dop = (dataflow_opcode_t *) scarray_iterator_next(i)) != NULL) {
     cfg_opcode_t *cop = (cfg_opcode_t *) routine_cfg_get_opcode(croutine, dop->id.op_index);
-    if (cop->opcode == ZEND_INCLUDE_OR_EVAL &&
-        (cop->extended_value == ZEND_INCLUDE || cop->extended_value == ZEND_REQUIRE)) {
-        dataflow_routine_t *included_routine = sctable_lookup(&dg->routine_table,
-                                                              dop->source.include.routine_hash);
-        dataflow_link_pass_t include_pass = { false, included_routine, 0, NULL, 0,
-                                              pass->live_variables };
-        propagate_source_dataflow(&include_pass);
+    if (cop->opcode == ZEND_INCLUDE_OR_EVAL) {
+      switch (cop->extended_value) {
+        case ZEND_INCLUDE:
+        case ZEND_REQUIRE: {
+          dataflow_routine_t *included_routine = sctable_lookup(&dg->routine_table,
+                                                                dop->source.include.routine_hash);
+          dataflow_link_pass_t include_pass = { false, included_routine, 0, NULL, 0,
+                                                pass->live_variables };
+          propagate_source_dataflow(&include_pass);
+        } break;
+        default: /*no*/;
+      }
     }
     propagate_operand_source_dataflow(dop, &dop->op1.predecessor, &dop->op1.influence, "op1");
     propagate_operand_source_dataflow(dop, &dop->op2.predecessor, &dop->op2.influence, "op2");
@@ -2006,7 +2011,11 @@ void propagate_source_dataflow(dataflow_link_pass_t *pass)
   }
   scarray_iterator_end(i);
 
-  // pass->complete = true;
+  if (pass->resume_droutine != NULL) {
+    dataflow_link_pass_t resume_pass = { false, pass->resume_droutine, pass->resume_index,
+                                         NULL, 0, pass->live_variables };
+    propagate_source_dataflow(&resume_pass);
+  }
 }
 
 int analyze_dataflow(zend_file_handle *file)
@@ -2154,7 +2163,7 @@ static void initilize_dataflow_operand(dataflow_operand_t *operand, zend_op_arra
       break;
     case IS_CV:
       operand->value.var_name = zops->vars[EX_VAR_TO_NUM(znode->var)]->val;
-      if (strcmp("this", operand->value.var_name) == 0) // maybe...?
+      if (strcmp("this", operand->value.var_name) == 0)
         operand->value.type = DATAFLOW_VALUE_TYPE_THIS;
       else
         operand->value.type = DATAFLOW_VALUE_TYPE_VAR;
