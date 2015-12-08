@@ -1163,13 +1163,15 @@ typedef struct _dataflow_routine_t {
 
 typedef struct _dataflow_live_variable_t {
   bool is_temp;
-  bool is_global;
   union {
     uint temp_id;
     const char *var_name;
   };
   dataflow_operand_id_t src;
+  cfg_opcode_id_t global_id;
 } dataflow_live_variable_t;
+
+#define IS_LIVE_GLOBAL(var) ((var)->global_id.routine_hash != 0U)
 
 typedef struct _dataflow_link_pass_t {
   bool complete;
@@ -1332,21 +1334,27 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
   char var_name[256];
   uint lookup_index = 0;
   dataflow_live_variable_t *dst_var;
-  bool existing_dst_var = false, found_any = false, is_global = false;;
+  bool existing_dst_var = false, found_any = false;
+  cfg_opcode_id_t global_id = {0};
 
   get_var_name(dst, var_name, 256);
   while ((dst_var = lookup_live_variable(live_variables, &lookup_index, dst)) != NULL) {
     if (is_same_opcode_id(&dst_var->src.opcode_id, &dop->id)) {
       existing_dst_var = true;
     } else {
-      scarray_remove(live_variables, lookup_index - 1 /* kind of hackish */);
-      found_any = true;
-      is_global |= dst_var->is_global;
+      dataflow_live_variable_t *clobbered = scarray_remove(live_variables,
+                                                           lookup_index - 1 /* kind of hackish */);
 
       fprintf(opcode_dump_file, "Clobber %svariable '%s' at 0x%x:%d.%c with 0x%x:%d.%c\n",
-              is_global ? "global " : "", var_name, dst_var->src.opcode_id.routine_hash,
-              dst_var->src.opcode_id.op_index, get_operand_index_code(dst_var->src.operand_index),
+              IS_LIVE_GLOBAL(clobbered) ? "global " : "", var_name,
+              dst_var->src.opcode_id.routine_hash, dst_var->src.opcode_id.op_index,
+              get_operand_index_code(dst_var->src.operand_index),
               dop->id.routine_hash, dop->id.op_index, get_operand_index_code(dst_index));
+
+      found_any = true;
+      if (IS_LIVE_GLOBAL(clobbered))
+        global_id = clobbered->global_id;
+      free(clobbered);
     }
   }
 
@@ -1361,7 +1369,6 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
   dst_var = malloc(sizeof(dataflow_live_variable_t));
   memset(dst_var, 0, sizeof(dataflow_live_variable_t));
   dst_var->is_temp = (dst->value.type == DATAFLOW_VALUE_TYPE_TEMP);
-  dst_var->is_global = is_global;
   if (dst_var->is_temp) {
     dst_var->temp_id = dst->value.temp_id;
   } else {
@@ -1376,6 +1383,7 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
   }
   dst_var->src.opcode_id = dop->id;
   dst_var->src.operand_index = dst_index;
+  dst_var->global_id = global_id;
   scarray_append(live_variables, dst_var);
 }
 
@@ -1433,7 +1441,7 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
         if (dop->sink.type == SINK_TYPE_GLOBAL) { /* create an empty live_variable flagged global */
           dataflow_live_variable_t *global_var = malloc(sizeof(dataflow_live_variable_t));
           memset(global_var, 0, sizeof(dataflow_live_variable_t));
-          global_var->is_global = true;
+          global_var->global_id = dop->id;
           global_var->var_name = src->value.var_name;
           global_var->src.opcode_id = dop->id;
           global_var->src.operand_index = src_index;
@@ -1490,22 +1498,24 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
                     src_index, dop->id.routine_hash, dop->id.op_index,
                     get_operand_index_code(dst_index));
           }
-          // no, need to look for a global destination
-          if (src_var->is_global) {
-            dataflow_operand_t *sink = get_dataflow_operand(dop, DATAFLOW_OPERAND_SINK);
-            // if `sink == NULL`, configure a sink now (couldn't see before that it was a sink)
-            // unless there is a way to propagate global status in the first analysis...?
+          if (IS_LIVE_GLOBAL(src_var)) {
+            dataflow_routine_t *sink_routine;
+            dataflow_opcode_t *sink_op;
+
+            sink_routine = sctable_lookup(&dg->routine_table,
+                                          src_var->global_id.routine_hash);
+            sink_op = (dataflow_opcode_t *) sink_routine->opcodes.data[src_var->global_id.op_index];
+            // unless there is a way to propagate `is_global` status in the first analysis...?
 
             fprintf(opcode_dump_file, "Attempting to link global sink of variable %s\n", var_name);
 
-            if (add_predecessor(&sink->predecessor, &src_var->src.opcode_id,
+            if (add_predecessor(&sink_op->sink.predecessor, &src_var->src.opcode_id,
                                 src_var->src.operand_index)) {
-              fprintf(opcode_dump_file, "Link global variable '%s': 0x%x:%d.%c -%d-> 0x%x:%d.%c\n",
+              fprintf(opcode_dump_file, "Link global variable '%s': 0x%x:%d.%c -%d-> 0x%x:%d.sink\n",
                       var_name, src_var->src.opcode_id.routine_hash,
                       src_var->src.opcode_id.op_index,
                       get_operand_index_code(src_var->src.operand_index),
-                      src_index, dop->id.routine_hash, dop->id.op_index,
-                      get_operand_index_code(DATAFLOW_OPERAND_SINK));
+                      src_index, sink_op->id.routine_hash, sink_op->id.op_index);
             }
           }
         }

@@ -42,12 +42,16 @@ void *scarray_get(scarray_t *a, uint index)
   return a->data[index];
 }
 
-void scarray_remove(scarray_t *a, uint index)
+void *scarray_remove(scarray_t *a, uint index)
 {
+  void *removal = a->data[index];
+
   a->size--;
 
   if (index < a->size)
     memmove(&a->data[index], &a->data[index+1], (a->size - index) * sizeof(void *));
+
+  return removal;
 }
 
 scarray_iterator_t *scarray_iterator_start(scarray_t *a)

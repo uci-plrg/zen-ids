@@ -19,7 +19,7 @@ void scarray_init(scarray_t *a);
 void scarray_destroy(scarray_t *a);
 void scarray_append(scarray_t *a, void *e);
 void *scarray_get(scarray_t *a, uint index);
-void scarray_remove(scarray_t *a, uint index);
+void* scarray_remove(scarray_t *a, uint index);
 
 scarray_iterator_t *scarray_iterator_start(scarray_t *a);
 scarray_iterator_t *scarray_iterator_start_at(scarray_t *a, uint start_index);
