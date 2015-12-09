@@ -52,6 +52,7 @@ typedef enum _dataflow_source_type_t {
   SOURCE_TYPE_FILE,      /* file access such as fread() */
   SOURCE_TYPE_SYSTEM,    /* server and environment configuration */
   SOURCE_TYPE_ARG,       /* function argument */
+  SOURCE_TYPE_GLOBAL,    /* globally defined variables and constants */
 } dataflow_source_type_t;
 
 typedef struct _dataflow_source_t {

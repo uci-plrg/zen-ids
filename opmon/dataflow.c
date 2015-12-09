@@ -1171,7 +1171,7 @@ typedef struct _dataflow_live_variable_t {
   cfg_opcode_id_t global_id;
 } dataflow_live_variable_t;
 
-#define IS_LIVE_GLOBAL(var) ((var)->global_id.routine_hash != 0U)
+#define IS_LIVE_GLOBAL(var) ((var) != NULL && (var)->global_id.routine_hash != 0U)
 
 typedef struct _dataflow_link_pass_t {
   bool complete;
@@ -1418,6 +1418,56 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
 {
   char var_name[256];
   uint lookup_index = 0;
+  dataflow_operand_t *src = get_dataflow_operand(dop, src_index);
+  dataflow_operand_t *dst = get_dataflow_operand(dop, dst_index);
+
+  /* Global src flows from all global bind points in scope. */
+  if (src_index != DATAFLOW_OPERAND_SOURCE) {
+    dataflow_live_variable_t *src_var;
+
+    get_var_name(src, var_name, 256);
+    while ((src_var = lookup_live_variable(live_variables, &lookup_index, src)) != NULL) {
+      if (IS_LIVE_GLOBAL(src_var)) {
+        fprintf(opcode_dump_file, "Attempting to link global source %s to 0x%x:%d\n", var_name,
+                dop->id.routine_hash, dop->id.op_index);
+
+        if (add_predecessor(&dst->predecessor, &src_var->global_id, DATAFLOW_OPERAND_SOURCE)) {
+          fprintf(opcode_dump_file, "Link global variable '%s': "
+                  "0x%x:%d.source -%d-> 0x%x:%d.%c\n", var_name,
+                  src_var->global_id.routine_hash, src_var->global_id.op_index, src_index,
+                  dop->id.routine_hash, dop->id.op_index,
+                  get_operand_index_code(dst_index));
+        }
+      }
+    }
+  }
+
+  /* Global dst flows to all global bind points in scope. */
+  lookup_index = 0;
+  if (dst_index != DATAFLOW_OPERAND_SINK) {
+    dataflow_live_variable_t *dst_var;
+
+    get_var_name(dst, var_name, 256);
+    while ((dst_var = lookup_live_variable(live_variables, &lookup_index, dst)) != NULL) {
+      if (IS_LIVE_GLOBAL(dst_var)) {
+        dataflow_routine_t *sink_routine = sctable_lookup(&dg->routine_table,
+                                                          dst_var->global_id.routine_hash);
+        dataflow_opcode_t *sink_op = (dataflow_opcode_t *) sink_routine->opcodes.data[dst_var->global_id.op_index];
+
+        fprintf(opcode_dump_file, "Attempting to link 0x%x:%d to global sink of variable %s\n",
+                dop->id.routine_hash, dop->id.op_index, var_name);
+
+        if (add_predecessor(&sink_op->sink.predecessor, &dst_var->src.opcode_id,
+                            dst_var->src.operand_index)) {
+          fprintf(opcode_dump_file, "Link to global variable '%s': 0x%x:%d.%c -%d-> 0x%x:%d.sink\n",
+                  var_name, dop->id.routine_hash, dop->id.op_index,
+                  get_operand_index_code(src_index),
+                  dst_index, sink_op->id.routine_hash, sink_op->id.op_index);
+        }
+      }
+    }
+  }
+  lookup_index = 0;
 
   //fprintf(opcode_dump_file, "   [ link_operand %d.(%d->%d)) ]\n",
   //        dop->id.op_index, src_index, dst_index);
@@ -1447,7 +1497,8 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
           global_var->src.operand_index = src_index;
           scarray_append(live_variables, global_var);
 
-          fprintf(opcode_dump_file, "Generate global var %s\n", global_var->var_name);
+          fprintf(opcode_dump_file, "Generate global var %s at 0x%x:%d\n", global_var->var_name,
+                  dop->id.routine_hash, dop->id.op_index);
         }
       case DATAFLOW_VALUE_TYPE_THIS: /* FT */
       case DATAFLOW_VALUE_TYPE_TEMP:
@@ -1497,26 +1548,6 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
                     get_operand_index_code(src_var->src.operand_index),
                     src_index, dop->id.routine_hash, dop->id.op_index,
                     get_operand_index_code(dst_index));
-          }
-          if (IS_LIVE_GLOBAL(src_var)) {
-            dataflow_routine_t *sink_routine;
-            dataflow_opcode_t *sink_op;
-
-            sink_routine = sctable_lookup(&dg->routine_table,
-                                          src_var->global_id.routine_hash);
-            sink_op = (dataflow_opcode_t *) sink_routine->opcodes.data[src_var->global_id.op_index];
-            // unless there is a way to propagate `is_global` status in the first analysis...?
-
-            fprintf(opcode_dump_file, "Attempting to link global sink of variable %s\n", var_name);
-
-            if (add_predecessor(&sink_op->sink.predecessor, &src_var->src.opcode_id,
-                                src_var->src.operand_index)) {
-              fprintf(opcode_dump_file, "Link global variable '%s': 0x%x:%d.%c -%d-> 0x%x:%d.sink\n",
-                      var_name, src_var->src.opcode_id.routine_hash,
-                      src_var->src.opcode_id.op_index,
-                      get_operand_index_code(src_var->src.operand_index),
-                      src_index, sink_op->id.routine_hash, sink_op->id.op_index);
-            }
           }
         }
         if (!found_any)
@@ -1992,7 +2023,9 @@ bool propagate_operand_source_dataflow(dataflow_opcode_t *dst_op,
 
   while (p != NULL) {
     if (p->operand_id.operand_index == DATAFLOW_OPERAND_SOURCE) {
-      src_op = dst_op; /* invariant (for now--but if this ever changes, do a lookup here) */
+      dataflow_routine_t *source_routine = sctable_lookup(&dg->routine_table,
+                                                          p->operand_id.opcode_id.routine_hash);
+      src_op = (dataflow_opcode_t *) source_routine->opcodes.data[p->operand_id.opcode_id.op_index];
       propagated |= propagate_one_source(dst_influence, &src_op->source);
     } else {
       src_routine = sctable_lookup(&dg->routine_table, p->operand_id.opcode_id.routine_hash);
@@ -2353,6 +2386,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
       break;
     case ZEND_DECLARE_CONST:
     case ZEND_BIND_GLOBAL:
+      initialize_source(opcode, SOURCE_TYPE_GLOBAL);
       initialize_sink(opcode, SINK_TYPE_GLOBAL);
       break;
     case ZEND_EXIT:
