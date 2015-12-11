@@ -61,7 +61,7 @@ static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_h
   fcall_frame->routine_name = strdup(routine_name);
   fcall_frame->opcode = opcode;
 
-  push_dataflow_fcall_init();
+  push_dataflow_fcall_init(routine_hash, routine_name);
 }
 
 static inline void push_fcall_skip(uint index, zend_uchar opcode)

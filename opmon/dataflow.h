@@ -36,7 +36,7 @@ typedef enum _dataflow_source_type_t {
   SOURCE_TYPE_SQL,       /* database query results */
   SOURCE_TYPE_FILE,      /* file access such as fread() */
   SOURCE_TYPE_SYSTEM,    /* server and environment configuration */
-  SOURCE_TYPE_ARG,       /* function argument */
+  SOURCE_TYPE_PARAMETER, /* function parameter */
   SOURCE_TYPE_GLOBAL,    /* globally defined variables and constants */
 } dataflow_source_type_t;
 
@@ -45,6 +45,7 @@ typedef struct _dataflow_source_t {
   dataflow_source_type_t type;
   union {
     dataflow_source_include_t include;
+    uint parameter_index;
   };
 } dataflow_source_t;
 
@@ -207,7 +208,7 @@ void destroy_dataflow_analysis();
 void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops,
                           bool is_function);
 void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops);
-void push_dataflow_fcall_init();
+void push_dataflow_fcall_init(uint target_hash, const char *routine_name);
 void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
                         const char *routine_name);
 void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,
