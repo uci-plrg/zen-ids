@@ -24,21 +24,6 @@ typedef struct _dataflow_predecessor_t {
   struct _dataflow_predecessor_t *next;
 } dataflow_predecessor_t;
 
-typedef struct _dataflow_call_by_name_t {
-  const char *name;
-} dataflow_call_by_name_t;
-
-typedef enum _dataflow_call_type_t {
-  DATAFLOW_CALL_TYPE_BY_NAME,
-} dataflow_call_type_t;
-
-typedef struct _dataflow_call_t {
-  dataflow_call_type_t type;
-  union {
-    dataflow_call_by_name_t call_by_name;
-  };
-} dataflow_call_t;
-
 typedef struct _dataflow_source_include_t {
   uint routine_hash;
 } dataflow_source_include_t;
@@ -96,9 +81,6 @@ typedef struct _dataflow_sink_t {
   dataflow_predecessor_t *predecessor;
   dataflow_influence_t *influence;
   dataflow_sink_type_t type;
-  union {
-    dataflow_call_t call;
-  };
 } dataflow_sink_t;
 
 typedef union _sink_identifier_t {
@@ -225,6 +207,7 @@ void destroy_dataflow_analysis();
 void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops,
                           bool is_function);
 void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops);
+void push_dataflow_fcall_init();
 void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
                         const char *routine_name);
 void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,

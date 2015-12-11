@@ -1154,11 +1154,31 @@ typedef struct _dataflow_graph_t {
   scarray_t routine_list; // N.B.: the routine_list does not contain include/require routines
 } dataflow_graph_t;
 
+typedef struct _dataflow_call_by_name_t {
+  const char *name;
+} dataflow_call_by_name_t;
+
+typedef enum _dataflow_call_flags_t {
+  DATAFLOW_CALL_FLAG_BY_NAME = 0x01,
+  DATAFLOW_CALL_FLAG_BUILTIN = 0x02,
+} dataflow_call_flags_t;
+
+typedef struct _dataflow_call_site_t {
+  dataflow_call_flags_t flags;
+  scarray_t *args; // dataflow_sink_t *
+  union {
+    dataflow_call_by_name_t call_by_name;
+  };
+} dataflow_call_site_t;
+
 typedef struct _dataflow_routine_t {
   application_t *app;
   uint routine_hash;
-  scarray_t opcodes; /* dataflow_opcode_t * */
-  // zend_op_array *zops; // &droutine->zops->opcodes[dop->id.op_index],
+  scarray_t opcodes; // dataflow_opcode_t *
+  scarray_t sources; // dataflow_source_t *
+  scarray_t sinks; // dataflow_sink_t *
+  scarray_t *parameters; // dataflow_source_t *
+  scarray_t *call_sites; // dataflow_call_site_t *
 } dataflow_routine_t;
 
 typedef struct _dataflow_live_variable_t {
@@ -1192,6 +1212,7 @@ static dataflow_file_t *dataflow_file_list = NULL;
 static dataflow_graph_t *dg = NULL;
 static dataflow_routine_t *assembling_routine = NULL;
 static scarray_t dataflow_link_worklist; // dataflow_link_pass_t *
+static scarray_t fcall_stack; // dataflow_call_site_t *
 // static scarray_t source_propagation_worklist; // source_propagation_pass_t */
 static bool analyzing_include = false;
 static bool dataflow_linking_complete, source_propagation_complete;
@@ -2380,9 +2401,16 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
     case ZEND_SEND_USER:
     case ZEND_SEND_ARRAY:
       initialize_sink(opcode, SINK_TYPE_CALL);
+      break;
     case ZEND_RECV:
     case ZEND_RECV_VARIADIC:
       initialize_source(opcode, SOURCE_TYPE_ARG);
+
+      if (routine->parameters == NULL) {
+        routine->parameters = malloc(sizeof(scarray_t));
+        scarray_init(routine->parameters);
+      }
+      scarray_append(routine->parameters, &opcode->sink);
       break;
     case ZEND_DECLARE_CONST:
     case ZEND_BIND_GLOBAL:
@@ -2396,29 +2424,57 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
   }
 }
 
+void push_dataflow_fcall_init()
+{
+  dataflow_call_site_t *call = malloc(sizeof(dataflow_call_site_t));
+  memset(call, 0, sizeof(dataflow_call_site_t));
+  scarray_append(&fcall_stack, call);
+}
+
 void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
                         const char *routine_name)
 {
   dataflow_routine_t *routine;
   dataflow_opcode_t *opcode;
-  zend_op *zop = &zops->opcodes[index];
+  //zend_op *zop = &zops->opcodes[index];
+  dataflow_call_site_t *call = (dataflow_call_site_t *) scarray_remove(&fcall_stack,
+                                                                       fcall_stack.size-1);
 
   initialize_opcode_index(routine_hash, index, &routine, &opcode);
 
-  if (uses_return_value(zop)) {
-    if (is_db_source_function(NULL, routine_name))
+  // if (?) call->flags |= DATAFLOW_CALL_FLAG_BY_NAME;
+
+  //if (uses_return_value(zop)) {
+    if (is_db_source_function(NULL, routine_name)) {
       initialize_source(opcode, SOURCE_TYPE_SQL);
-    else if (is_db_sink_function(NULL, routine_name))
+      call->flags |= DATAFLOW_CALL_FLAG_BUILTIN;
+    } else if (is_db_sink_function(NULL, routine_name)) {
       initialize_sink(opcode, SINK_TYPE_SQL);
-    else if (is_file_source_function(routine_name))
+      call->flags |= DATAFLOW_CALL_FLAG_BUILTIN;
+    } else if (is_file_source_function(routine_name)) {
       initialize_source(opcode, SOURCE_TYPE_FILE);
-    else if (is_file_sink_function(routine_name))
+      call->flags |= DATAFLOW_CALL_FLAG_BUILTIN;
+    } else if (is_file_sink_function(routine_name)) {
       initialize_sink(opcode, SINK_TYPE_FILE);
-    else if (is_system_source_function(routine_name))
+      call->flags |= DATAFLOW_CALL_FLAG_BUILTIN;
+    } else if (is_system_source_function(routine_name)) {
       initialize_source(opcode, SOURCE_TYPE_SYSTEM);
-    else if (is_system_sink_function(routine_name))
+      call->flags |= DATAFLOW_CALL_FLAG_BUILTIN;
+    } else if (is_system_sink_function(routine_name)) {
       initialize_sink(opcode, SINK_TYPE_SYSTEM);
-  }
+      call->flags |= DATAFLOW_CALL_FLAG_BUILTIN;
+    } else {
+    }
+  //}
+
+    if (routine->call_sites == NULL) {
+      routine->call_sites = malloc(sizeof(scarray_t));
+      scarray_init(routine->call_sites);
+    }
+    scarray_append(routine->call_sites, call);
+
+    fprintf(opcode_dump_file, "Routine 0x%x makes a call to %s with %d args\n",
+            routine->routine_hash, call->call_by_name.name, call->args->size);
 }
 
 void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,
@@ -2426,14 +2482,22 @@ void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,
 {
   dataflow_routine_t *routine;
   dataflow_opcode_t *opcode;
+  dataflow_call_site_t *call = (dataflow_call_site_t *) fcall_stack.data[fcall_stack.size-1];
 
   initialize_opcode_index(routine_hash, index, &routine, &opcode);
+
+  if (call->args == NULL) {
+    call->args = malloc(sizeof(scarray_t));
+    scarray_init(call->args);
+  }
 
   opcode->sink.id.routine_hash = routine_hash;
   opcode->sink.id.op_index = index;
   opcode->sink.type = SINK_TYPE_CALL;
-  opcode->sink.call.type = DATAFLOW_CALL_TYPE_BY_NAME;
-  opcode->sink.call.call_by_name.name = routine_name;
+
+  // when? call->flags |= DATAFLOW_CALL_FLAG_BY_NAME;
+  // when? call->call_by_name.name = routine_name;
+  scarray_append(call->args, &opcode->sink);
 }
 
 void add_dataflow_map_assignment(uint routine_hash, uint index, zend_op_array *zops)
