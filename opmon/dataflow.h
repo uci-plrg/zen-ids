@@ -37,6 +37,7 @@ typedef enum _dataflow_source_type_t {
   SOURCE_TYPE_FILE,      /* file access such as fread() */
   SOURCE_TYPE_SYSTEM,    /* server and environment configuration */
   SOURCE_TYPE_PARAMETER, /* function parameter */
+  SOURCE_TYPE_RESULT,    /* function return value */
   SOURCE_TYPE_GLOBAL,    /* globally defined variables and constants */
 } dataflow_source_type_t;
 
@@ -64,6 +65,7 @@ typedef enum _dataflow_sink_type_t {
   SINK_TYPE_OUTPUT,           /* specifies output text */
   SINK_TYPE_EDGE,             /* specifies an intra-procedural control flow target, e.g. jmp */
   SINK_TYPE_CALL,             /* specifies an inter-procedural control flow target, e.g. call */
+  SINK_TYPE_RESULT,           /* specifies an inter-procedural control flow result, e.g. return */
   SINK_TYPE_SQL,              /* specifies an SQL insert or update (possibly a fragment) */
   /* Various functions like file_put_contents(), fopen(), fwrite(), etc. It might be a good idea
    * to monitor system calls in the process, though not sure how (hook?)

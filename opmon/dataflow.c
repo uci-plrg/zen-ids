@@ -559,6 +559,10 @@ void identify_sink_operands(zend_op *op, sink_identifier_t id)
       else
         print_sink("sink(edge) {fcall-stack} =d=> {opline,result}");
       break;
+    case ZEND_RETURN:
+    case ZEND_RETURN_BY_REF:
+      print_sink("sink(return) {1} =d=> {return}");
+      break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_EVAL)
         print_sink("sink(edge) {1} =d=> {code,opline}");
@@ -709,7 +713,6 @@ void identify_sink_operands(zend_op *op, sink_identifier_t id)
 
   ZEND_NOP
   ZEND_EXT_NOP
-  ZEND_RETURN
   ZEND_JMP
   ZEND_FREE
   ZEND_DO_FCALL
@@ -1159,6 +1162,7 @@ typedef enum _dataflow_call_flags_t {
 } dataflow_call_flags_t;
 
 typedef struct _dataflow_call_site_t {
+  uint opcode_index;
   uint target_hash;
   dataflow_call_flags_t flags;
   scarray_t *args; // dataflow_sink_t *
@@ -1938,6 +1942,11 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
         // else if (is_file_sink_function(id.call_target))   /* {fcall-stack} => {file,opline,result} */
         // else if (is_system_sink_function(id.call_target)) /* {fcall-stack} => {system,opline,result} */
         // else                                              /* {fcall-stack} =d=> {opline,result} */
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_SOURCE, DATAFLOW_OPERAND_RESULT, true);
+        break;
+      case ZEND_RETURN:
+      case ZEND_RETURN_BY_REF:
+        link_operand(pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
         break;
       case ZEND_INCLUDE_OR_EVAL:
         switch (cop->extended_value) {
@@ -2117,9 +2126,9 @@ void propagate_source_dataflow(dataflow_link_pass_t *pass)
 
 static void propagate_function_dataflow(scarray_t *call_stack, dataflow_routine_t *routine)
 {
-  scarray_iterator_t *f, *s, *t, *c;
-  dataflow_sink_t *sink, *arg;
-  dataflow_influence_t *influence, *arg_influence;
+  scarray_iterator_t *c, *l, *f, *s, *t;
+  dataflow_sink_t *callee_sink, *caller_sink, *arg;
+  dataflow_influence_t *influence, *arg_influence, *result_influence;
   dataflow_call_site_t *call, *callee_call;
   dataflow_routine_t *callee;
   uint frame_hash;
@@ -2156,26 +2165,54 @@ static void propagate_function_dataflow(scarray_t *call_stack, dataflow_routine_
     callee = (dataflow_routine_t *) sctable_lookup(&dg->routine_table, call->target_hash);
 
     s = scarray_iterator_start(&callee->sinks);
-    while ((sink = (dataflow_sink_t *) scarray_iterator_next(s)) != NULL) {
-      influence = sink->influence;
+    while ((callee_sink = (dataflow_sink_t *) scarray_iterator_next(s)) != NULL) {
+      influence = callee_sink->influence;
       while (influence != NULL) {
         if (influence->source.type == SOURCE_TYPE_PARAMETER) {
           arg = (dataflow_sink_t *) call->args->data[influence->source.parameter_index];
           arg_influence = arg->influence;
-          while (arg_influence != NULL) { // pushes behind `influence` pointer
+          while (arg_influence != NULL) { // pushes behind the `influence` pointer
             fprintf(opcode_dump_file, "Propagating arg %d influence\n",
                     influence->source.parameter_index);
-            if (propagate_one_source(&sink->influence, &arg_influence->source)) {
+            if (propagate_one_source(&callee_sink->influence, &arg_influence->source)) {
               function_propagation_complete = false;
               fprintf(opcode_dump_file, "Propagated source at 0x%x:%d via 0x%x(#%d) to 0x%x:%d\n",
                       arg_influence->source.id.routine_hash, arg_influence->source.id.op_index,
                       call->target_hash, influence->source.parameter_index,
-                      sink->id.routine_hash, sink->id.op_index);
+                      callee_sink->id.routine_hash, callee_sink->id.op_index);
             }
             arg_influence = arg_influence->next;
           }
         }
         influence = influence->next;
+      }
+
+      if (callee_sink->type == SINK_TYPE_RESULT) {
+        dataflow_opcode_t *call_op = routine->opcodes.data[call->opcode_index];
+
+        l = scarray_iterator_start(&routine->sinks);
+        while ((caller_sink = (dataflow_sink_t *) scarray_iterator_next(l)) != NULL) {
+          influence = caller_sink->influence;
+          while (influence != NULL) {
+            if (influence->source.id.routine_hash == call_op->source.id.routine_hash &&
+                influence->source.id.op_index == call_op->source.id.op_index) {
+              result_influence = callee_sink->influence;
+              while (result_influence != NULL) { // pushes behind the `influence` pointer
+                if (propagate_one_source(&caller_sink->influence, &result_influence->source)) {
+                  function_propagation_complete = false;
+                  fprintf(opcode_dump_file,
+                          "Propagated source at 0x%x:%d via 0x%x:result to 0x%x:%d\n",
+                          result_influence->source.id.routine_hash,
+                          result_influence->source.id.op_index,
+                          callee->routine_hash,
+                          caller_sink->id.routine_hash, caller_sink->id.op_index);
+                }
+                result_influence = result_influence->next;
+              }
+            }
+            influence = influence->next;
+          }
+        }
       }
     }
 
@@ -2452,6 +2489,9 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
     case ZEND_JMP_SET:
       // dunno how this works
       break;
+    case ZEND_DO_FCALL:
+      initialize_source(opcode, SOURCE_TYPE_RESULT);
+      break;
     case ZEND_COALESCE:
       // dunno how this works
       break;
@@ -2512,6 +2552,10 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
       opcode->source.parameter_index = routine->parameters->size;
       scarray_append(routine->parameters, &opcode->sink);
       break;
+    case ZEND_RETURN:
+    case ZEND_RETURN_BY_REF:
+      initialize_sink(opcode, SINK_TYPE_RESULT);
+      break;
     case ZEND_DECLARE_CONST:
     case ZEND_BIND_GLOBAL:
       initialize_source(opcode, SOURCE_TYPE_GLOBAL);
@@ -2544,11 +2588,13 @@ void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
 {
   dataflow_routine_t *routine;
   dataflow_opcode_t *opcode;
-  //zend_op *zop = &zops->opcodes[index];
+  zend_op *zop = &zops->opcodes[index];
   dataflow_call_site_t *call = (dataflow_call_site_t *) scarray_remove(&fcall_stack,
                                                                        fcall_stack.size-1);
 
+  call->opcode_index = index;
   initialize_opcode_index(routine_hash, index, &routine, &opcode);
+  initilize_dataflow_operand(&opcode->result, zops, &zop->result, zop->result_type);
 
   // if (?) call->flags |= DATAFLOW_CALL_FLAG_BY_NAME;
 
