@@ -10,7 +10,6 @@
 #include "dataflow.h"
 #include "compile_context.h"
 
-#define ROUTINE_NAME_LENGTH 256
 #define CLOSURE_NAME "{closure}"
 #define CLOSURE_NAME_LENGTH 9
 #define CLOSURE_ID_TEMPLATE "<closure-%d>"
@@ -25,7 +24,8 @@ typedef struct _compilation_unit_t {
 } compilation_unit_t;
 
 typedef struct _compilation_routine_t {
-  uint hash;
+  uint caller_hash;
+  uint callee_hash;
   control_flow_metadata_t cfm;
 } compilation_routine_t;
 
@@ -44,7 +44,7 @@ typedef struct _fcall_init_t {
 fcall_init_t fcall_stack[MAX_STACK_FRAME_fcall_stack];
 fcall_init_t *fcall_frame;
 
-static sctable_t routines_by_hash;
+static sctable_t routines_by_callee_hash;
 static sctable_t routines_by_opcode_address;
 static uint closure_count = 0;
 
@@ -110,8 +110,8 @@ inline int is_closure(const char *function_name)
 
 void init_compile_context()
 {
-  routines_by_hash.hash_bits = 8;
-  sctable_init(&routines_by_hash);
+  routines_by_callee_hash.hash_bits = 8;
+  sctable_init(&routines_by_callee_hash);
 
   routines_by_opcode_address.hash_bits = 8;
   sctable_init(&routines_by_opcode_address);
@@ -128,7 +128,8 @@ void function_compiled(zend_op_array *op_array)
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename;
-  char routine_name[ROUTINE_NAME_LENGTH], closure_id[CLOSURE_ID_LENGTH];
+  char routine_name[ROUTINE_NAME_LENGTH], routine_caller_name[ROUTINE_NAME_LENGTH] = {0};
+  char closure_id[CLOSURE_ID_LENGTH];
 #ifdef SPOT_DEBUG
   bool spot = false;
 #endif
@@ -192,33 +193,41 @@ void function_compiled(zend_op_array *op_array)
       efree(filename);
     filename = site_filename = NULL;
 
-    if (is_script_body)
+    if (is_script_body) {
       sprintf(routine_name, "%s:%s", fqn->unit.path, function_name);
-    else if (op_array->scope == NULL)
+    } else if (op_array->scope == NULL) {
       sprintf(routine_name, "%s:%d:%s", fqn->unit.path, op_array->opcodes[0].lineno, function_name);
-    else
+      sprintf(routine_caller_name, "%s:%s", COMPILED_ROUTINE_DEFAULT_SCOPE, function_name);
+    } else {
       sprintf(routine_name, "%s:%s", op_array->scope->name->val, function_name);
+    }
     has_routine_name = true;
   }
+
+  if (strlen(routine_caller_name) == 0)
+    strcat(routine_caller_name, routine_name);
 
   buffer = malloc(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
   cfm.app = fqn->unit.application;
   buffer = NULL;
-  if (is_eval)
-    fqn->function.hash = hash_eval(eval_id);
-  else
-    fqn->function.hash = hash_routine(cfm.routine_name);
+  if (is_eval) {
+    fqn->function.callee_hash = hash_eval(eval_id);
+    fqn->function.caller_hash = hash_eval(eval_id);
+  } else {
+    fqn->function.callee_hash = hash_routine(cfm.routine_name);
+    fqn->function.caller_hash = hash_routine(routine_caller_name);
+  }
 
   if (!is_eval) {
-    cfm.dataset = dataset_routine_lookup(cfm.app, fqn->function.hash);
-    cfm.cfg = cfg_routine_lookup(cfm.app->cfg, fqn->function.hash);
+    cfm.dataset = dataset_routine_lookup(cfm.app, fqn->function.callee_hash);
+    cfm.cfg = cfg_routine_lookup(cfm.app->cfg, fqn->function.callee_hash);
   }
   if (cfm.cfg == NULL) {
-    cfm.cfg = routine_cfg_new(fqn->function.hash); // crash in eval-function-test.php
+    cfm.cfg = routine_cfg_new(fqn->function.caller_hash);
     cfg_add_routine(cfm.app->cfg, cfm.cfg);
-    write_routine_catalog_entry(cfm.app, fqn->function.hash, fqn->unit.path, routine_name);
+    write_routine_catalog_entry(cfm.app, fqn->function.callee_hash, fqn->unit.path, routine_name);
   } else {
     zend_op *op;
     cfg_opcode_t *cfg_opcode;
@@ -244,33 +253,33 @@ void function_compiled(zend_op_array *op_array)
   fqn->function.cfm = cfm;
 
 #ifdef SPOT_DEBUG
-  spot = (fqn->function.hash == 0x933ca2cd);
+  spot = (fqn->function.callee_hash == 0x933ca2cd);
 #endif
 
   if (cfm.dataset == NULL) {
     WARN("--- Function compiled from %d opcodes at "PX": %s|%s: 0x%x"
          " (dataset not found)\n",
          op_array->last, p2int(op_array->opcodes), fqn->unit.path, routine_name,
-         fqn->function.hash);
+         fqn->function.callee_hash);
   } else {
     PRINT("--- Function compiled from %d opcodes at "PX": %s|%s: 0x%x"
           " (dataset found)\n",
           op_array->last, p2int(op_array->opcodes), fqn->unit.path, routine_name,
-          fqn->function.hash);
+          fqn->function.callee_hash);
   }
 
   if (is_opcode_dump_enabled()) {
     if (is_script_body)
-      dump_script_header(routine_name, fqn->function.hash);
+      dump_script_header(routine_name, fqn->function.caller_hash);
     else
-      dump_function_header(fqn->unit.path, routine_name, fqn->function.hash);
+      dump_function_header(fqn->unit.path, routine_name, fqn->function.caller_hash);
   }
 
-  sctable_add_or_replace(&routines_by_hash, fqn->function.hash, fqn);
+  sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn);
 
   if (is_already_compiled) {
-    PRINT("(skipping existing routine 0x%x at "PX")\n", fqn->function.hash,
+    PRINT("(skipping existing routine 0x%x at "PX")\n", fqn->function.callee_hash,
           p2int(op_array->opcodes));
     fflush(stderr);
     return; // verify equal?
@@ -279,7 +288,7 @@ void function_compiled(zend_op_array *op_array)
   if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled())
     reset_fcall_stack();
   if (is_dataflow_analysis()) {
-    add_dataflow_routine(fqn->unit.application, fqn->function.hash, op_array,
+    add_dataflow_routine(fqn->unit.application, fqn->function.caller_hash, op_array,
                          !(is_script_body || is_eval));
   }
 
@@ -290,7 +299,7 @@ void function_compiled(zend_op_array *op_array)
     sink_identifier_t sink_id = {NULL};
 
     PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
-          op->opcode, i, routine_name, fqn->function.hash);
+          op->opcode, i, routine_name, fqn->function.callee_hash);
 
     if (is_opcode_dump_enabled()) {
       fcall_init_t *fcall;
@@ -334,7 +343,7 @@ void function_compiled(zend_op_array *op_array)
       switch (op->opcode) {
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
-          add_dataflow_fcall(fqn->function.hash, i, op_array, fcall->routine_name);
+          add_dataflow_fcall(fqn->function.caller_hash, i, op_array, fcall->routine_name);
           //sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_SEND_VAL:
@@ -347,18 +356,18 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
           fcall = peek_fcall_init();
-          add_dataflow_fcall_arg(fqn->function.hash, i, op_array, fcall->routine_name);
+          add_dataflow_fcall_arg(fqn->function.caller_hash, i, op_array, fcall->routine_name);
           //sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_ASSIGN_OBJ:
         case ZEND_ASSIGN_DIM:
-          add_dataflow_map_assignment(fqn->function.hash, i, op_array);
+          add_dataflow_map_assignment(fqn->function.caller_hash, i, op_array);
           break;
         case ZEND_FE_FETCH:
-          add_dataflow_foreach_fetch(fqn->function.hash, i, op_array);
+          add_dataflow_foreach_fetch(fqn->function.caller_hash, i, op_array);
           break;
         default:
-          add_dataflow_opcode(fqn->function.hash, i, op_array);
+          add_dataflow_opcode(fqn->function.caller_hash, i, op_array);
       }
 
       //add_dataflow_sinks(fqn->function.hash, op, sink_id);
@@ -413,7 +422,7 @@ void function_compiled(zend_op_array *op_array)
                 to_routine_hash = hash_routine(to_routine_name);
 
                 if (is_dataflow_analysis()) {
-                  add_dataflow_include(fqn->function.hash, i, op_array, internal_to_path,
+                  add_dataflow_include(fqn->function.caller_hash, i, op_array, internal_to_path,
                                        to_routine_hash);
                 }
 
@@ -423,7 +432,7 @@ void function_compiled(zend_op_array *op_array)
 
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
 
-                write_routine_edge(true, cfm.app, fqn->function.hash, i,
+                write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
                                    to_routine_hash, 0, USER_LEVEL_TOP);
               } break;
               case ZEND_EVAL: {
@@ -450,12 +459,12 @@ void function_compiled(zend_op_array *op_array)
           fcall_init_t *fcall = pop_fcall_init();
           if (fcall->routine_hash > 0) {
             SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
-            write_routine_edge(true, cfm.app, fqn->function.hash, i,
+            write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
                                fcall->routine_hash, 0, USER_LEVEL_TOP);
           } else if (fcall->opcode > 0) {
             SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
                  "Dataset: %s. edges: %d.\n", i, fcall->opcode, cfm.routine_name, fqn->unit.path,
-                 op->lineno, fqn->function.hash, cfm.dataset == NULL ? "missing" : "found",
+                 op->lineno, fqn->function.callee_hash, cfm.dataset == NULL ? "missing" : "found",
                  cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.app, cfm.dataset, i));
           }
           free((char *) fcall->routine_name);
@@ -534,14 +543,14 @@ void function_compiled(zend_op_array *op_array)
         ERROR("Skipping foobar edge %u|0x%x(%u,%u) -> %u in {%s|%s, 0x%x}\n",
               i, op->opcode, op->op1_type, op->op2_type, target.index,
               fqn->unit.path, fqn->function.cfm.routine_name,
-              fqn->function.hash);
+              fqn->function.callee_hash);
         continue;
       }
 
 #ifdef SPOT_DEBUG
       if (spot) {
         SPOT("Compiling opcode edge %d -> %d for opcode 0x%x in %s (0x%x)\n",
-             i, target.index, op->opcode, routine_name, fqn->function.hash);
+             i, target.index, op->opcode, routine_name, fqn->function.callee_hash);
       }
 #endif
 
@@ -549,7 +558,7 @@ void function_compiled(zend_op_array *op_array)
       PRINT("\t[create edge %u|0x%x(%u,%u) -> %u for {%s|%s, 0x%x}]\n",
             i, op->opcode, op->op1_type, op->op2_type, target.index,
             fqn->unit.path, fqn->function.cfm.routine_name,
-            fqn->function.hash);
+            fqn->function.callee_hash);
     }
   }
 
@@ -568,24 +577,24 @@ void function_compiled(zend_op_array *op_array)
         SPOT("\t[emit %s at %d for {%s|%s, 0x%x}]\n",
               zend_get_opcode_name(cfg_opcode->opcode), i,
               fqn->unit.path, fqn->function.cfm.routine_name,
-              fqn->function.hash);
+              fqn->function.callee_hash);
       }
 #endif
-      write_node(cfm.app, fqn->function.hash, cfg_opcode, i);
+      write_node(cfm.app, fqn->function.callee_hash, cfg_opcode, i);
     }
     for (i = 0; i < cfm.cfg->opcode_edges.size; i++) {
       cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
-      write_op_edge(cfm.app, fqn->function.hash, cfg_edge->from_index,
+      write_op_edge(cfm.app, fqn->function.callee_hash, cfg_edge->from_index,
                     cfg_edge->to_index, USER_LEVEL_TOP);
 #ifdef SPOT_DEBUG
       if (spot) {
         SPOT("\t[emit %d -> %d in 0x%x]\n", cfg_edge->from_index,
-             cfg_edge->to_index, fqn->function.hash);
+             cfg_edge->to_index, fqn->function.callee_hash);
       }
 #endif
     }
-    WARN("No dataset for routine 0x%x\n", fqn->function.hash);
-  } else if (is_eval_routine(fqn->function.hash)) {
+    WARN("No dataset for routine 0x%x\n", fqn->function.callee_hash);
+  } else if (is_eval_routine(fqn->function.callee_hash)) {
     cfg_opcode_edge_t *cfg_edge;
     for (i = 0; i < cfm.cfg->opcodes.size; i++) {
       dataset_routine_verify_opcode(cfm.dataset, i,
@@ -595,7 +604,7 @@ void function_compiled(zend_op_array *op_array)
       cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
       dataset_routine_verify_compiled_edge(cfm.dataset, cfg_edge->from_index, cfg_edge->to_index);
     }
-    WARN("Found dataset for routine 0x%x\n", fqn->function.hash);
+    WARN("Found dataset for routine 0x%x\n", fqn->function.callee_hash);
   }
 
   flush_all_outputs(cfm.app);
@@ -606,7 +615,7 @@ control_flow_metadata_t *get_cfm_by_name(const char *routine_name)
 {
   function_fqn_t *fqn;
 
-  fqn = (function_fqn_t *) sctable_lookup(&routines_by_hash, hash_routine(routine_name));
+  fqn = (function_fqn_t *) sctable_lookup(&routines_by_callee_hash, hash_routine(routine_name));
   if (fqn == NULL)
     return NULL;
   else

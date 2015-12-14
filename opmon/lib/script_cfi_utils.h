@@ -116,6 +116,8 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 # define OPMON_G(v) (opcode_monitor_globals.v)
 #endif
 
+#define ROUTINE_NAME_LENGTH 256
+
 uint hash_string(const char *string);
 uint64 hash_addrs(void *first, void *second);
 void opmon_activate_printer();
@@ -134,7 +136,17 @@ static inline uint64 hash_addr(void *addr)
 
 static inline uint hash_routine(const char *routine_name)
 {
-  uint hash = hash_string(routine_name);
+  uint hash;
+  size_t len = strlen(routine_name);
+  char lowercase[ROUTINE_NAME_LENGTH];
+
+  if (len > ROUTINE_NAME_LENGTH) {
+    ERROR("Routine name '%s' (%zd) exceeds limit of %d characters.\n",
+          routine_name, len, ROUTINE_NAME_LENGTH);
+  }
+
+  zend_str_tolower_copy(lowercase, routine_name, len);
+  hash = hash_string(lowercase);
   return (hash & 0x7fffffff);
 }
 
