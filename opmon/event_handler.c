@@ -41,7 +41,7 @@ static void init_worker()
 
 static void query_executing(const char *query)
 {
-  SPOT("DB: %s\n", query);
+  PRINT("DB query: %s\n", query);
 }
 
 const char *get_static_analysis()

@@ -213,8 +213,7 @@ void function_compiled(zend_op_array *op_array)
   cfm.app = fqn->unit.application;
   buffer = NULL;
   if (is_eval) {
-    fqn->function.callee_hash = hash_eval(eval_id);
-    fqn->function.caller_hash = hash_eval(eval_id);
+    fqn->function.callee_hash = fqn->function.caller_hash = hash_eval(eval_id);
   } else {
     fqn->function.callee_hash = hash_routine(cfm.routine_name);
     fqn->function.caller_hash = hash_routine(routine_caller_name);
@@ -225,7 +224,7 @@ void function_compiled(zend_op_array *op_array)
     cfm.cfg = cfg_routine_lookup(cfm.app->cfg, fqn->function.callee_hash);
   }
   if (cfm.cfg == NULL) {
-    cfm.cfg = routine_cfg_new(fqn->function.caller_hash);
+    cfm.cfg = routine_cfg_new(fqn->function.callee_hash);
     cfg_add_routine(cfm.app->cfg, cfm.cfg);
     write_routine_catalog_entry(cfm.app, fqn->function.callee_hash, fqn->unit.path, routine_name);
   } else {

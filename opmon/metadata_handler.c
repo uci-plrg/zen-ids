@@ -52,7 +52,7 @@ void *load_dataset(const char *script_path)
     WARN("Failed to map the dataset at path %s. Skipping dataset operations.\n", dataset_path);
     return NULL;
   }
-  STATUS("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
+  SPOT("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
 
   dataset = install_dataset(map);
   eval_id = dataset_get_eval_count(dataset);

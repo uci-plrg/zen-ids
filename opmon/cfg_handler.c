@@ -447,6 +447,9 @@ void cfg_initialize_application(application_t *app)
       }
     }
 
+    if (app->cfg_files != NULL)
+      ERROR("Overwriting app cfg files!\n");
+
     app->cfg_files = malloc(sizeof(cfg_files_t));
     open_output_files_in_dir((cfg_files_t *) app->cfg_files, app_cfg_file_path, "w");
 
