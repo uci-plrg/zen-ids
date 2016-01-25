@@ -1,0 +1,39 @@
+
+To replay gor logs:
+
+1. Get gor
+   · Build from plrg repository if necessary--instructions in /BUILD.txt
+2. Unpack the logs somewhere
+   · Number the logs sequentially for easy iteration
+3. Reset the database
+   · Delete whatever is there
+   · Change all URLs in the DB init script to the replay server
+   · Run the DB init script
+4. Reset the site files if necessary
+   · Delete the site tree
+   · Unpack the original site tree
+   · Patch the authentication code (e.g. WordPress)
+5. Set up a merge area having nothing in it
+6. Delete the dataset from a while ago: $datasets/$app.set
+7. Delete the error and access logs in /var/log/apache2
+8. Replay the logs like this:
+     $gor
+       --input-file "log.gor|i"
+       --output-sync-http "http://dw-7.eecs.uci.edu"
+       --output-http-redirects=100
+       --output-http-url-regexp "\.edu/$|\.edu/wordpress|\.edu/index.php"
+9. After each replay batch:
+   · Make a $run directory
+   · Move the apache error and access logs into $run
+   · Merge:
+      · w-merge -o $merge_output $(ls -d $(sr -w 1)/*/$app)
+      · Copy the merge result files into $run
+      · Copy the cfg.set file to $datasets/sets/$app.set
+
+
+
+--------------
+
+Notes
+
+1. If the authentication is not working, use PHP function `error_log($message)` to debug.

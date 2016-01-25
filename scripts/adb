@@ -1,0 +1,10 @@
+#!/bin/bash
+
+[ "$1" == "--help" ] && echo "Usage: adb # starts gdb with the Apache environment"  \
+                     && echo "       run -X -d /etc/apache2 # starts Apache in gdb" \
+                     && exit
+
+source /etc/apache2/envvars
+source /root/.rc
+
+gdb --args /usr/sbin/apache2 -X -d /etc/apache2
