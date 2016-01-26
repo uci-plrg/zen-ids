@@ -97,13 +97,14 @@ static uint get_timestamp(void)
 
 static void write_request_entry(cfg_files_t *cfg_files)
 {
-  fprintf(cfg_files->request, "<client-ip> %s\n", request_state.r->useragent_ip);
   fprintf(cfg_files->request, "<request> %s\n", request_state.r->the_request);
   fprintf(cfg_files->request, "<requested-file> %s\n", request_state.r->filename);
   fprintf(cfg_files->request, "<protocol> %s\n", request_state.r->protocol);
   fprintf(cfg_files->request, "<method> %s\n", request_state.r->method);
   fprintf(cfg_files->request, "<content-type> %s\n", request_state.r->content_type);
   fprintf(cfg_files->request, "<content-encodings> %s\n", request_state.r->content_encoding);
+  fprintf(cfg_files->request, "<client-ip> %s\n", request_state.r->useragent_ip);
+  fprintf(cfg_files->request, "<request-time> 0x%lx\n", request_state.r->request_time);
   fprintf(cfg_files->request, "<status> %s\n", request_state.r->status_line);
   fprintf(cfg_files->request, "<arguments> %s\n", request_state.r->args);
 
@@ -506,11 +507,13 @@ void cfg_request(bool start)
       strcpy(session.id, PS(id)->val);
       session.hash = hash_string(session.id);
       SPOT("New session id %s (0x%x) on pid 0x%x\n", session.id, session.hash, getpid());
-      if (strcmp(session.id, "9491nc08len3diid9t7r5757e5") == 0 /* ||
-          strcmp(session.id, "i6ivdkcgdmurtjcffudk5frna4") == 0 */) {
+      /* Patched OPMON_REPLAY_AUTH in WordPress to accept any user_logged_in_* token
+      if (strcmp(session.id, "9491nc08len3diid9t7r5757e5") == 0 / * ||
+          strcmp(session.id, "i6ivdkcgdmurtjcffudk5frna4") == 0 * /) {
         SPOT("Faking user level 10 for truncated session\n");
         set_opmon_user_level(10);
       }
+      */
     }
   } else {
     if (request_state.app != NULL) {

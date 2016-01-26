@@ -12,7 +12,7 @@ To replay gor logs:
 4. Reset the site files if necessary
    · Delete the site tree
    · Unpack the original site tree
-   · Patch the authentication code (e.g. WordPress)
+   · Patch the PHP code with replay authentication hooks (e.g. WordPress)
 5. Set up a merge area having nothing in it
 6. Delete the dataset from a while ago: $datasets/$app.set
 7. Delete the error and access logs in /var/log/apache2
@@ -21,7 +21,7 @@ To replay gor logs:
        --input-file "log.gor|i"
        --output-sync-http "http://dw-7.eecs.uci.edu"
        --output-http-redirects=100
-       --output-http-url-regexp "\.edu/$|\.edu/wordpress|\.edu/index.php"
+       --output-http-url-exclude "\.edu/git|\.edu/publications|\.edu/software|\.edu/admin"
 9. After each replay batch:
    · Make a $run directory
    · Move the apache error and access logs into $run
