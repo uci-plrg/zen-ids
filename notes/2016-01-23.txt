@@ -1,0 +1,25 @@
+ap_rflush() (https://ci.apache.org/projects/httpd/trunk/doxygen/structrequest__rec.html)
+sapi/apache2handler/sapi_apache2.c:php_apache_sapi_flush()
+main/SAPI.c:sapi_flush()
+main/output.c:php_output_op()
+main/main.c:php_output_wrapper()
+
+
+ · Create a dataset from:
+   · a merge of all the requests
+   · the first n requests
+
+Maybe like this:
+
+1. load the base dataset, if any
+   · merge the run's routines into the base?
+     · maybe with all user levels at 0?
+2. merge the datasets/runs into a copy, which becomes the routine/node source
+3. sort the requests chronologically, starting from the first request not in the base (if any)
+4. iterate the requests
+   · pull new routines from the source
+   · add request edges to the base
+5. write the graph to a new dataset
+
+Then iterate the remaining requests and log any edges outside the dataset (alarms).
+

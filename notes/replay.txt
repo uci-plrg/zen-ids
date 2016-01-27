@@ -37,3 +37,16 @@ To replay gor logs:
 Notes
 
 1. If the authentication is not working, use PHP function `error_log($message)` to debug.
+2. Change include/exclude to allow multiple flags, then update script to filter:
+
+   3061 favicon.ico
+    999 ~peizhaoo/
+    955 robots.txt
+    678 ~bdemsky/
+    360 compiler/
+    258 ~bhawkins/
+    233 javadoc/
+    209 students/
+    172 satcheck/
+    159 cgi-bin/
+    114 bdemsky.html
