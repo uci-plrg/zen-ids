@@ -97,6 +97,7 @@ static uint get_timestamp(void)
 
 static void write_request_entry(cfg_files_t *cfg_files)
 {
+  fprintf(cfg_files->request, "<request-time> 0x%lx\n", request_state.r->request_time);
   fprintf(cfg_files->request, "<request> %s\n", request_state.r->the_request);
   fprintf(cfg_files->request, "<requested-file> %s\n", request_state.r->filename);
   fprintf(cfg_files->request, "<protocol> %s\n", request_state.r->protocol);
@@ -104,7 +105,6 @@ static void write_request_entry(cfg_files_t *cfg_files)
   fprintf(cfg_files->request, "<content-type> %s\n", request_state.r->content_type);
   fprintf(cfg_files->request, "<content-encodings> %s\n", request_state.r->content_encoding);
   fprintf(cfg_files->request, "<client-ip> %s\n", request_state.r->useragent_ip);
-  fprintf(cfg_files->request, "<request-time> 0x%lx\n", request_state.r->request_time);
   fprintf(cfg_files->request, "<status> %s\n", request_state.r->status_line);
   fprintf(cfg_files->request, "<arguments> %s\n", request_state.r->args);
 
