@@ -95,6 +95,14 @@ static uint get_timestamp(void)
   return (hi << 0xc) | (lo >> 0x14);
 }
 
+static bool is_media_file(char *buffer)
+{
+  if (strncmp("%PDF", buffer, strlen("%PDF")) == 0)
+    return true;
+
+  return false;
+}
+
 static void write_request_entry(cfg_files_t *cfg_files)
 {
   fprintf(cfg_files->request, "<request-time> 0x%lx\n", request_state.r->request_time);
@@ -155,7 +163,7 @@ static void write_request_entry(cfg_files_t *cfg_files)
     } break;
     case M_POST: {
       char buffer[SAPI_POST_BLOCK_SIZE], *set, *mark;
-      apr_size_t size;
+      apr_size_t size, tail;
 #ifdef URL_DECODE
       char decode_buffer[SAPI_POST_BLOCK_SIZE];
       apr_size_t decode_size, decode_fragment_size = 0;
@@ -174,10 +182,14 @@ static void write_request_entry(cfg_files_t *cfg_files)
                                                           SAPI_POST_BLOCK_SIZE);
           if (size == 0)
             break;
+          if (is_media_file(buffer)) { /* ignore all subsequent parameters--impossible to find the delimiter */
+            fprintf(cfg_files->request, "[media]");
+            break;
+          }
           set = buffer;
-          do {
+          do { /* write up to the next post parameter (delimited by '&') */
             mark = strchr(set, '&');
-            if (mark == NULL)
+            if (mark == NULL || mark > buffer + size)
               break;
 #ifdef URL_DECODE
             decode_size = mark - set;
@@ -209,7 +221,11 @@ static void write_request_entry(cfg_files_t *cfg_files)
           decode_size = php_url_decode(decode_buffer, size - (set - buffer));
           fwrite(decode_buffer, sizeof(char), decode_size, cfg_files->request);
 #else
-          fwrite(set, sizeof(char), size - (set - buffer), cfg_files->request);
+          tail = 0;
+          if (size > 0)
+            tail = size - (set - buffer);
+          if (tail > 0)
+            fwrite(set, sizeof(char), tail, cfg_files->request);
 #endif
         }
       }
