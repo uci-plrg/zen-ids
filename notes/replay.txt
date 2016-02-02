@@ -50,3 +50,11 @@ Notes
     172 satcheck/
     159 cgi-bin/
     114 bdemsky.html
+
+3. When configuring gitlist, apache mod_rewrite requres this entry in apache2.conf per gitlist instance:
+
+    <Directory /stash/www/html/git>
+            Options FollowSymLinks
+            AllowOverride All
+            Require all granted
+    </Directory>
