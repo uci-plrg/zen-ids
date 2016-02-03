@@ -48,7 +48,8 @@ To build the opcode-monitor extension:
           --enable-opcode-monitor
           --prefix=$PHP_HOME
           --with-php-config=$PHP_HOME/bin/php-config
-   > make -j3 install
+   > make # do not `make -j` yet, it will fail. The very first time it has to just be `make`.
+   > make install
 
 To rebuild the opcode-monitor extension after changing the source file set:
 
