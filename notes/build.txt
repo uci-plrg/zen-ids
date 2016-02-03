@@ -1,12 +1,14 @@
 
 --------------
+Build PHP
+--------------
 
 This build of PHP requires the environment variable PHP_HOME.
 
 First install the pre-requisites:
 $PHP_HOME/fix-bison
 
-apt-get install autoconf apache2-dev libxml2 libxml2-dev libssl-dev libcurl4-openssl-dev pkg-config libicu-dev libmcrypt-dev libtidy-dev libxslt1.1 libxslt1-dev libjpeg-dev
+apt-get install autoconf apache2-dev libxml2 libxml2-dev libssl-dev libcurl4-openssl-dev pkg-config libicu-dev libmcrypt-dev libtidy-dev libxslt1.1 libxslt1-dev libjpeg-dev libpng12-dev
 
 # manually install libxdiff
 cd /hd/temp
@@ -38,6 +40,8 @@ dpkg -i libbison-dev_2.7.1.dfsg-1_amd64.deb
 dpkg -i bison_2.7.1.dfsg-1_amd64.deb
 
 ----------------
+Build opmon
+----------------
 
 To build the opcode-monitor extension:
 
@@ -51,6 +55,23 @@ To build the opcode-monitor extension:
    > make # do not `make -j` yet, it will fail. The very first time it has to just be `make`.
    > make install
 
+Next configure php with the opmon extension:
+
+   > cd $PHP_HOME
+   > mkdir conf.d/ext
+   > scp $similar conf.d/ext/opmon.ini
+
+Open the opmon.ini file and change the paths for this machine.
+
+After installing for the first time, php needs to be rebuilt:
+
+   > cd $PHP_HOME
+   > make install
+
+----------------
+Rebuild opmon
+----------------
+
 To rebuild the opcode-monitor extension after changing the source file set:
 
    > cd opmon
@@ -59,10 +80,23 @@ To rebuild the opcode-monitor extension after changing the source file set:
    > ../../php/scripts/phpize
    > ./current-config
 
+
+----------------
+Configure apache
 ----------------
 
-When checking out php-cfi for the first time, the apache includes must be
-copied from the local apache install into php-cfi/opmon/include, e.g.:
+   > a2dismod mpm_event
+   > a2enmod mpm_prefork
+   > cd /etc/apache2
+   > scp $similar mods-enabled/php7.conf
+   > cp mods-enabled/php7.conf mods-available/php7.conf
+
+----------------
+Miscellaneous
+----------------
+
+When checking out php-cfi for the first time, it may be necessary to
+copy the apache includes from the local apache install into php-cfi/opmon/include, e.g.:
 
    cp /usr/include/apache2/* include
    cp /usr/include/apr-1.0/* include
