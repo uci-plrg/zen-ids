@@ -55,13 +55,6 @@ typedef struct _stack_event_t {
   const char *return_target_name;
 } stack_event_t;
 
-typedef struct _fcall_init_t {
-  zend_op_array *op_array;
-  const zend_op *call_op;
-  const char *builtin_name;
-  scarray_t *args;
-} fcall_init_t;
-
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
 static exception_frame_t *exception_frame;
 
@@ -72,10 +65,6 @@ static sctable_t frame_table;
 static stack_frame_t void_frame;
 static stack_frame_t prev_frame;
 static stack_frame_t cur_frame;
-
-static fcall_init_t fcall_stack[MAX_STACK_FRAME_fcall_stack];
-static fcall_init_t *fcall_frame;
-static bool executing_internal_function = false;
 
 static stack_event_t stack_event;
 
@@ -88,40 +77,6 @@ static pthread_t first_thread_id;
 static zend_op entry_op;
 
 #define CONTEXT_ENTRY 0xffffffffU
-
-static void fcall_init_push(zend_op_array *op_array, const zval *callee_name)
-{
-  if (callee_name != NULL && zend_hash_find(executor_globals.function_table, Z_STR_P(callee_name)) == NULL)
-    callee_name = NULL; /* only track builtins */
-
-  INCREMENT_STACK(fcall_stack, fcall_frame);
-  fcall_frame->call_op = NULL;
-  fcall_frame->op_array = op_array;
-  fcall_frame->builtin_name = /*strdup(*/Z_STRVAL_P(callee_name); //);
-  if (fcall_frame->args == NULL) {
-    fcall_frame->args = malloc(sizeof(scarray_t));
-    scarray_init(fcall_frame->args);
-  }
-}
-
-static inline fcall_init_t *fcall_init_pop()
-{
-  fcall_init_t *top = fcall_frame;
-  if (top->args != NULL)
-    top->args->size = 0;
-  DECREMENT_STACK(fcall_stack, fcall_frame);
-  return top;
-}
-
-static inline void fcall_init_set_call(const zend_op *call_op)
-{
-  fcall_frame->call_op = call_op;
-}
-
-static inline void fcall_init_add_arg(const zend_op *op)
-{
-  scarray_append(fcall_frame->args, (void *) op);
-}
 
 static void fcall_init_print_var_value(const zval *var)
 {
@@ -243,50 +198,82 @@ static void fcall_init_print_operand(const char *tag, zend_op_array *ops,
   fprintf(stderr, " ");
 }
 
-static void fcall_init_print_file_builtin(const char *tag)
+static void print_file_builtin(const char *tag, const char *callee_name, zend_op_array *op_array,
+                               const zend_op *call_op, uint arg_count, const zend_op **args)
 {
     uint i;
-    zend_op *arg_op;
 
-    SPOT("%s %s ", tag, fcall_frame->builtin_name);
-    for (i = 0; i < fcall_frame->args->size; i++) {
-      arg_op = (zend_op *) fcall_frame->args->data[i];
-      fcall_init_print_operand("<arg>", fcall_frame->op_array, &arg_op->op1, arg_op->op1_type);
-    }
-    fcall_init_print_operand("<ret>", fcall_frame->op_array,
-                             &fcall_frame->call_op->result, fcall_frame->call_op->result_type);
+    SPOT("%s %s ", tag, callee_name);
+    for (i = 0; i < arg_count; i++)
+      fcall_init_print_operand("<arg>", op_array, &args[i]->op1, args[i]->op1_type);
+    fcall_init_print_operand("<ret>", op_array, &call_op->result, call_op->result_type);
     fprintf(stderr, "\n");
 }
 
-static inline void fcall_init_print()
+static void print_builtin(zend_execute_data *execute_data, zend_op_array *op_array, const zend_op *call_op)
 {
-  if (fcall_frame->builtin_name != NULL) {
-    if (is_file_sink_function(fcall_frame->builtin_name))
-      fcall_init_print_file_builtin("<file-output>");
-    else if (is_file_source_function(fcall_frame->builtin_name))
-      fcall_init_print_file_builtin("<file-input>");
-  }
-}
+  bool done = false;
+  uint init_count = 0, arg_count = 0;
+  const zend_op *walk = (call_op - 1);
+  const zend_op *args[0x10];
 
-/*
-    if (fcall_frame->args != NULL) {
-      uint i;
+  do {
+    if (init_count > 0) {
+      switch (walk->opcode) {
+        case ZEND_NEW:
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_NS_FCALL_BY_NAME:
+        case ZEND_INIT_METHOD_CALL:
+        case ZEND_INIT_STATIC_METHOD_CALL:
+        case ZEND_INIT_USER_CALL:
+          init_count--;
+          break;
+        case ZEND_DO_FCALL:
+          init_count++;
+          break;
+      }
+    } else {
+      switch (walk->opcode) {
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_NS_FCALL_BY_NAME: {
+          const zval *callee_name = NULL;
 
-      for (i = 0; i < fcall_frame->args->size; i++)
-        free((char *) ((fcall_init_t *) fcall_frame->args->data[i])->builtin_name);
-      fcall_frame->args->size = 0;
+          if (walk->op2_type == IS_CONST && Z_TYPE_P(walk->op2.zv) == IS_STRING) {
+            callee_name = walk->op2.zv;
+          } else if (walk->opcode != ZEND_INIT_FCALL) {
+            callee_name = EX_VAR(walk->op2.var);
+          }
+          if (callee_name != NULL &&
+              zend_hash_find(executor_globals.function_table, Z_STR_P(callee_name)) != NULL) {
+            if (is_file_sink_function(Z_STRVAL_P(callee_name)))
+              print_file_builtin("<file-output>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
+            else if (is_file_source_function(Z_STRVAL_P(callee_name)))
+              print_file_builtin("<file-input>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
+          }
+          done = true;
+        } break;
+        case ZEND_NEW:
+        case ZEND_INIT_METHOD_CALL:
+        case ZEND_INIT_STATIC_METHOD_CALL:
+        case ZEND_INIT_USER_CALL:
+          done = true;
+          break;
+        case ZEND_SEND_VAL:
+        case ZEND_SEND_VAL_EX:
+        case ZEND_SEND_VAR:
+        case ZEND_SEND_VAR_NO_REF:
+        case ZEND_SEND_REF:
+        case ZEND_SEND_VAR_EX:
+        case ZEND_SEND_UNPACK:
+        case ZEND_SEND_ARRAY:
+        case ZEND_SEND_USER:
+          args[arg_count++] = walk;
+          break;
+      }
     }
-*/
-
-static inline void fcall_init_reset()
-{
-  while (true) {
-    if (fcall_frame->args != NULL)
-      fcall_frame->args->size = 0;
-    if (fcall_frame <= fcall_stack + 1)
-      break;
-    DECREMENT_STACK(fcall_stack, fcall_frame);
-  }
+  } while ((--walk >= (zend_op *) &op_array[0]) && !done);
 }
 
 static uint get_first_executable_index(zend_op *opcodes)
@@ -323,9 +310,6 @@ void initialize_interp_context()
 
   stack_event.state = STACK_STATE_NONE;
   stack_event.last_opcode = 0;
-
-  memset(fcall_stack, 0, sizeof(fcall_init_t) * MAX_STACK_FRAME_fcall_stack);
-  fcall_frame = fcall_stack + 1;
 
   first_thread_id = pthread_self();
 
@@ -694,12 +678,6 @@ void opcode_executing(const zend_op *op)
 
   update_user_session();
 
-  if (executing_internal_function) {
-    fcall_init_print();
-    fcall_init_pop();
-    executing_internal_function = false;
-  }
-
   op_execution_count++;
   if ((op_execution_count & FLUSH_MASK) == 0)
     flush_all_outputs(cur_frame.cfm.app);
@@ -737,29 +715,6 @@ void opcode_executing(const zend_op *op)
 #endif
 
   switch (op->opcode) {
-    case ZEND_INIT_FCALL: {
-      const zval *callee_name = NULL;
-
-      if (op->op2_type == IS_CONST)
-        callee_name = op->op2.zv;
-      fcall_init_push(op_array, callee_name);
-    } break;
-    case ZEND_INIT_FCALL_BY_NAME:
-    case ZEND_INIT_NS_FCALL_BY_NAME: {
-      const zval *callee_name = NULL;
-
-      if (op->op2_type == IS_CONST && Z_TYPE_P(op->op2.zv) == IS_STRING) {
-        callee_name = op->op2.zv;
-      } else {
-        callee_name = EX_VAR(op->op2.var);
-      }
-      fcall_init_push(op_array, callee_name);
-    } break;
-    case ZEND_INIT_METHOD_CALL:
-    case ZEND_INIT_STATIC_METHOD_CALL:
-    case ZEND_INIT_USER_CALL:
-      fcall_init_push(op_array, NULL);
-      break;
     case ZEND_SEND_VAL:
     case ZEND_SEND_VAL_EX:
     case ZEND_SEND_VAR:
@@ -769,12 +724,10 @@ void opcode_executing(const zend_op *op)
     case ZEND_SEND_UNPACK:
     case ZEND_SEND_ARRAY:
     case ZEND_SEND_USER:
-      fcall_init_add_arg(op);
       break;
     case ZEND_DO_FCALL:
       if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
-        fcall_init_set_call(op);
-        executing_internal_function = true;
+        print_builtin(execute_data, op_array, op);
       } else {
         stack_event.state = STACK_STATE_CALL;
         stack_event.last_opcode = op->opcode;

@@ -34,6 +34,10 @@ typedef struct _function_fqn_t {
   compilation_routine_t function;
 } function_fqn_t;
 
+/* N.B.: in general, fcall stacks are unsafe at runtime because of tricky cases
+ * like autoloaders that invoke PHP functions without any associated call. It
+ * seems to mostly work for static analysis though.
+ */
 typedef struct _fcall_init_t {
   uint init_index;
   uint routine_hash;
