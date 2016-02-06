@@ -41,7 +41,8 @@ static void init_worker()
 
 static void query_executing(const char *query)
 {
-  PRINT("DB query: %s\n", query);
+  SPOT("DB | request #%d | user-level %d | %s\n",
+       get_current_request_id(), get_current_user_level(), query);
 }
 
 const char *get_static_analysis()

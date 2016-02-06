@@ -493,6 +493,7 @@ void cfg_destroy_application(application_t *app)
     }
     if (!is_standalone_app)
       free(cfg_files);
+    app->cfg_files = NULL;
   }
 
   destroy_interp_app_context(app);
@@ -680,4 +681,12 @@ void flush_all_outputs(application_t *app)
     fflush(cfg_files->request_edge);
   }
   fflush(stderr);
+}
+
+int get_current_request_id()
+{
+  if (request_state.is_in_request)
+    return request_state.request_id;
+  else
+    return -1;
 }

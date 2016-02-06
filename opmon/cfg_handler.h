@@ -28,4 +28,6 @@ void write_routine_catalog_entry(application_t *app, uint routine_hash, const ch
 
 void flush_all_outputs(application_t *app);
 
+int get_current_request_id();
+
 #endif

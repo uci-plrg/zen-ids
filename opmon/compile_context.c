@@ -306,8 +306,10 @@ void function_compiled(zend_op_array *op_array)
       switch (op->opcode) {
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
-          dump_fcall_opcode(op_array, op, fcall->routine_name);
-          sink_id.call_target = fcall->routine_name;
+          if (fcall->routine_hash > 0) {
+            dump_fcall_opcode(op_array, op, fcall->routine_name);
+            sink_id.call_target = fcall->routine_name;
+          }
           break;
         case ZEND_SEND_VAL:
         case ZEND_SEND_VAL_EX:
@@ -333,7 +335,8 @@ void function_compiled(zend_op_array *op_array)
           dump_opcode(op_array, op);
       }
 
-      identify_sink_operands(op, sink_id);
+      if (sink_id.call_target != NULL)
+        identify_sink_operands(op, sink_id);
     }
 
     if (is_dataflow_analysis()) {
@@ -342,7 +345,8 @@ void function_compiled(zend_op_array *op_array)
       switch (op->opcode) {
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
-          add_dataflow_fcall(fqn->function.caller_hash, i, op_array, fcall->routine_name);
+          if (fcall->routine_hash > 0)
+            add_dataflow_fcall(fqn->function.caller_hash, i, op_array, fcall->routine_name);
           //sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_SEND_VAL:
@@ -355,7 +359,8 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
           fcall = peek_fcall_init();
-          add_dataflow_fcall_arg(fqn->function.caller_hash, i, op_array, fcall->routine_name);
+          if (fcall->routine_hash > 0)
+            add_dataflow_fcall_arg(fqn->function.caller_hash, i, op_array, fcall->routine_name);
           //sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_ASSIGN_OBJ:
@@ -476,9 +481,9 @@ void function_compiled(zend_op_array *op_array)
             //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
             //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
 
-            if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL &&
-                !is_opcode_dump_enabled()) {
-              ignore_call = true;
+            if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL) {
+              ignore_call |= !is_opcode_dump_enabled();
+              // flex: print all args if is_file_sink_function() or is_file_source_function() ?
               break; // ignore builtins for now (unless dumping ops)
             }
 

@@ -889,56 +889,6 @@ bool is_file_source_function(const char *name)
     return true;
   } else if (strcmp(name, "scandir") == 0) {
     return true;
-  }
-  return false;
-}
-
-bool is_file_sink_function(const char *name)
-{
-  if (strcmp(name, "chdir") == 0) {
-    return true;
-  } else if (strcmp(name, "chroot") == 0) {
-    return true;
-  } else if (strcmp(name, "closedir") == 0) {
-    return true;
-  } else if (strcmp(name, "opendir") == 0) {
-    return true;
-  } else if (strcmp(name, "rewinddir") == 0) {
-    return true;
-  }
-  return false;
-}
-
-bool is_system_source_function(const char *name)
-{
-  if (strcmp(name, "shmop_read") == 0) {
-    return true;
-  } else if (strcmp(name, "shmop_size") == 0) {
-    return true;
-  } else if (strcmp(name, "expect_expectl") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_alarm") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_errno") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_get_last_err") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_getpriority") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_strerror") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_wexitstatus") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_wifexited") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_wifsignaled") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_wifstopped") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_wstopsig") == 0) {
-    return true;
-  } else if (strcmp(name, "pcntl_wtermsig") == 0) {
-    return true;
   } else if (strcmp(name, "basename") == 0) {
     return true;
   } else if (strcmp(name, "dirname") == 0) {
@@ -1011,6 +961,114 @@ bool is_system_source_function(const char *name)
     return true;
   } else if (strcmp(name, "is_writeable") == 0) {
     return true;
+  } else if (strcmp(name, "fclose") == 0) {
+    return true;
+  } else if (strcmp(name, "fseek") == 0) {
+    return true;
+  } else if (strcmp(name, "rewind") == 0) {
+    return true;
+  }
+  return false;
+}
+
+bool is_file_sink_function(const char *name)
+{
+  if (strcmp(name, "chdir") == 0) {
+    return true;
+  } else if (strcmp(name, "chroot") == 0) {
+    return true;
+  } else if (strcmp(name, "closedir") == 0) {
+    return true;
+  } else if (strcmp(name, "opendir") == 0) {
+    return true;
+  } else if (strcmp(name, "rewinddir") == 0) {
+    return true;
+  } else if (strcmp(name, "chgrp") == 0) {
+    return true;
+  } else if (strcmp(name, "chmod") == 0) {
+    return true;
+  } else if (strcmp(name, "chown") == 0) {
+    return true;
+  } else if (strcmp(name, "copy") == 0) {
+    return true;
+  } else if (strcmp(name, "delete") == 0) {
+    return true;
+  } else if (strcmp(name, "fflush") == 0) {
+    return true;
+  } else if (strcmp(name, "file_put_contents") == 0) {
+    return true;
+  } else if (strcmp(name, "flock") == 0) {
+    return true;
+  } else if (strcmp(name, "fopen") == 0) {
+    return true;
+  } else if (strcmp(name, "fpassthru") == 0) {
+    return true;
+  } else if (strcmp(name, "fputcsv") == 0) {
+    return true;
+  } else if (strcmp(name, "fputs") == 0) {
+    return true;
+  } else if (strcmp(name, "ftruncate") == 0) {
+    return true;
+  } else if (strcmp(name, "fwrite") == 0) {
+    return true;
+  } else if (strcmp(name, "lchgrp") == 0) {
+    return true;
+  } else if (strcmp(name, "lchown") == 0) {
+    return true;
+  } else if (strcmp(name, "mkdir") == 0) {
+    return true;
+  } else if (strcmp(name, "move_uploaded_file") == 0) {
+    return true;
+  } else if (strcmp(name, "rename") == 0) {
+    return true;
+  } else if (strcmp(name, "rmdir") == 0) {
+    return true;
+  } else if (strcmp(name, "set_file_buffer") == 0) {
+    return true;
+  } else if (strcmp(name, "link") == 0) {
+    return true;
+  } else if (strcmp(name, "symlink") == 0) {
+    return true;
+  } else if (strcmp(name, "unlink") == 0) {
+    return true;
+  } else if (strcmp(name, "touch") == 0) {
+    return true;
+  } else if (strcmp(name, "tmpfile") == 0) {
+    return true;
+  }
+  return false;
+}
+
+bool is_system_source_function(const char *name)
+{
+  if (strcmp(name, "shmop_read") == 0) {
+    return true;
+  } else if (strcmp(name, "shmop_size") == 0) {
+    return true;
+  } else if (strcmp(name, "expect_expectl") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_alarm") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_errno") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_get_last_err") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_getpriority") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_strerror") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wexitstatus") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wifexited") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wifsignaled") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wifstopped") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wstopsig") == 0) {
+    return true;
+  } else if (strcmp(name, "pcntl_wtermsig") == 0) {
+    return true;
   } else if (strcmp(name, "linkinfo") == 0) {
     return true;
   } else if (strcmp(name, "lstat") == 0) {
@@ -1069,73 +1127,15 @@ bool is_system_sink_function(const char *name)
     return true;
   } else if (strcmp(name, "pcntl_waitpid") == 0) {
     return true;
-  } else if (strcmp(name, "chgrp") == 0) {
-    return true;
-  } else if (strcmp(name, "chmod") == 0) {
-    return true;
-  } else if (strcmp(name, "chown") == 0) {
-    return true;
   } else if (strcmp(name, "clearstatcache") == 0) {
-    return true;
-  } else if (strcmp(name, "copy") == 0) {
-    return true;
-  } else if (strcmp(name, "delete") == 0) {
-    return true;
-  } else if (strcmp(name, "fclose") == 0) {
-    return true;
-  } else if (strcmp(name, "fflush") == 0) {
-    return true;
-  } else if (strcmp(name, "file_put_contents") == 0) {
-    return true;
-  } else if (strcmp(name, "flock") == 0) {
-    return true;
-  } else if (strcmp(name, "fopen") == 0) {
-    return true;
-  } else if (strcmp(name, "fpassthru") == 0) {
-    return true;
-  } else if (strcmp(name, "fputcsv") == 0) {
-    return true;
-  } else if (strcmp(name, "fputs") == 0) {
-    return true;
-  } else if (strcmp(name, "fseek") == 0) {
-    return true;
-  } else if (strcmp(name, "ftruncate") == 0) {
-    return true;
-  } else if (strcmp(name, "fwrite") == 0) {
-    return true;
-  } else if (strcmp(name, "lchgrp") == 0) {
-    return true;
-  } else if (strcmp(name, "lchown") == 0) {
-    return true;
-  } else if (strcmp(name, "link") == 0) {
-    return true;
-  } else if (strcmp(name, "mkdir") == 0) {
-    return true;
-  } else if (strcmp(name, "move_uploaded_file") == 0) {
     return true;
   } else if (strcmp(name, "pclose") == 0) {
     return true;
   } else if (strcmp(name, "popen") == 0) {
     return true;
-  } else if (strcmp(name, "rename") == 0) {
-    return true;
-  } else if (strcmp(name, "rewind") == 0) {
-    return true;
-  } else if (strcmp(name, "rmdir") == 0) {
-    return true;
-  } else if (strcmp(name, "set_file_buffer") == 0) {
-    return true;
-  } else if (strcmp(name, "symlink") == 0) {
-    return true;
   } else if (strcmp(name, "tempnam") == 0) {
     return true;
-  } else if (strcmp(name, "tmpfile") == 0) {
-    return true;
-  } else if (strcmp(name, "touch") == 0) {
-    return true;
   } else if (strcmp(name, "umask") == 0) {
-    return true;
-  } else if (strcmp(name, "unlink") == 0) {
     return true;
   }
   return false;
@@ -1733,6 +1733,11 @@ static void link_operand_dataflow(dataflow_link_pass_t *pass)
   cfg_opcode_t *cop;
   scarray_iterator_t *i;
 
+  if (croutine == NULL) {
+    pass->complete = true;
+    return;
+  }
+
   fprintf(opcode_dump_file, "Starting inner dataflow link pass 0x%x:%d\n",
           pass->droutine->routine_hash, pass->start_index);
 
@@ -2052,27 +2057,31 @@ bool propagate_operand_source_dataflow(dataflow_opcode_t *dst_op,
     if (p->operand_id.operand_index == DATAFLOW_OPERAND_SOURCE) {
       dataflow_routine_t *source_routine = sctable_lookup(&dg->routine_table,
                                                           p->operand_id.opcode_id.routine_hash);
-      src_op = (dataflow_opcode_t *) source_routine->opcodes.data[p->operand_id.opcode_id.op_index];
-      if (propagate_one_source(dst_influence, &src_op->source)) {
-        propagated = true;
-        source_propagation_complete = false;
+      if (source_routine != NULL) {
+        src_op = (dataflow_opcode_t *) source_routine->opcodes.data[p->operand_id.opcode_id.op_index];
+        if (propagate_one_source(dst_influence, &src_op->source)) {
+          propagated = true;
+          source_propagation_complete = false;
+        }
       }
     } else {
       src_routine = sctable_lookup(&dg->routine_table, p->operand_id.opcode_id.routine_hash);
-      src_op = (dataflow_opcode_t *) src_routine->opcodes.data[p->operand_id.opcode_id.op_index];
-      src_operand = get_dataflow_operand(src_op, p->operand_id.operand_index);
+      if (src_routine != NULL) {
+        src_op = (dataflow_opcode_t *) src_routine->opcodes.data[p->operand_id.opcode_id.op_index];
+        src_operand = get_dataflow_operand(src_op, p->operand_id.operand_index);
 
-      src_influence = src_operand->influence;
-      while (src_influence != NULL) {
-        if (propagate_one_source(dst_influence, &src_influence->source)) {
-          propagated = true;
-          source_propagation_complete = false;
-          fprintf(opcode_dump_file, "[%s] Propagated source at 0x%x:%d from 0x%x:%d to 0x%x:%d\n",
-                  tag, src_influence->source.id.routine_hash, src_influence->source.id.op_index,
-                  src_op->id.routine_hash, src_op->id.op_index,
-                  dst_op->id.routine_hash, dst_op->id.op_index);
+        src_influence = src_operand->influence;
+        while (src_influence != NULL) {
+          if (propagate_one_source(dst_influence, &src_influence->source)) {
+            propagated = true;
+            source_propagation_complete = false;
+            fprintf(opcode_dump_file, "[%s] Propagated source at 0x%x:%d from 0x%x:%d to 0x%x:%d\n",
+                    tag, src_influence->source.id.routine_hash, src_influence->source.id.op_index,
+                    src_op->id.routine_hash, src_op->id.op_index,
+                    dst_op->id.routine_hash, dst_op->id.op_index);
+          }
+          src_influence = src_influence->next;
         }
-        src_influence = src_influence->next;
       }
     }
     p = p->next;
@@ -2087,6 +2096,9 @@ void propagate_source_dataflow(dataflow_link_pass_t *pass)
   scarray_iterator_t *i;
   routine_cfg_t *croutine = cfg_routine_lookup(pass->droutine->app->cfg,
                                                pass->droutine->routine_hash);
+
+  if (croutine == NULL)
+    return;
 
   fprintf(opcode_dump_file, "Starting inner source propagation pass at 0x%x:%d\n",
           pass->droutine->routine_hash, pass->start_index);
@@ -2625,7 +2637,8 @@ void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
   scarray_append(routine->call_sites, call);
 
   fprintf(opcode_dump_file, "Routine 0x%x makes a call to %s with %d args\n",
-          routine->routine_hash, call->call_by_name.name, call->args->size);
+          routine->routine_hash, call->call_by_name.name,
+          call->args == NULL ? 0 : call->args->size);
 }
 
 void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,

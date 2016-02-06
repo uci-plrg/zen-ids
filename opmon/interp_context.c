@@ -5,6 +5,7 @@
 #include "lib/script_cfi_hashtable.h"
 #include "metadata_handler.h"
 #include "dataset.h"
+#include "dataflow.h"
 #include "cfg_handler.h"
 #include "compile_context.h"
 #include "interp_context.h"
@@ -12,6 +13,7 @@
 #define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
 #define MAX_STACK_FRAME_lambda_stack 0x100
+#define MAX_STACK_FRAME_fcall_stack 0x20
 #define ROUTINE_NAME_LENGTH 256
 #define FLUSH_MASK 0xff
 
@@ -53,6 +55,13 @@ typedef struct _stack_event_t {
   const char *return_target_name;
 } stack_event_t;
 
+typedef struct _fcall_init_t {
+  zend_op_array *op_array;
+  const zend_op *call_op;
+  const char *builtin_name;
+  scarray_t *args;
+} fcall_init_t;
+
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
 static exception_frame_t *exception_frame;
 
@@ -63,6 +72,10 @@ static sctable_t frame_table;
 static stack_frame_t void_frame;
 static stack_frame_t prev_frame;
 static stack_frame_t cur_frame;
+
+static fcall_init_t fcall_stack[MAX_STACK_FRAME_fcall_stack];
+static fcall_init_t *fcall_frame;
+static bool executing_internal_function = false;
 
 static stack_event_t stack_event;
 
@@ -75,6 +88,206 @@ static pthread_t first_thread_id;
 static zend_op entry_op;
 
 #define CONTEXT_ENTRY 0xffffffffU
+
+static void fcall_init_push(zend_op_array *op_array, const zval *callee_name)
+{
+  if (callee_name != NULL && zend_hash_find(executor_globals.function_table, Z_STR_P(callee_name)) == NULL)
+    callee_name = NULL; /* only track builtins */
+
+  INCREMENT_STACK(fcall_stack, fcall_frame);
+  fcall_frame->call_op = NULL;
+  fcall_frame->op_array = op_array;
+  fcall_frame->builtin_name = /*strdup(*/Z_STRVAL_P(callee_name); //);
+  if (fcall_frame->args == NULL) {
+    fcall_frame->args = malloc(sizeof(scarray_t));
+    scarray_init(fcall_frame->args);
+  }
+}
+
+static inline fcall_init_t *fcall_init_pop()
+{
+  fcall_init_t *top = fcall_frame;
+  if (top->args != NULL)
+    top->args->size = 0;
+  DECREMENT_STACK(fcall_stack, fcall_frame);
+  return top;
+}
+
+static inline void fcall_init_set_call(const zend_op *call_op)
+{
+  fcall_frame->call_op = call_op;
+}
+
+static inline void fcall_init_add_arg(const zend_op *op)
+{
+  scarray_append(fcall_frame->args, (void *) op);
+}
+
+static void fcall_init_print_var_value(const zval *var)
+{
+  switch (var->u1.v.type) {
+    case IS_UNDEF:
+      fprintf(stderr, "const <undefined-type>");
+      break;
+    case IS_NULL:
+      fprintf(stderr, "const null");
+      break;
+    case IS_FALSE:
+      fprintf(stderr, "const false");
+      break;
+    case IS_TRUE:
+      fprintf(stderr, "const true");
+      break;
+    case IS_LONG:
+      fprintf(stderr, "const 0x%lx", var->value.lval);
+      break;
+    case IS_DOUBLE:
+      fprintf(stderr, "const %f", var->value.dval);
+      break;
+    case IS_STRING: {
+      fprintf(stderr, "\"%s\"", Z_STRVAL_P(var));
+    } break;
+    case IS_ARRAY:
+      fprintf(stderr, "(array)");
+      break;
+    case IS_OBJECT:
+      fprintf(stderr, "(object)");
+      break;
+    case IS_RESOURCE:
+      fprintf(stderr, "(resource)");
+      break;
+    case IS_REFERENCE:
+      fprintf(stderr, "reference? (zv:"PX")", p2int(var));
+      break;
+    default:
+      fprintf(stderr, "what?? (zv:"PX")", p2int(var));
+      break;
+  }
+}
+
+static void fcall_init_print_operand(const char *tag, zend_op_array *ops,
+                                     const znode_op *operand, const zend_uchar type)
+{
+  zend_execute_data *execute_data = EG(current_execute_data);
+  fprintf(stderr, "%s ", tag);
+
+  switch (type) {
+    case IS_CONST:
+      switch (operand->zv->u1.v.type) {
+        case IS_UNDEF:
+          fprintf(stderr, "const <undefined-type>");
+          break;
+        case IS_NULL:
+          fprintf(stderr, "const null");
+          break;
+        case IS_FALSE:
+          fprintf(stderr, "const false");
+          break;
+        case IS_TRUE:
+          fprintf(stderr, "const true");
+          break;
+        case IS_LONG:
+          fprintf(stderr, "const 0x%lx", operand->zv->value.lval);
+          break;
+        case IS_DOUBLE:
+          fprintf(stderr, "const %f", operand->zv->value.dval);
+          break;
+        case IS_STRING: {
+          uint i, j;
+          char buffer[32] = {0};
+          const char *str = Z_STRVAL_P(operand->zv);
+
+          for (i = 0, j = 0; i < 31; i++) {
+            if (str[i] == '\0')
+              break;
+            if (str[i] != '\n')
+              buffer[j++] = str[i];
+          }
+          fprintf(stderr, "\"%s\"", buffer);
+        } break;
+        case IS_ARRAY:
+          fprintf(stderr, "const array (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_OBJECT:
+          fprintf(stderr, "const object? (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_RESOURCE:
+          fprintf(stderr, "const resource? (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_REFERENCE:
+          fprintf(stderr, "const reference? (zv:"PX")", p2int(operand->zv));
+          break;
+        default:
+          fprintf(stderr, "const what?? (zv:"PX")", p2int(operand->zv));
+          break;
+      }
+      break;
+    case IS_VAR:
+    case IS_TMP_VAR:
+      fprintf(stderr, "var #%d: ", (uint) (EX_VAR_TO_NUM(operand->var) - ops->last_var));
+      fcall_init_print_var_value(EX_VAR(operand->var));
+      break;
+    case IS_CV:
+      fprintf(stderr, "var $%s: ", ops->vars[EX_VAR_TO_NUM(operand->var)]->val);
+      fcall_init_print_var_value(EX_VAR(operand->var));
+      break;
+    case IS_UNUSED:
+      fprintf(stderr, "-");
+      break;
+    case 0x24:
+      fprintf(stderr, "(discarded)");
+      break;
+    default:
+      fprintf(stderr, "? (type 0x%x)", type);
+  }
+  fprintf(stderr, " ");
+}
+
+static void fcall_init_print_file_builtin(const char *tag)
+{
+    uint i;
+    zend_op *arg_op;
+
+    SPOT("%s %s ", tag, fcall_frame->builtin_name);
+    for (i = 0; i < fcall_frame->args->size; i++) {
+      arg_op = (zend_op *) fcall_frame->args->data[i];
+      fcall_init_print_operand("<arg>", fcall_frame->op_array, &arg_op->op1, arg_op->op1_type);
+    }
+    fcall_init_print_operand("<ret>", fcall_frame->op_array,
+                             &fcall_frame->call_op->result, fcall_frame->call_op->result_type);
+    fprintf(stderr, "\n");
+}
+
+static inline void fcall_init_print()
+{
+  if (fcall_frame->builtin_name != NULL) {
+    if (is_file_sink_function(fcall_frame->builtin_name))
+      fcall_init_print_file_builtin("<file-output>");
+    else if (is_file_source_function(fcall_frame->builtin_name))
+      fcall_init_print_file_builtin("<file-input>");
+  }
+}
+
+/*
+    if (fcall_frame->args != NULL) {
+      uint i;
+
+      for (i = 0; i < fcall_frame->args->size; i++)
+        free((char *) ((fcall_init_t *) fcall_frame->args->data[i])->builtin_name);
+      fcall_frame->args->size = 0;
+    }
+*/
+
+static inline void fcall_init_reset()
+{
+  while (true) {
+    if (fcall_frame->args != NULL)
+      fcall_frame->args->size = 0;
+    if (fcall_frame <= fcall_stack + 1)
+      break;
+    DECREMENT_STACK(fcall_stack, fcall_frame);
+  }
+}
 
 static uint get_first_executable_index(zend_op *opcodes)
 {
@@ -110,6 +323,9 @@ void initialize_interp_context()
 
   stack_event.state = STACK_STATE_NONE;
   stack_event.last_opcode = 0;
+
+  memset(fcall_stack, 0, sizeof(fcall_init_t) * MAX_STACK_FRAME_fcall_stack);
+  fcall_frame = fcall_stack + 1;
 
   first_thread_id = pthread_self();
 
@@ -478,6 +694,12 @@ void opcode_executing(const zend_op *op)
 
   update_user_session();
 
+  if (executing_internal_function) {
+    fcall_init_print();
+    fcall_init_pop();
+    executing_internal_function = false;
+  }
+
   op_execution_count++;
   if ((op_execution_count & FLUSH_MASK) == 0)
     flush_all_outputs(cur_frame.cfm.app);
@@ -515,8 +737,40 @@ void opcode_executing(const zend_op *op)
 #endif
 
   switch (op->opcode) {
+    case ZEND_INIT_FCALL: {
+      const zval *callee_name = NULL;
+
+      if (op->op2_type == IS_CONST)
+        callee_name = op->op2.zv;
+      fcall_init_push(op_array, callee_name);
+    } break;
+    case ZEND_INIT_FCALL_BY_NAME:
+    case ZEND_INIT_NS_FCALL_BY_NAME: {
+      const zval *callee_name = NULL;
+
+      if (op->op2_type == IS_CONST && Z_TYPE_P(op->op2.zv) == IS_STRING) {
+        callee_name = op->op2.zv;
+      } else {
+        callee_name = EX_VAR(op->op2.var);
+      }
+      fcall_init_push(op_array, callee_name);
+    } break;
+    case ZEND_SEND_VAL:
+    case ZEND_SEND_VAL_EX:
+    case ZEND_SEND_VAR:
+    case ZEND_SEND_VAR_NO_REF:
+    case ZEND_SEND_REF:
+    case ZEND_SEND_VAR_EX:
+    case ZEND_SEND_UNPACK:
+    case ZEND_SEND_ARRAY:
+    case ZEND_SEND_USER:
+      fcall_init_add_arg(op);
+      break;
     case ZEND_DO_FCALL:
-      if (EX(call)->func->type != ZEND_INTERNAL_FUNCTION) {
+      if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
+        fcall_init_set_call(op);
+        executing_internal_function = true;
+      } else {
         stack_event.state = STACK_STATE_CALL;
         stack_event.last_opcode = op->opcode;
       }
@@ -537,7 +791,8 @@ void opcode_executing(const zend_op *op)
     case ZEND_ASSIGN_OBJ:
     case ZEND_ISSET_ISEMPTY_PROP_OBJ:
     */
-    case ZEND_RETURN: {
+    case ZEND_RETURN:
+    case ZEND_RETURN_BY_REF: {
       control_flow_metadata_t return_target_cfm;
       zend_execute_data *return_target = find_return_target(execute_data);
       if (return_target == NULL) {
@@ -677,4 +932,9 @@ void opcode_executing(const zend_op *op)
     }
   }
   */
+}
+
+user_level_t get_current_user_level()
+{
+  return current_session.user_level;
 }
