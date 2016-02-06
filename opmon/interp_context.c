@@ -755,6 +755,11 @@ void opcode_executing(const zend_op *op)
       }
       fcall_init_push(op_array, callee_name);
     } break;
+    case ZEND_INIT_METHOD_CALL:
+    case ZEND_INIT_STATIC_METHOD_CALL:
+    case ZEND_INIT_USER_CALL:
+      fcall_init_push(op_array, NULL);
+      break;
     case ZEND_SEND_VAL:
     case ZEND_SEND_VAL_EX:
     case ZEND_SEND_VAR:
