@@ -31,7 +31,8 @@ void print_var_value(FILE *out, const zval *var);
 void print_operand(FILE *out, const char *tag, zend_op_array *ops,
                    const znode_op *operand, const zend_uchar type);
 void plog_builtin(application_t *app, zend_op_array *op_array, const zend_op *call_op);
-void plog_taint(application_t *app, taint_variable_t *taint);
+void print_taint(FILE *plog, taint_variable_t *taint);
+void plog_taint_var(application_t *app, taint_variable_t *taint_var);
 
 void flush_all_outputs(application_t *app);
 

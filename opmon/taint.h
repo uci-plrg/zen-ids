@@ -1,6 +1,9 @@
 #ifndef _TAINT_H_
 #define _TAINT_H_ 1
 
+#include "php.h"
+#include "cfg.h"
+
 /*
 
 typedef struct _cfg_opcode_id_t {
@@ -55,6 +58,39 @@ typedef struct _dataflow_live_variable_t {
   request can really go.
  */
 
+typedef enum _site_modification_type_t {
+  SITE_MOD_NONE,
+  SITE_MOD_DB,
+  SITE_MOD_FILE
+} site_modification_type_t;
+
+typedef struct _site_modification_t {
+  site_modification_type_t type;
+  union {
+    const char *file_path;
+    const char *db_query;
+  };
+} site_modification_t;
+
+typedef enum _request_input_type_t {
+  REQUEST_INPUT_TYPE_NONE,
+  REQUEST_INPUT_TYPE_REQUEST,
+  REQUEST_INPUT_TYPE_GET,
+  REQUEST_INPUT_TYPE_POST,
+  REQUEST_INPUT_TYPE_COOKIE,
+  REQUEST_INPUT_TYPE_FILES,
+} request_input_type_t;
+
+typedef struct _request_input_t {
+  request_input_type_t type;
+  zval *value; /* NULL indicates fetch of the superglobal itself */
+} request_input_t;
+
+typedef enum _taint_type_t {
+  TAINT_TYPE_SITE_MOD,
+  TAINT_TYPE_REQUEST_INPUT
+} taint_type_t;
+
 typedef enum _taint_variable_type_t {
   TAINT_VAR_NONE,
   TAINT_VAR_TEMP,
@@ -68,14 +104,18 @@ typedef union _taint_variable_id_t {
 } taint_variable_id_t;
 
 typedef struct _taint_variable_t {
-  taint_variable_type_t type;
-  taint_variable_id_t id;
-  zend_op *stack_frame_id;
+  taint_variable_type_t var_type;
+  taint_variable_id_t var_id;
+  const zend_op *tainted_op;
+  zend_op_array *stack_frame;
+  taint_type_t type;
   void *taint;
 } taint_variable_t;
 
-void taint_var_add(application_t *app, taint_variable_type_t type, taint_variable_id_t id,
-                   zend_op *stack_frame_id, void *taint);
+taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *tainted_op,
+                                        taint_type_t type, void *taint);
+
+void taint_var_add(application_t *app, taint_variable_t *var);
 
 void *taint_var_get(taint_variable_type_t type, taint_variable_id_t id, zend_op *stack_frame_id);
 

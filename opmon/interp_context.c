@@ -24,20 +24,6 @@
 
 #define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
 
-typedef enum _site_modification_type_t {
-  SITE_MOD_NONE,
-  SITE_MOD_DB,
-  SITE_MOD_FILE
-} site_modification_type_t;
-
-typedef struct _site_modification_t {
-  site_modification_type_t type;
-  union {
-    const char *file_path;
-    const char *db_query;
-  };
-} site_modification_t;
-
 typedef struct _stack_frame_t {
   zend_execute_data *execute_data;
   zend_op *opcodes;
@@ -97,36 +83,17 @@ static zend_op entry_op;
 void query_executing(const char *query)
 {
   site_modification_t *mod = NULL;
-
-  SPOT("DB | request #%d | user-level %d | %s\n",
-       get_current_request_id(), get_current_user_level(), query);
+  site_modification_t fake_mod = { SITE_MOD_DB, { query } };
 
   // lookup corresponding site modifications
+  mod = &fake_mod;
   if (mod != NULL) {
-    zend_op *mysql_query_op = &cur_frame.opcodes[cur_frame.op_index];
-    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
-    taint_variable_type_t var_type = TAINT_VAR_NONE;
-    taint_variable_id_t var_id;
+    taint_variable_t *var = create_taint_variable(&cur_frame.execute_data->func->op_array,
+                                                  &cur_frame.opcodes[cur_frame.op_index],
+                                                  TAINT_TYPE_SITE_MOD, mod);
 
-    switch (mysql_query_op->result_type) {
-      case IS_TMP_VAR:
-        var_type = TAINT_VAR_TEMP;
-        var_id.temp_id = (uint) (EX_VAR_TO_NUM(mysql_query_op->result.var) - op_array->last_var);
-        // print_var_value(EX_VAR(operand->var));
-        break;
-      case IS_VAR:
-        var_type = TAINT_VAR_TEMP;
-        var_id.temp_id = (uint) (EX_VAR_TO_NUM(mysql_query_op->result.var) - op_array->last_var);
-        break;
-      case IS_CV:
-        var_type = TAINT_VAR_LOCAL;
-        var_id.var_name = op_array->vars[EX_VAR_TO_NUM(mysql_query_op->result.var)]->val;
-        // print_var_value(EX_VAR(operand->var));
-        break;
-    }
-
-    if (var_type != TAINT_VAR_NONE)
-      taint_var_add(cur_frame.cfm.app, var_type, var_id, cur_frame.opcodes, mod);
+    if (var != NULL)
+      taint_var_add(cur_frame.cfm.app, var);
   }
 }
 
@@ -524,11 +491,39 @@ static bool is_lambda_call_init(const zend_op *op)
 }
 */
 
+static request_input_type_t get_request_input_type(const zend_op *op)
+{
+  switch (op->opcode) {
+    case ZEND_FETCH_R:  /* fetch a superglobal */
+    case ZEND_FETCH_W:
+    case ZEND_FETCH_RW:
+    case ZEND_FETCH_IS:
+      if (op->op2_type == IS_UNUSED) {
+        const char *superglobal_name = Z_STRVAL_P(op->op1.zv);
+        if (superglobal_name != NULL) {
+          if (strcmp(superglobal_name, "_REQUEST") == 0)
+            return REQUEST_INPUT_TYPE_REQUEST;
+          if (strcmp(superglobal_name, "_GET") == 0)
+            return REQUEST_INPUT_TYPE_GET;
+          if (strcmp(superglobal_name, "_POST") == 0)
+            return REQUEST_INPUT_TYPE_POST;
+          if (strcmp(superglobal_name, "_COOKIE") == 0)
+            return REQUEST_INPUT_TYPE_COOKIE;
+          if (strcmp(superglobal_name, "_FILES") == 0)
+            return REQUEST_INPUT_TYPE_FILES;
+        }
+      }
+      break;
+  }
+  return REQUEST_INPUT_TYPE_NONE;
+}
+
 void opcode_executing(const zend_op *op)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
   bool stack_pointer_moved, caught_exception = false;
+  request_input_type_t input_type;
 
   update_user_session();
 
@@ -567,6 +562,19 @@ void opcode_executing(const zend_op *op)
   if (cur_frame.cfm.cfg->routine_hash == 0x35b71951)
     SPOT("\twp-admin/admin.php: %d\n", op->lineno);
 #endif
+
+  input_type = get_request_input_type(op); // TODO: combine in following switch
+  if (input_type != REQUEST_INPUT_TYPE_NONE) {
+    request_input_t *input = malloc(sizeof(request_input_t));
+    taint_variable_t *taint_var;
+
+    input->type = input_type;
+    input->value = NULL;
+
+    taint_var = create_taint_variable(op_array, op, TAINT_TYPE_REQUEST_INPUT, input);
+    if (taint_var != NULL)
+      taint_var_add(cur_frame.cfm.app, taint_var);
+  }
 
   switch (op->opcode) {
     case ZEND_SEND_VAL:

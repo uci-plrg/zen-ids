@@ -875,22 +875,73 @@ void plog_builtin(application_t *app, zend_op_array *op_array, const zend_op *ca
   } while ((--walk >= (zend_op *) &op_array[0]) && !done);
 }
 
-void plog_taint(application_t *app, taint_variable_t *taint)
+void print_taint(FILE *out, taint_variable_t *taint)
 {
+  switch (taint->type) {
+    case TAINT_TYPE_SITE_MOD: {
+      site_modification_t *mod = (site_modification_t *) taint->taint;
+      switch (mod->type) {
+        case SITE_MOD_DB:
+          fprintf(out, "<query> %s", mod->db_query);
+        case SITE_MOD_FILE:
+          fprintf(out, "<file-path> %s", mod->file_path);
+        default: ;
+      }
+    } break;
+    case TAINT_TYPE_REQUEST_INPUT: {
+      request_input_t *input = (request_input_t *) taint->taint;
+      switch (input->type) {
+        case REQUEST_INPUT_TYPE_REQUEST:
+          fprintf(out, "<input-request> ");
+          break;
+        case REQUEST_INPUT_TYPE_GET:
+          fprintf(out, "<input-get> ");
+          break;
+        case REQUEST_INPUT_TYPE_POST:
+          fprintf(out, "<input-post> ");
+          break;
+        case REQUEST_INPUT_TYPE_COOKIE:
+          fprintf(out, "<input-cookie> ");
+          break;
+        case REQUEST_INPUT_TYPE_FILES:
+          fprintf(out, "<input-files> ");
+          break;
+        default: return;
+      }
+      if (input->value == NULL)
+        fprintf(out, "<fetch>");
+      else
+        print_var_value(out, input->value);
+    } break;
+  }
+}
+
+void plog_taint_var(application_t *app, taint_variable_t *taint_var)
+{
+  bool plogged = true;
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
 
-  switch (taint->type) {
+  fprintf(plog, "<tainted-op> %s:%d\n", taint_var->stack_frame->filename->val,
+          taint_var->tainted_op->lineno);
+
+  switch (taint_var->var_type) {
     case TAINT_VAR_TEMP:
-      fprintf(plog, "Taint temp #%d with query %s\n", taint->id.temp_id, (const char *) taint->taint);
+      fprintf(plog, "<taint-var> temp #%d with ", taint_var->var_id.temp_id);
+      print_taint(plog, taint_var);
       break;
     case TAINT_VAR_LOCAL:
-      fprintf(plog, "Taint var #%d with query %s\n", taint->id.temp_id, (const char *) taint->taint);
+      fprintf(plog, "<taint-var> var #%d with ", taint_var->var_id.temp_id);
+      print_taint(plog, taint_var);
       break;
     case TAINT_VAR_GLOBAL:
-      fprintf(plog, "Taint var %s with query %s\n", taint->id.var_name, (const char *) taint->taint);
+      fprintf(plog, "<taint-var> var %s with ", taint_var->var_id.var_name);
+      print_taint(plog, taint_var);
       break;
-    default: ;
+    default:
+      plogged = false;
   }
+  if (plogged)
+    fprintf(plog, "\n");
 }
 
 void flush_all_outputs(application_t *app)
