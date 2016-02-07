@@ -86,6 +86,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   init_compile_context();
   init_cfg_handler();
   init_metadata_handler();
+  init_taint_tracker();
 
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_opcode_interp = opcode_executing;
@@ -107,6 +108,7 @@ void destroy_event_handler()
   destroy_metadata_handler();
   destroy_operand_resolver();
   destroy_cfg_handler();
+  destroy_taint_tracker();
 
   if (run_type == OPMON_RUN_DATAFLOW_ANALYSIS)
     destroy_dataflow_analysis();
