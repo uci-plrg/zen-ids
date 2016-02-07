@@ -1,0 +1,126 @@
+# 15722
+
+<request> GET /wordpress/wp-admin/edit.php?post_type=page HTTP/1.1
+<request-id> |00034599
+<request> GET /wordpress/wp-admin/edit.php?post_type=page HTTP/1.1
+<request-id> |00034601
+--
+<request> GET /wordpress/wp-admin/edit.php?post_type=page HTTP/1.1
+<request-id> |00042600
+
+
+TODO:
+
+  1. handle minor site changes with safe URL list and site_mod flag
+  2. minimum training requests, given successful handling of minor site changes
+  3. why are exploit attempts getting blocked?
+  4. fix sticky user level
+
+
+Blocks by category:
+
+  · admin user level is occasionally sticky in the session, causing ambiguous user level
+    assignment, especially for entry points to admin pages where cookie-login eventually occurs
+  · when something trivial in the site changes, a few new edges may occur. Try this:
+    · establish some list of trusted URLs
+      · never blocked
+      · always execute code from the same "URL cfg"
+      · never crosses admin boundary
+    · when a code change occurs in a request to a trusted URL:
+      · isolate the new edges and user level changes
+      · try to guess if a recent DB/filesystem update may be related to the code change
+      · if we decide it's safe, add these edges to the dataset
+        · log the update, including reasons for approval
+      · if we decide it's not safe (yet), block the request
+        · can still approve the code later, e.g. if enough safe URLs try to use it
+
+
+Safe URLs
+
+  · All URLs during training are considered safe.
+    · Manually remove suspicious URLs?
+  · For any request that does not invoke any new code, add the URL to the safe list.
+  · When the site changes, set a "flex" flag on each safe URL
+  · For each request to a URL with "flex" enabled:
+    · Evaluate the request for safe-looking behavior:
+      · Executes a reasonable amount of new code
+        · Accesses the modified table?
+      · Does not change user level where it did not before
+      · Does not modify app state (DB/filesystem) where it did not before
+    · If the request still looks safe:
+      · Add all new edges to the dataset
+    · Disable the "flex" flag for that URL
+
+  * Issues
+
+  · How to handle a new post? It potentially introduces a new URL together with new code. Options:
+    · Handle it as a major site change and require offline retraining.
+    · Instrument the site's PHP to register the new URL with ScriptSafe, which makes it safe.
+    · Infer that a new URL is safe if it occurs after a (relatable?) site change.
+      · Rely on past experience with new URLs.
+
+
+New PHP files
+
+  · If the site generates PHP files, catalog the safe code generators.
+  · If the site accepts uploads, catalog the safe upload path (with user level).
+  · When a safe file creation path is observed, mark the new file as safe.
+
+  * Issues:
+
+  · How much to trust requests that invoke code in the new PHP file?
+  · What about changes to site data in the file tree? Some sites may write to those files on every request,
+    for example to track internal statistics. Maybe we only count the change as flex for requests that
+    actually load the changed data, whether from DB or file or anywhere else.
+
+
+gitlist new edges--server out of memory after 200K:
+
+0x3c6b9290 vendor/symfony/process/Symfony/Component/Process/Process.php|Symfony\Component\Process\Process:start
+  17359  New edge 0x3c6b9290 @83 (#252) -> 0x4a3a095 with user level 0
+  17300  New edge 0x3c6b9290 @86 (#252) -> 0x70a376ed with user level 0
+0x4a3a095 vendor/composer/ClassLoader.php|Composer\Autoload\ClassLoader:loadClass
+0x70a376ed vendor/symfony/http-kernel/Symfony/Component/HttpKernel/HttpKernel.php|Symfony\Component\HttpKernel\HttpKerne
+
+0x5bcf762a vendor/composer/ClassLoader.php|vendor/composer/ClassLoader.php:376:Composer\Autoload\includeFile
+  17359  New edge 0x5bcf762a @1 (#378) -> 0xc58a99b with user level 0
+  17359  New edge 0x5bcf762a @1 (#378) -> 0x6da283db with user level 0
+0xc58a99b vendor/symfony/process/Symfony/Component/Process/Exception/ExceptionInterface.php|vendor/symfony/process/Symfo
+0x6da283db vendor/symfony/process/Symfony/Component/Process/Exception/RuntimeException.php|vendor/symfony/process/Symfon
+
+0x6da283db vendor/symfony/process/Symfony/Component/Process/Exception/RuntimeException.php|vendor/symfony/process/Symfon
+  17359  New edge 0x6da283db @2 (#19) -> 0x4a3a095 with user level 0
+0x4a3a095 vendor/composer/ClassLoader.php|Composer\Autoload\ClassLoader:loadClass
+
+
+ ==== Safe file generators
+
+  · fopen, fwrite and file_put_contents are defined in here:
+    · ext/standard/basic_functions.c
+  · file_put_contents takes a path arg, so we know the file immediately
+  · fwrite takes a handle that comes from fopen()
+    · the handle is a zend_resource (Zend/zend_types.php:189), which only has the filesystem handle
+    · looks like the easy way to get the file path is to just catalog all the fopen calls
+  · uploads generally use php/ext/curl, which directly calls libc fwrite()
+
+  --- gitlist
+
+  · the template is always generated on exactly the same call stack
+  · twig/symfony are using file_put_contents(), so we have the filename in hand
+
+
+
+
+
+<file-output> tmpfile <ret> var #0: const <undefined-type>
+<file-output> fwrite <arg> "Temp" <arg> var $f: (resource) <ret> var #2: const <undefined-type>
+<file-input> fseek <arg> const 0x0 <arg> var $f: (resource) <ret> (discarded)
+<file-input> fread <arg> const 0x20 <arg> var $f: (resource) <ret> var #6: const <undefined-type>
+<file-input> fread <arg> var #6: "Temp" <arg> const 0x20 <arg> var $f: (resource) <ret> (discarded)
+<file-input> fclose <arg> var $f: (resource) <ret> (discarded)
+<file-output> file_put_contents <arg> "foo" <arg> "/var/tmp/foo.txt" <ret> (discarded)
+
+
+
+
+

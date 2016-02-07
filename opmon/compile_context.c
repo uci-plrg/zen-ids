@@ -52,6 +52,8 @@ static sctable_t routines_by_callee_hash;
 static sctable_t routines_by_opcode_address;
 static uint closure_count = 0;
 
+#define BUILTIN_ROUTINE_HASH_PLACEHOLDER 1
+
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
 static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_hash,
@@ -310,10 +312,10 @@ void function_compiled(zend_op_array *op_array)
       switch (op->opcode) {
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
-          if (fcall->routine_hash > 0) {
+          if (fcall->routine_name != NULL)
             dump_fcall_opcode(op_array, op, fcall->routine_name);
+          if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER)
             sink_id.call_target = fcall->routine_name;
-          }
           break;
         case ZEND_SEND_VAL:
         case ZEND_SEND_VAL_EX:
@@ -349,7 +351,7 @@ void function_compiled(zend_op_array *op_array)
       switch (op->opcode) {
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
-          if (fcall->routine_hash > 0)
+          if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER)
             add_dataflow_fcall(fqn->function.caller_hash, i, op_array, fcall->routine_name);
           //sink_id.call_target = fcall->routine_name;
           break;
@@ -363,7 +365,7 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
           fcall = peek_fcall_init();
-          if (fcall->routine_hash > 0)
+          if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER)
             add_dataflow_fcall_arg(fqn->function.caller_hash, i, op_array, fcall->routine_name);
           //sink_id.call_target = fcall->routine_name;
           break;
@@ -465,7 +467,7 @@ void function_compiled(zend_op_array *op_array)
         } break;
         case ZEND_DO_FCALL: {
           fcall_init_t *fcall = pop_fcall_init();
-          if (fcall->routine_hash > 0) {
+          if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER) {
             SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
             write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
                                fcall->routine_hash, 0, USER_LEVEL_TOP);
@@ -487,7 +489,8 @@ void function_compiled(zend_op_array *op_array)
 
             if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL) {
               ignore_call |= !is_opcode_dump_enabled();
-              // flex: print all args if is_file_sink_function() or is_file_source_function() ?
+              sprintf(routine_name, "builtin:%s", Z_STRVAL_P(op->op2.zv));
+              push_fcall_init(i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);
               break; // ignore builtins for now (unless dumping ops)
             }
 

@@ -4,6 +4,7 @@
 #include "httpd.h"
 
 #include "cfg.h"
+#include "taint.h"
 
 void init_cfg_handler();
 void destroy_cfg_handler();
@@ -25,6 +26,12 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
                         user_level_t user_level);
 void write_routine_catalog_entry(application_t *app, uint routine_hash, const char *unit_path,
                                  const char *routine_name);
+
+void print_var_value(FILE *out, const zval *var);
+void print_operand(FILE *out, const char *tag, zend_op_array *ops,
+                   const znode_op *operand, const zend_uchar type);
+void plog_builtin(application_t *app, zend_op_array *op_array, const zend_op *call_op);
+void plog_taint(application_t *app, taint_variable_t *taint);
 
 void flush_all_outputs(application_t *app);
 

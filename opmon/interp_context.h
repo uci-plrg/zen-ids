@@ -13,5 +13,6 @@ void pop_interp_context();
 void opcode_executing(const zend_op *op);
 
 user_level_t get_current_user_level();
+void query_executing(const char *query);
 
 #endif

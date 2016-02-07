@@ -1,0 +1,11 @@
+
+The notify_database_query() hook in PHP mysqli occurs during calls like these:
+
+  wp-includes/wp-db.php:792
+  $res = mysqli_query( $this->dbh, 'SELECT @@SESSION.sql_mode' );
+
+  wp-includes/wp-db.php:1720
+  $this->result = @mysqli_query( $this->dbh, $query );
+
+The query result is returned by the fcall handler (N.B.: watch for caching!)
+

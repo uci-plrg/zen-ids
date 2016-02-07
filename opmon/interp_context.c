@@ -6,6 +6,7 @@
 #include "metadata_handler.h"
 #include "dataset.h"
 #include "dataflow.h"
+#include "taint.h"
 #include "cfg_handler.h"
 #include "compile_context.h"
 #include "interp_context.h"
@@ -22,6 +23,20 @@
    VM_FRAME_KIND((ex)->frame_info) == VM_FRAME_TOP_FUNCTION)
 
 #define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
+
+typedef enum _site_modification_type_t {
+  SITE_MOD_NONE,
+  SITE_MOD_DB,
+  SITE_MOD_FILE
+} site_modification_type_t;
+
+typedef struct _site_modification_t {
+  site_modification_type_t type;
+  union {
+    const char *file_path;
+    const char *db_query;
+  };
+} site_modification_t;
 
 typedef struct _stack_frame_t {
   zend_execute_data *execute_data;
@@ -78,202 +93,41 @@ static zend_op entry_op;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
-static void fcall_init_print_var_value(const zval *var)
+
+void query_executing(const char *query)
 {
-  switch (var->u1.v.type) {
-    case IS_UNDEF:
-      fprintf(stderr, "const <undefined-type>");
-      break;
-    case IS_NULL:
-      fprintf(stderr, "const null");
-      break;
-    case IS_FALSE:
-      fprintf(stderr, "const false");
-      break;
-    case IS_TRUE:
-      fprintf(stderr, "const true");
-      break;
-    case IS_LONG:
-      fprintf(stderr, "const 0x%lx", var->value.lval);
-      break;
-    case IS_DOUBLE:
-      fprintf(stderr, "const %f", var->value.dval);
-      break;
-    case IS_STRING: {
-      fprintf(stderr, "\"%s\"", Z_STRVAL_P(var));
-    } break;
-    case IS_ARRAY:
-      fprintf(stderr, "(array)");
-      break;
-    case IS_OBJECT:
-      fprintf(stderr, "(object)");
-      break;
-    case IS_RESOURCE:
-      fprintf(stderr, "(resource)");
-      break;
-    case IS_REFERENCE:
-      fprintf(stderr, "reference? (zv:"PX")", p2int(var));
-      break;
-    default:
-      fprintf(stderr, "what?? (zv:"PX")", p2int(var));
-      break;
-  }
-}
+  site_modification_t *mod = NULL;
 
-static void fcall_init_print_operand(const char *tag, zend_op_array *ops,
-                                     const znode_op *operand, const zend_uchar type)
-{
-  zend_execute_data *execute_data = EG(current_execute_data);
-  fprintf(stderr, "%s ", tag);
+  SPOT("DB | request #%d | user-level %d | %s\n",
+       get_current_request_id(), get_current_user_level(), query);
 
-  switch (type) {
-    case IS_CONST:
-      switch (operand->zv->u1.v.type) {
-        case IS_UNDEF:
-          fprintf(stderr, "const <undefined-type>");
-          break;
-        case IS_NULL:
-          fprintf(stderr, "const null");
-          break;
-        case IS_FALSE:
-          fprintf(stderr, "const false");
-          break;
-        case IS_TRUE:
-          fprintf(stderr, "const true");
-          break;
-        case IS_LONG:
-          fprintf(stderr, "const 0x%lx", operand->zv->value.lval);
-          break;
-        case IS_DOUBLE:
-          fprintf(stderr, "const %f", operand->zv->value.dval);
-          break;
-        case IS_STRING: {
-          uint i, j;
-          char buffer[32] = {0};
-          const char *str = Z_STRVAL_P(operand->zv);
+  // lookup corresponding site modifications
+  if (mod != NULL) {
+    zend_op *mysql_query_op = &cur_frame.opcodes[cur_frame.op_index];
+    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+    taint_variable_type_t var_type = TAINT_VAR_NONE;
+    taint_variable_id_t var_id;
 
-          for (i = 0, j = 0; i < 31; i++) {
-            if (str[i] == '\0')
-              break;
-            if (str[i] != '\n')
-              buffer[j++] = str[i];
-          }
-          fprintf(stderr, "\"%s\"", buffer);
-        } break;
-        case IS_ARRAY:
-          fprintf(stderr, "const array (zv:"PX")", p2int(operand->zv));
-          break;
-        case IS_OBJECT:
-          fprintf(stderr, "const object? (zv:"PX")", p2int(operand->zv));
-          break;
-        case IS_RESOURCE:
-          fprintf(stderr, "const resource? (zv:"PX")", p2int(operand->zv));
-          break;
-        case IS_REFERENCE:
-          fprintf(stderr, "const reference? (zv:"PX")", p2int(operand->zv));
-          break;
-        default:
-          fprintf(stderr, "const what?? (zv:"PX")", p2int(operand->zv));
-          break;
-      }
-      break;
-    case IS_VAR:
-    case IS_TMP_VAR:
-      fprintf(stderr, "var #%d: ", (uint) (EX_VAR_TO_NUM(operand->var) - ops->last_var));
-      fcall_init_print_var_value(EX_VAR(operand->var));
-      break;
-    case IS_CV:
-      fprintf(stderr, "var $%s: ", ops->vars[EX_VAR_TO_NUM(operand->var)]->val);
-      fcall_init_print_var_value(EX_VAR(operand->var));
-      break;
-    case IS_UNUSED:
-      fprintf(stderr, "-");
-      break;
-    case 0x24:
-      fprintf(stderr, "(discarded)");
-      break;
-    default:
-      fprintf(stderr, "? (type 0x%x)", type);
-  }
-  fprintf(stderr, " ");
-}
-
-static void print_file_builtin(const char *tag, const char *callee_name, zend_op_array *op_array,
-                               const zend_op *call_op, uint arg_count, const zend_op **args)
-{
-    uint i;
-
-    SPOT("%s %s ", tag, callee_name);
-    for (i = 0; i < arg_count; i++)
-      fcall_init_print_operand("<arg>", op_array, &args[i]->op1, args[i]->op1_type);
-    fcall_init_print_operand("<ret>", op_array, &call_op->result, call_op->result_type);
-    fprintf(stderr, "\n");
-}
-
-static void print_builtin(zend_execute_data *execute_data, zend_op_array *op_array, const zend_op *call_op)
-{
-  bool done = false;
-  uint init_count = 0, arg_count = 0;
-  const zend_op *walk = (call_op - 1);
-  const zend_op *args[0x10];
-
-  do {
-    if (init_count > 0) {
-      switch (walk->opcode) {
-        case ZEND_NEW:
-        case ZEND_INIT_FCALL:
-        case ZEND_INIT_FCALL_BY_NAME:
-        case ZEND_INIT_NS_FCALL_BY_NAME:
-        case ZEND_INIT_METHOD_CALL:
-        case ZEND_INIT_STATIC_METHOD_CALL:
-        case ZEND_INIT_USER_CALL:
-          init_count--;
-          break;
-        case ZEND_DO_FCALL:
-          init_count++;
-          break;
-      }
-    } else {
-      switch (walk->opcode) {
-        case ZEND_INIT_FCALL:
-        case ZEND_INIT_FCALL_BY_NAME:
-        case ZEND_INIT_NS_FCALL_BY_NAME: {
-          const zval *callee_name = NULL;
-
-          if (walk->op2_type == IS_CONST && Z_TYPE_P(walk->op2.zv) == IS_STRING) {
-            callee_name = walk->op2.zv;
-          } else if (walk->opcode != ZEND_INIT_FCALL) {
-            callee_name = EX_VAR(walk->op2.var);
-          }
-          if (callee_name != NULL &&
-              zend_hash_find(executor_globals.function_table, Z_STR_P(callee_name)) != NULL) {
-            if (is_file_sink_function(Z_STRVAL_P(callee_name)))
-              print_file_builtin("<file-output>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
-            else if (is_file_source_function(Z_STRVAL_P(callee_name)))
-              print_file_builtin("<file-input>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
-          }
-          done = true;
-        } break;
-        case ZEND_NEW:
-        case ZEND_INIT_METHOD_CALL:
-        case ZEND_INIT_STATIC_METHOD_CALL:
-        case ZEND_INIT_USER_CALL:
-          done = true;
-          break;
-        case ZEND_SEND_VAL:
-        case ZEND_SEND_VAL_EX:
-        case ZEND_SEND_VAR:
-        case ZEND_SEND_VAR_NO_REF:
-        case ZEND_SEND_REF:
-        case ZEND_SEND_VAR_EX:
-        case ZEND_SEND_UNPACK:
-        case ZEND_SEND_ARRAY:
-        case ZEND_SEND_USER:
-          args[arg_count++] = walk;
-          break;
-      }
+    switch (mysql_query_op->result_type) {
+      case IS_TMP_VAR:
+        var_type = TAINT_VAR_TEMP;
+        var_id.temp_id = (uint) (EX_VAR_TO_NUM(mysql_query_op->result.var) - op_array->last_var);
+        // print_var_value(EX_VAR(operand->var));
+        break;
+      case IS_VAR:
+        var_type = TAINT_VAR_TEMP;
+        var_id.temp_id = (uint) (EX_VAR_TO_NUM(mysql_query_op->result.var) - op_array->last_var);
+        break;
+      case IS_CV:
+        var_type = TAINT_VAR_LOCAL;
+        var_id.var_name = op_array->vars[EX_VAR_TO_NUM(mysql_query_op->result.var)]->val;
+        // print_var_value(EX_VAR(operand->var));
+        break;
     }
-  } while ((--walk >= (zend_op *) &op_array[0]) && !done);
+
+    if (var_type != TAINT_VAR_NONE)
+      taint_var_add(cur_frame.cfm.app, var_type, var_id, cur_frame.opcodes, mod);
+  }
 }
 
 static uint get_first_executable_index(zend_op *opcodes)
@@ -727,7 +581,7 @@ void opcode_executing(const zend_op *op)
       break;
     case ZEND_DO_FCALL:
       if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
-        print_builtin(execute_data, op_array, op);
+        plog_builtin(cur_frame.cfm.app, op_array, op);
       } else {
         stack_event.state = STACK_STATE_CALL;
         stack_event.last_opcode = op->opcode;

@@ -20,6 +20,7 @@ if test "$PHP_OPCODE_MONITOR" != "no"; then
                  cfg.c \
                  cfg_handler.c \
 		 dataflow.c \
+		 taint.c \
                  lib/script_cfi_utils.c \
                  lib/script_cfi_array.c \
                  lib/script_cfi_hashtable.c"

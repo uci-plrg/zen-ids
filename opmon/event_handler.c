@@ -39,12 +39,6 @@ static void init_worker()
   worker_startup();
 }
 
-static void query_executing(const char *query)
-{
-  SPOT("DB | request #%d | user-level %d | %s\n",
-       get_current_request_id(), get_current_user_level(), query);
-}
-
 const char *get_static_analysis()
 {
   return static_analysis;

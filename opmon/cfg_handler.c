@@ -13,6 +13,8 @@
 #include "interp_context.h"
 #include "event_handler.h"
 #include "dataset.h"
+#include "dataflow.h"
+#include "taint.h"
 #include "operand_resolver.h"
 #include "cfg_handler.h"
 
@@ -26,6 +28,7 @@ typedef struct _cfg_files_t {
   FILE *request;
   FILE *request_edge;
   FILE *routine_catalog;
+  FILE *persistence;
 } cfg_files_t;
 
 static char session_file_path[256] = {0}, cfg_file_path[256] = {0};
@@ -280,6 +283,7 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
   OPEN_CFG_FILE("op-edge.run", op_edge);
   OPEN_CFG_FILE("routine-edge.run", routine_edge);
   OPEN_CFG_FILE("routine-catalog.tab", routine_catalog);
+  OPEN_CFG_FILE("persistence.log", persistence);
   if (!is_standalone_app) {
     OPEN_CFG_FILE("request.tab", request);
     OPEN_CFG_FILE("request-edge.run", request_edge);
@@ -487,6 +491,7 @@ void cfg_destroy_application(application_t *app)
     fclose(cfg_files->op_edge);
     fclose(cfg_files->routine_edge);
     fclose(cfg_files->routine_catalog);
+    fclose(cfg_files->persistence);
     if (!is_standalone_app) {
       fclose(cfg_files->request);
       fclose(cfg_files->request_edge);
@@ -666,6 +671,226 @@ void write_routine_catalog_entry(application_t *app, uint routine_hash,
 
   fprintf(cfg_files->routine_catalog, "0x%x %s|%s\n", routine_hash,
           unit_path, routine_name);
+}
+
+void print_var_value(FILE *out, const zval *var)
+{
+  switch (var->u1.v.type) {
+    case IS_UNDEF:
+      fprintf(out, "const <undefined-type>");
+      break;
+    case IS_NULL:
+      fprintf(out, "const null");
+      break;
+    case IS_FALSE:
+      fprintf(out, "const false");
+      break;
+    case IS_TRUE:
+      fprintf(out, "const true");
+      break;
+    case IS_LONG:
+      fprintf(out, "const 0x%lx", var->value.lval);
+      break;
+    case IS_DOUBLE:
+      fprintf(out, "const %f", var->value.dval);
+      break;
+    case IS_STRING: {
+      fprintf(out, "\"%s\"", Z_STRVAL_P(var));
+    } break;
+    case IS_ARRAY:
+      fprintf(out, "(array)");
+      break;
+    case IS_OBJECT:
+      fprintf(out, "(object)");
+      break;
+    case IS_RESOURCE:
+      fprintf(out, "(resource)");
+      break;
+    case IS_REFERENCE:
+      fprintf(out, "reference? (zv:"PX")", p2int(var));
+      break;
+    default:
+      fprintf(out, "what?? (zv:"PX")", p2int(var));
+      break;
+  }
+}
+
+void print_operand(FILE *out, const char *tag, zend_op_array *ops,
+                   const znode_op *operand, const zend_uchar type)
+{
+  zend_execute_data *execute_data = EG(current_execute_data);
+  fprintf(out, "%s ", tag);
+
+  switch (type) {
+    case IS_CONST:
+      switch (operand->zv->u1.v.type) {
+        case IS_UNDEF:
+          fprintf(out, "const <undefined-type>");
+          break;
+        case IS_NULL:
+          fprintf(out, "const null");
+          break;
+        case IS_FALSE:
+          fprintf(out, "const false");
+          break;
+        case IS_TRUE:
+          fprintf(out, "const true");
+          break;
+        case IS_LONG:
+          fprintf(out, "const 0x%lx", operand->zv->value.lval);
+          break;
+        case IS_DOUBLE:
+          fprintf(out, "const %f", operand->zv->value.dval);
+          break;
+        case IS_STRING: {
+          uint i, j;
+          char buffer[32] = {0};
+          const char *str = Z_STRVAL_P(operand->zv);
+
+          for (i = 0, j = 0; i < 31; i++) {
+            if (str[i] == '\0')
+              break;
+            if (str[i] != '\n')
+              buffer[j++] = str[i];
+          }
+          fprintf(out, "\"%s\"", buffer);
+        } break;
+        case IS_ARRAY:
+          fprintf(out, "const array (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_OBJECT:
+          fprintf(out, "const object? (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_RESOURCE:
+          fprintf(out, "const resource? (zv:"PX")", p2int(operand->zv));
+          break;
+        case IS_REFERENCE:
+          fprintf(out, "const reference? (zv:"PX")", p2int(operand->zv));
+          break;
+        default:
+          fprintf(out, "const what?? (zv:"PX")", p2int(operand->zv));
+          break;
+      }
+      break;
+    case IS_VAR:
+    case IS_TMP_VAR:
+      fprintf(out, "var #%d: ", (uint) (EX_VAR_TO_NUM(operand->var) - ops->last_var));
+      print_var_value(out, EX_VAR(operand->var));
+      break;
+    case IS_CV:
+      fprintf(out, "var $%s: ", ops->vars[EX_VAR_TO_NUM(operand->var)]->val);
+      print_var_value(out, EX_VAR(operand->var));
+      break;
+    case IS_UNUSED:
+      fprintf(out, "-");
+      break;
+    case 0x24:
+      fprintf(out, "(discarded)");
+      break;
+    default:
+      fprintf(out, "? (type 0x%x)", type);
+  }
+  fprintf(out, " ");
+}
+
+static void plog_file_builtin(application_t *app, const char *tag, const char *callee_name,
+                              zend_op_array *op_array, const zend_op *call_op, uint arg_count,
+                              const zend_op **args)
+{
+  uint i;
+  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+
+  fprintf(plog, "%s %s ", tag, callee_name);
+  for (i = 0; i < arg_count; i++)
+    print_operand(plog, "<arg>", op_array, &args[i]->op1, args[i]->op1_type);
+  print_operand(plog, "<ret>", op_array, &call_op->result, call_op->result_type);
+  fprintf(plog, "\n");
+}
+
+void plog_builtin(application_t *app, zend_op_array *op_array, const zend_op *call_op)
+{
+  bool done = false;
+  uint init_count = 0, arg_count = 0;
+  const zend_op *walk = (call_op - 1);
+  const zend_op *args[0x10];
+  zend_execute_data *execute_data = EG(current_execute_data);
+
+  do {
+    if (walk->opcode == ZEND_DO_FCALL) {
+      init_count++;
+      break;
+    }
+    if (init_count > 0) {
+      switch (walk->opcode) {
+        case ZEND_NEW:
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_NS_FCALL_BY_NAME:
+        case ZEND_INIT_METHOD_CALL:
+        case ZEND_INIT_STATIC_METHOD_CALL:
+        case ZEND_INIT_USER_CALL:
+          init_count--;
+          break;
+      }
+    } else {
+      switch (walk->opcode) {
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_NS_FCALL_BY_NAME: {
+          const zval *callee_name = NULL;
+
+          if (walk->op2_type == IS_CONST && Z_TYPE_P(walk->op2.zv) == IS_STRING) {
+            callee_name = walk->op2.zv;
+          } else if (walk->opcode != ZEND_INIT_FCALL) {
+            callee_name = EX_VAR(walk->op2.var);
+          }
+          if (callee_name != NULL &&
+              zend_hash_find(executor_globals.function_table, Z_STR_P(callee_name)) != NULL) {
+            if (is_file_sink_function(Z_STRVAL_P(callee_name)))
+              plog_file_builtin(app, "<file-output>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
+            else if (is_file_source_function(Z_STRVAL_P(callee_name)))
+              plog_file_builtin(app, "<file-input>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
+          }
+          done = true;
+        } break;
+        case ZEND_NEW:
+        case ZEND_INIT_METHOD_CALL:
+        case ZEND_INIT_STATIC_METHOD_CALL:
+        case ZEND_INIT_USER_CALL:
+          done = true;
+          break;
+        case ZEND_SEND_VAL:
+        case ZEND_SEND_VAL_EX:
+        case ZEND_SEND_VAR:
+        case ZEND_SEND_VAR_NO_REF:
+        case ZEND_SEND_REF:
+        case ZEND_SEND_VAR_EX:
+        case ZEND_SEND_UNPACK:
+        case ZEND_SEND_ARRAY:
+        case ZEND_SEND_USER:
+          args[arg_count++] = walk;
+          break;
+      }
+    }
+  } while ((--walk >= (zend_op *) &op_array[0]) && !done);
+}
+
+void plog_taint(application_t *app, taint_variable_t *taint)
+{
+  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+
+  switch (taint->type) {
+    case TAINT_VAR_TEMP:
+      fprintf(plog, "Taint temp #%d with query %s\n", taint->id.temp_id, (const char *) taint->taint);
+      break;
+    case TAINT_VAR_LOCAL:
+      fprintf(plog, "Taint var #%d with query %s\n", taint->id.temp_id, (const char *) taint->taint);
+      break;
+    case TAINT_VAR_GLOBAL:
+      fprintf(plog, "Taint var %s with query %s\n", taint->id.var_name, (const char *) taint->taint);
+      break;
+    default: ;
+  }
 }
 
 void flush_all_outputs(application_t *app)
