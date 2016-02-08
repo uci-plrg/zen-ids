@@ -733,7 +733,7 @@ static bool is_db_stmt_function_base(const char *type, const char *name)
     if (strncmp(name, DB_STMT_PREFIX, DB_STMT_PREFIX_LEN) != 0)
       return false;
   } else {
-    if (strcmp(type, DB_STMT_PREFIX) != 0)
+    if (strncmp(name, type, strlen(type)) != 0)
       return false;
   }
   return true;
@@ -745,14 +745,14 @@ static bool is_db_stmt_function_base(const char *type, const char *name)
 
 static bool is_db_sql_function_base(const char *type, const char *name)
 {
-  if (is_db_stmt_function_base(type, name))
+  if (type == NULL && is_db_stmt_function_base(type, name)) // FIXME: distinguishing stmt functions
     return false;
 
   if (type == NULL) {
     if (strncmp(name, DB_SQL_PREFIX, DB_SQL_PREFIX_LEN) != 0)
       return false;
   } else {
-    if (strcmp(type, DB_SQL_TYPE) != 0)
+    if (strncmp(name, type, strlen(type)) != 0)
       return false;
   }
 
@@ -832,9 +832,9 @@ static bool is_db_stmt_source_function(const char *name)
 bool is_db_source_function(const char *type, const char *name)
 {
   return (is_db_sql_function_base(type, name) &&
-          is_db_sql_source_function(type == NULL ? name + DB_SQL_PREFIX_LEN : name)) ||
+          is_db_sql_source_function(name + (type == NULL ? DB_SQL_PREFIX_LEN : strlen(type)))) ||
          (is_db_stmt_function_base(type, name) &&
-          is_db_stmt_source_function(type == NULL ? name + DB_STMT_PREFIX_LEN : name));
+          is_db_stmt_source_function(name + (type == NULL ? DB_STMT_PREFIX_LEN : strlen(type))));
 }
 
 static bool is_db_sql_sink_function(const char *name)
@@ -874,9 +874,9 @@ static bool is_db_stmt_sink_function(const char *name)
 bool is_db_sink_function(const char *type, const char *name)
 {
   return (is_db_sql_function_base(type, name) &&
-          is_db_sql_sink_function(type == NULL ? name + DB_SQL_PREFIX_LEN : name)) ||
+          is_db_sql_sink_function(name + (type == NULL ? DB_SQL_PREFIX_LEN : strlen(type)))) ||
          (is_db_stmt_function_base(type, name) &&
-          is_db_stmt_sink_function(type == NULL ? name + DB_STMT_PREFIX_LEN : name));
+          is_db_stmt_sink_function(name + (type == NULL ? DB_STMT_PREFIX_LEN : strlen(type))));
 }
 
 bool is_file_source_function(const char *name)

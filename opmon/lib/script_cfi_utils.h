@@ -127,6 +127,9 @@ bool is_php_session_active();
 zval *php_session_set_var(zend_string *key, zval *value);
 void set_opmon_user_level(long user_level);
 
+const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
+const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
+
 void tokenize_file(void);
 
 static inline uint64 hash_addr(void *addr)

@@ -8,4 +8,23 @@ The notify_database_query() hook in PHP mysqli occurs during calls like these:
   $this->result = @mysqli_query( $this->dbh, $query );
 
 The query result is returned by the fcall handler (N.B.: watch for caching!)
+Query result type is mysqli_result. In WordPress, the query() function sometimes
+returns the mysqli_result directly, and sometimes calls
+
+    $row = mysqli_fetch_object( $result )
+    $values = array_values( get_object_vars( $row ) );
+
+
+------------
+function ref
+------------
+
+mysqli_fetch_object : mysqli builtin
+get_object_vars     : mysqli builtin
+mysqli_query        : mysqli builtin
+array_values        : PHP builtin
+
+
+
+
 

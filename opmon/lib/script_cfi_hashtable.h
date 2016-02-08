@@ -15,12 +15,13 @@ typedef struct _sctable_entry_t {
 
 typedef struct _sctable_t {
   sctable_entry_t **data;
-  uint  hash_bits;
-  uint  hash_mask;
-  uint  capacity;           /* = 2^bits */
-  uint  entries;
-  uint  load_factor_percent; /* \alpha = load_factor_percent/100 */
-  uint  resize_threshold;    /*  = capacity * load_factor */
+  uint hash_bits;
+  uint hash_mask;
+  uint capacity;           /* = 2^bits */
+  uint entries;
+  uint load_factor_percent; /* \alpha = load_factor_percent/100 */
+  uint resize_threshold;    /*  = capacity * load_factor */
+  bool (*comparator)(sctable_entry_t *first, sctable_entry_t *second);
 } sctable_t;
 
 /* caller must have previously set `t->hash_bits` */
@@ -36,7 +37,7 @@ sctable_add(sctable_t *t, KEY_TYPE key, void *value);
 void
 sctable_add_or_replace(sctable_t *t, KEY_TYPE key, void *value);
 
-void
+void *
 sctable_remove(sctable_t *t, KEY_TYPE key);
 
 void

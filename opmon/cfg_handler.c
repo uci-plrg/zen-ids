@@ -715,10 +715,15 @@ void print_var_value(FILE *out, const zval *var)
   }
 }
 
+void print_operand_value(FILE *out, const znode_op *operand)
+{
+  zend_execute_data *execute_data = EG(current_execute_data);
+  print_var_value(out, EX_VAR(operand->var));
+}
+
 void print_operand(FILE *out, const char *tag, zend_op_array *ops,
                    const znode_op *operand, const zend_uchar type)
 {
-  zend_execute_data *execute_data = EG(current_execute_data);
   fprintf(out, "%s ", tag);
 
   switch (type) {
@@ -775,11 +780,11 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
     case IS_VAR:
     case IS_TMP_VAR:
       fprintf(out, "var #%d: ", (uint) (EX_VAR_TO_NUM(operand->var) - ops->last_var));
-      print_var_value(out, EX_VAR(operand->var));
+      print_operand_value(out, operand);
       break;
     case IS_CV:
       fprintf(out, "var $%s: ", ops->vars[EX_VAR_TO_NUM(operand->var)]->val);
-      print_var_value(out, EX_VAR(operand->var));
+      print_operand_value(out, operand);
       break;
     case IS_UNUSED:
       fprintf(out, "-");
@@ -793,86 +798,20 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
   fprintf(out, " ");
 }
 
-static void plog_file_builtin(application_t *app, const char *tag, const char *callee_name,
-                              zend_op_array *op_array, const zend_op *call_op, uint arg_count,
-                              const zend_op **args)
+void plog_call(application_t *app, const char *tag, const char *callee_name,
+               zend_op_array *op_array, const zend_op *call_op,
+               uint arg_count, const zend_op **args)
 {
   uint i;
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+
+  fprintf(plog, "%s at %s:%d\n", tag, op_array->filename->val, call_op->lineno);
 
   fprintf(plog, "%s %s ", tag, callee_name);
   for (i = 0; i < arg_count; i++)
     print_operand(plog, "<arg>", op_array, &args[i]->op1, args[i]->op1_type);
   print_operand(plog, "<ret>", op_array, &call_op->result, call_op->result_type);
   fprintf(plog, "\n");
-}
-
-void plog_builtin(application_t *app, zend_op_array *op_array, const zend_op *call_op)
-{
-  bool done = false;
-  uint init_count = 0, arg_count = 0;
-  const zend_op *walk = (call_op - 1);
-  const zend_op *args[0x10];
-  zend_execute_data *execute_data = EG(current_execute_data);
-
-  do {
-    if (walk->opcode == ZEND_DO_FCALL) {
-      init_count++;
-      break;
-    }
-    if (init_count > 0) {
-      switch (walk->opcode) {
-        case ZEND_NEW:
-        case ZEND_INIT_FCALL:
-        case ZEND_INIT_FCALL_BY_NAME:
-        case ZEND_INIT_NS_FCALL_BY_NAME:
-        case ZEND_INIT_METHOD_CALL:
-        case ZEND_INIT_STATIC_METHOD_CALL:
-        case ZEND_INIT_USER_CALL:
-          init_count--;
-          break;
-      }
-    } else {
-      switch (walk->opcode) {
-        case ZEND_INIT_FCALL:
-        case ZEND_INIT_FCALL_BY_NAME:
-        case ZEND_INIT_NS_FCALL_BY_NAME: {
-          const zval *callee_name = NULL;
-
-          if (walk->op2_type == IS_CONST && Z_TYPE_P(walk->op2.zv) == IS_STRING) {
-            callee_name = walk->op2.zv;
-          } else if (walk->opcode != ZEND_INIT_FCALL) {
-            callee_name = EX_VAR(walk->op2.var);
-          }
-          if (callee_name != NULL &&
-              zend_hash_find(executor_globals.function_table, Z_STR_P(callee_name)) != NULL) {
-            if (is_file_sink_function(Z_STRVAL_P(callee_name)))
-              plog_file_builtin(app, "<file-output>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
-            else if (is_file_source_function(Z_STRVAL_P(callee_name)))
-              plog_file_builtin(app, "<file-input>", Z_STRVAL_P(callee_name), op_array, call_op, arg_count, args);
-          }
-          done = true;
-        } break;
-        case ZEND_NEW:
-        case ZEND_INIT_METHOD_CALL:
-        case ZEND_INIT_STATIC_METHOD_CALL:
-        case ZEND_INIT_USER_CALL:
-          done = true;
-          break;
-        case ZEND_SEND_VAL:
-        case ZEND_SEND_VAL_EX:
-        case ZEND_SEND_VAR:
-        case ZEND_SEND_VAR_NO_REF:
-        case ZEND_SEND_REF:
-        case ZEND_SEND_VAR_EX:
-        case ZEND_SEND_UNPACK:
-        case ZEND_SEND_ARRAY:
-        case ZEND_SEND_USER:
-          args[arg_count++] = walk;
-          break;
-      }
-    }
-  } while ((--walk >= (zend_op *) &op_array[0]) && !done);
 }
 
 void print_taint(FILE *out, taint_variable_t *taint)
@@ -918,12 +857,14 @@ void print_taint(FILE *out, taint_variable_t *taint)
 
 void plog_taint_var(application_t *app, taint_variable_t *taint_var)
 {
-  bool plogged = true;
+  //bool plogged = true;
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
 
-  fprintf(plog, "<tainted-op> %s:%d\n", taint_var->stack_frame->filename->val,
-          taint_var->tainted_op->lineno);
+  fprintf(plog, "<tainted-op> %s:%d\n", taint_var->tainted_at_file, taint_var->tainted_at->lineno);
+  fprintf(plog, "<taint-var> ");
+  print_taint(plog, taint_var);
 
+  /*
   switch (taint_var->var_type) {
     case TAINT_VAR_TEMP:
       fprintf(plog, "<taint-var> temp #%d with ", taint_var->var_id.temp_id);
@@ -941,7 +882,17 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var)
       plogged = false;
   }
   if (plogged)
+  */
     fprintf(plog, "\n");
+}
+
+void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op *db_mod_taint_op)
+{
+  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+
+  fprintf(plog, "<site-mod> ");
+  print_operand_value(plog, &db_mod_taint_op->result);
+  fprintf(plog, "\n");
 }
 
 void flush_all_outputs(application_t *app)

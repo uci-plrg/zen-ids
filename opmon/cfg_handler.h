@@ -28,11 +28,15 @@ void write_routine_catalog_entry(application_t *app, uint routine_hash, const ch
                                  const char *routine_name);
 
 void print_var_value(FILE *out, const zval *var);
+void print_operand_value(FILE *out, const znode_op *operand);
 void print_operand(FILE *out, const char *tag, zend_op_array *ops,
                    const znode_op *operand, const zend_uchar type);
-void plog_builtin(application_t *app, zend_op_array *op_array, const zend_op *call_op);
+void plog_call(application_t *app, const char *tag, const char *callee_name,
+               zend_op_array *op_array, const zend_op *call_op,
+               uint arg_count, const zend_op **args);
 void print_taint(FILE *plog, taint_variable_t *taint);
 void plog_taint_var(application_t *app, taint_variable_t *taint_var);
+void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op *db_mod_taint_op);
 
 void flush_all_outputs(application_t *app);
 

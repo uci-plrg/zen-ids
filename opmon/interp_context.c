@@ -79,9 +79,9 @@ static zend_op entry_op;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
-
 void query_executing(const char *query)
 {
+  /*
   site_modification_t *mod = NULL;
   site_modification_t fake_mod = { SITE_MOD_DB, { query } };
 
@@ -92,9 +92,13 @@ void query_executing(const char *query)
                                                   &cur_frame.opcodes[cur_frame.op_index],
                                                   TAINT_TYPE_SITE_MOD, mod);
 
-    if (var != NULL)
+    if (var != NULL) {
       taint_var_add(cur_frame.cfm.app, var);
+      db_mod = mod;
+      db_mod_taint_op = &cur_frame.opcodes[cur_frame.op_index];
+    }
   }
+  */
 }
 
 static uint get_first_executable_index(zend_op *opcodes)
@@ -518,6 +522,112 @@ static request_input_type_t get_request_input_type(const zend_op *op)
   return REQUEST_INPUT_TYPE_NONE;
 }
 
+static void inflate_call(zend_execute_data *execute_data,
+                         zend_op_array *op_array, const zend_op *call_op,
+                         const zend_op **args, uint *arg_count)
+{
+  bool done = false;
+  uint init_count = 0;
+  const zend_op *walk = (call_op - 1);
+
+  *arg_count = 0;
+
+  do {
+    if (walk->opcode == ZEND_DO_FCALL) {
+      init_count++;
+      break;
+    }
+    if (init_count > 0) {
+      switch (walk->opcode) {
+        case ZEND_NEW:
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_NS_FCALL_BY_NAME:
+        case ZEND_INIT_METHOD_CALL:
+        case ZEND_INIT_STATIC_METHOD_CALL:
+        case ZEND_INIT_USER_CALL:
+          init_count--;
+          break;
+      }
+    } else {
+      switch (walk->opcode) {
+        case ZEND_INIT_FCALL:
+        case ZEND_INIT_FCALL_BY_NAME:
+        case ZEND_INIT_NS_FCALL_BY_NAME:
+        case ZEND_NEW:
+        case ZEND_INIT_METHOD_CALL:
+        case ZEND_INIT_STATIC_METHOD_CALL:
+        case ZEND_INIT_USER_CALL:
+          done = true;
+          break;
+        case ZEND_SEND_VAL:
+        case ZEND_SEND_VAL_EX:
+        case ZEND_SEND_VAR:
+        case ZEND_SEND_VAR_NO_REF:
+        case ZEND_SEND_REF:
+        case ZEND_SEND_VAR_EX:
+        case ZEND_SEND_UNPACK:
+        case ZEND_SEND_ARRAY:
+        case ZEND_SEND_USER:
+          args[(*arg_count)++] = walk;
+          break;
+      }
+    }
+  } while ((--walk >= (zend_op *) &op_array[0]) && !done);
+}
+
+static zend_string *executing_builtin = NULL;
+
+static void post_process_builtin()
+{
+  if (prev_frame.execute_data != NULL) {
+    zend_execute_data *execute_data = prev_frame.execute_data;
+    zend_op_array *op_array = &execute_data->func->op_array;
+    zend_op *op = &op_array->opcodes[prev_frame.op_index];
+
+    switch (op->opcode) {
+      case ZEND_DO_FCALL:
+        if (executing_builtin == NULL) {
+          propagate_taint(cur_frame.cfm.app, execute_data, op_array, op);
+        } else {
+          uint arg_count;
+          const zend_op *args[0x10];
+
+          inflate_call(execute_data, op_array, op, args, &arg_count);
+          if (is_file_sink_function(executing_builtin->val))
+            plog_call(cur_frame.cfm.app, "<file-output>", executing_builtin->val, op_array, op, arg_count, args);
+          else if (is_file_source_function(executing_builtin->val))
+            plog_call(cur_frame.cfm.app, "<file-input>", executing_builtin->val, op_array, op, arg_count, args);
+          else if (is_db_sink_function("mysqli_", executing_builtin->val))
+            plog_call(cur_frame.cfm.app, "<db-output>", executing_builtin->val, op_array, op, arg_count, args);
+          else if (is_db_source_function("mysqli_", executing_builtin->val))
+            plog_call(cur_frame.cfm.app, "<db-input>", executing_builtin->val, op_array, op, arg_count, args);
+
+          if (strcmp(executing_builtin->val, "mysqli_query") == 0) {
+            const char *query = operand_strdup(execute_data, &args[0]->op1, args[0]->op1_type);
+            site_modification_t *mod = NULL;
+            site_modification_t fake_mod = { SITE_MOD_DB, { query } };
+
+            // lookup corresponding site modifications
+            mod = &fake_mod;
+            if (mod != NULL) {
+              const zval *value = get_zval(execute_data, &op->result, op->result_type);
+              if (value != NULL) {
+                taint_variable_t *var = create_taint_variable(value, op_array, op, TAINT_TYPE_SITE_MOD, mod);
+                taint_var_add(cur_frame.cfm.app, var);
+                plog_db_mod_result(cur_frame.cfm.app, mod, op);
+              }
+            }
+          }
+
+          executing_builtin = NULL;
+        } break;
+      default:
+        propagate_taint(cur_frame.cfm.app, execute_data, op_array, op);
+    }
+  }
+}
+
 void opcode_executing(const zend_op *op)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
@@ -553,6 +663,28 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
+  post_process_builtin();
+
+  {
+    taint_variable_t *taint_var;
+    const zval *operand = get_zval(execute_data, &op->op1, op->op1_type);
+    if (operand != NULL) {
+      taint_var = taint_var_get(operand);
+      if (taint_var != NULL) {
+        SPOT("<taint> propagated to op1 of %s:%d(%d)\n", op_array->filename->val, op->lineno,
+             (uint) (op - (zend_op *) op_array->opcodes));
+      }
+    }
+    operand = get_zval(execute_data, &op->op2, op->op2_type);
+    if (operand != NULL) {
+      taint_var = taint_var_get(operand);
+      if (taint_var != NULL) {
+        SPOT("<taint> propagated to op2 of %s:%d(%d)\n", op_array->filename->val, op->lineno,
+             (uint) (op - (zend_op *) op_array->opcodes));
+      }
+    }
+  }
+
   if (!current_session.active) {
     PRINT("<session> Inactive session while executing %s. User level is %d.\n",
           cur_frame.cfm.routine_name, current_session.user_level);
@@ -565,15 +697,17 @@ void opcode_executing(const zend_op *op)
 
   input_type = get_request_input_type(op); // TODO: combine in following switch
   if (input_type != REQUEST_INPUT_TYPE_NONE) {
-    request_input_t *input = malloc(sizeof(request_input_t));
-    taint_variable_t *taint_var;
+    const zval *value = get_zval(execute_data, &op->result, op->result_type);
+    if (value != NULL) {
+      request_input_t *input = malloc(sizeof(request_input_t));
+      taint_variable_t *taint_var;
 
-    input->type = input_type;
-    input->value = NULL;
+      input->type = input_type;
+      input->value = NULL;
 
-    taint_var = create_taint_variable(op_array, op, TAINT_TYPE_REQUEST_INPUT, input);
-    if (taint_var != NULL)
+      taint_var = create_taint_variable(value, op_array, op, TAINT_TYPE_REQUEST_INPUT, input);
       taint_var_add(cur_frame.cfm.app, taint_var);
+    }
   }
 
   switch (op->opcode) {
@@ -589,7 +723,7 @@ void opcode_executing(const zend_op *op)
       break;
     case ZEND_DO_FCALL:
       if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
-        plog_builtin(cur_frame.cfm.app, op_array, op);
+        executing_builtin = EX(call)->func->common.function_name;
       } else {
         stack_event.state = STACK_STATE_CALL;
         stack_event.last_opcode = op->opcode;

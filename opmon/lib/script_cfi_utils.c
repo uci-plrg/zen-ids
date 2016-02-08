@@ -119,6 +119,36 @@ void set_opmon_user_level(long user_level)
   }
 }
 
+const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type)
+{
+  switch (type) {
+    case IS_CONST:
+      if (operand->zv->u1.v.type == IS_STRING)
+        return strdup(Z_STRVAL_P(operand->zv));
+      break;
+    case IS_VAR:
+    case IS_TMP_VAR:
+    case IS_CV:
+      return strdup(Z_STRVAL_P(EX_VAR(operand->var)));
+  }
+
+  return NULL;
+}
+
+const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type)
+{
+  switch (type) {
+    case IS_CONST:
+      return operand->zv;
+    case IS_VAR:
+    case IS_TMP_VAR:
+    case IS_CV:
+      return EX_VAR(operand->var);
+    default:
+      return NULL;
+  }
+}
+
 void tokenize_file(void)
 {
 	zval token;

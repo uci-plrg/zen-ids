@@ -38,7 +38,7 @@ sctable_resize(sctable_t *t)
         }
     }
 
-    TABLE_FREE(old_data); // todo! fix segfault
+    TABLE_FREE(old_data);
 }
 
 static sctable_entry_t *
@@ -100,9 +100,10 @@ sctable_add_or_replace(sctable_t *t, KEY_TYPE key, void *value)
     sctable_add(t, key, value);
 }
 
-void
+void *
 sctable_remove(sctable_t *t, KEY_TYPE key)
 {
+  void *payload = NULL;
   sctable_entry_t *e, *prev_e = NULL;
   uint hindex = HASH_FUNC(key, t);
   for (e = t->data[hindex]; e; prev_e = e, e = e->next) {
@@ -112,10 +113,12 @@ sctable_remove(sctable_t *t, KEY_TYPE key)
       else
         t->data[hindex] = e->next;
       t->entries--;
+      payload = e->payload;
       TABLE_FREE(e);
       break;
     }
   }
+  return payload;
 }
 
 void

@@ -104,10 +104,12 @@ typedef union _taint_variable_id_t {
 } taint_variable_id_t;
 
 typedef struct _taint_variable_t {
-  taint_variable_type_t var_type;
-  taint_variable_id_t var_id;
-  const zend_op *first_tainted_op;
-  zend_op_array *stack_frame;
+  //taint_variable_type_t var_type;
+  //taint_variable_id_t var_id;
+  const zval *value;
+  const char *tainted_at_file;
+  const zend_op *tainted_at;
+  //zend_op_array *stack_frame;
   taint_type_t type;
   void *taint;
 } taint_variable_t;
@@ -116,18 +118,21 @@ void init_taint_tracker();
 
 void destroy_taint_tracker();
 
-taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *tainted_op,
-                                        taint_type_t type, void *taint);
+//taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *tainted_op,
+//                                        taint_type_t type, void *taint);
+taint_variable_t *create_taint_variable(const zval *value, zend_op_array *stack_frame,
+                                        const zend_op *tainted_at, taint_type_t type, void *taint);
+
+void destroy_taint_variable(taint_variable_t *taint_var);
 
 void taint_var_add(application_t *app, taint_variable_t *var);
 
-void *taint_var_get(taint_variable_type_t var_type, taint_variable_id_t var_id,
-                    zend_op *stack_frame_id);
+taint_variable_t *taint_var_get(const zval *value);
 
-void *taint_var_remove(taint_variable_type_t var_type, taint_variable_id_t var_id,
-                       zend_op *stack_frame_id);
+taint_variable_t *taint_var_remove(const zval *value);
 
-void propagate_taint(zend_op_array *stack_frame, zend_op *op);
+void propagate_taint(application_t *app, zend_execute_data *execute_data,
+                     zend_op_array *stack_frame, zend_op *op);
 
 #endif
 
