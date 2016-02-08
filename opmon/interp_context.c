@@ -665,26 +665,6 @@ void opcode_executing(const zend_op *op)
 
   post_process_builtin();
 
-  {
-    taint_variable_t *taint_var;
-    const zval *operand = get_zval(execute_data, &op->op1, op->op1_type);
-    if (operand != NULL) {
-      taint_var = taint_var_get(operand);
-      if (taint_var != NULL) {
-        SPOT("<taint> propagated to op1 of %s:%d(%d)\n", op_array->filename->val, op->lineno,
-             (uint) (op - (zend_op *) op_array->opcodes));
-      }
-    }
-    operand = get_zval(execute_data, &op->op2, op->op2_type);
-    if (operand != NULL) {
-      taint_var = taint_var_get(operand);
-      if (taint_var != NULL) {
-        SPOT("<taint> propagated to op2 of %s:%d(%d)\n", op_array->filename->val, op->lineno,
-             (uint) (op - (zend_op *) op_array->opcodes));
-      }
-    }
-  }
-
   if (!current_session.active) {
     PRINT("<session> Inactive session while executing %s. User level is %d.\n",
           cur_frame.cfm.routine_name, current_session.user_level);

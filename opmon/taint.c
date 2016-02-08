@@ -351,24 +351,38 @@ static inline zend_uchar get_operand_type(zend_op *op, taint_operand_index_t ind
   }
 }
 
+static const char *get_operand_index_name(taint_operand_index_t index)
+{
+  switch (index) {
+    case TAINT_OPERAND_RESULT:
+      return "result/value";
+    case TAINT_OPERAND_1:
+      return "1/map";
+    case TAINT_OPERAND_2:
+      return "2/key";
+    default:
+      return "<unknown>";
+  }
+}
+
 static inline const zval *get_operand_zval(zend_execute_data *execute_data, zend_op *op,
                                     taint_operand_index_t index)
 {
   return get_zval(execute_data, get_operand(op, index), get_operand_type(op, index));
 }
 
-static void propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
+static bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
                                  zend_op_array *stack_frame, zend_op *op,
-                                 const zval *src, taint_operand_index_t dst)
+                                 const zval *src, const zval *dst)
 {
   taint_variable_t *taint_var = taint_var_get(src);
-  if (taint_var != NULL) {
-    const zval *dst_op = get_zval(execute_data, get_operand(op, dst), get_operand_type(op, dst));
-    taint_variable_t *propagation = create_taint_variable(dst_op, stack_frame, op,
+  if (taint_var == NULL) {
+    return false;
+  } else {
+    taint_variable_t *propagation = create_taint_variable(dst, stack_frame, op,
                                                           taint_var->type, taint_var->taint);
     taint_var_add(app, propagation);
-    SPOT("Propagate taint to result at %s:%d(%d)\n", stack_frame->filename->val, op->lineno,
-         (uint) (op - (zend_op *) stack_frame->opcodes));
+    return true;
   }
 }
 
@@ -376,16 +390,34 @@ static void propagate_operand_taint(application_t *app, zend_execute_data *execu
                                     zend_op_array *stack_frame, zend_op *op,
                                     taint_operand_index_t src, taint_operand_index_t dst)
 {
-  propagate_zval_taint(app, execute_data, stack_frame, op,
-                       get_operand_zval(execute_data, op, src), dst);
+  if (propagate_zval_taint(app, execute_data, stack_frame, op,
+                           get_operand_zval(execute_data, op, src),
+                           get_operand_zval(execute_data, op, dst))) {
+    SPOT("Propagate taint to %s at %s:%d(%d)\n", get_operand_index_name(dst),
+         stack_frame->filename->val, op->lineno, (uint) (op - (zend_op *) stack_frame->opcodes));
+  }
 }
 
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op)
 {
   switch (op->opcode) {
-    case ZEND_ASSIGN: /* FT */
+    case ZEND_ASSIGN:
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_1);
+      break;
+    case ZEND_FETCH_DIM_R: {
+      zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
+      zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
+      const zval *dst = get_operand_zval(execute_data, op, TAINT_OPERAND_RESULT);
+      zval *src;
+
+      // if object map: Z_OBJ_HT_P(map)->read_dimension(map, key, IS_CONST, &dst_indirect);
+      if (Z_TYPE_P(map) == IS_ARRAY) {
+        zend_string *key_string = Z_STR_P(key); // check type though...
+        src = zend_hash_find(Z_ARRVAL_P(map), key_string);
+        propagate_zval_taint(app, execute_data, stack_frame, op, src, dst);
+      }
+    }
     case ZEND_ADD: /* FT */
     case ZEND_SUB:
     case ZEND_MUL:
@@ -408,19 +440,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_IS_SMALLER:
     case ZEND_IS_SMALLER_OR_EQUAL:
     case ZEND_CASE:
-    case ZEND_FETCH_DIM_R: /* {1.2} => {result} */
-    case ZEND_FETCH_DIM_W:
-    case ZEND_FETCH_DIM_RW:
-    case ZEND_FETCH_DIM_IS:
-    case ZEND_FETCH_OBJ_R:
-    case ZEND_FETCH_OBJ_W:
-    case ZEND_FETCH_OBJ_RW:
-    case ZEND_FETCH_OBJ_IS:
     case ZEND_FETCH_CONSTANT:
-    case ZEND_FETCH_DIM_UNSET: /* also {} => {1.2}, which is not modelled yet */
-    case ZEND_FETCH_OBJ_UNSET:
-    case ZEND_ADD_VAR:
-    case ZEND_ADD_STRING:
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
     case ZEND_TYPE_CHECK: /* FT */
     case ZEND_DEFINED:
@@ -433,14 +453,40 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_CLONE: // TODO: propagate into clone function (if any)
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       break;
+    case ZEND_ADD_VAR:
+    case ZEND_ADD_STRING:
+      propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
+      break;
+    case ZEND_FETCH_DIM_W: // like fetch dim r?
+    case ZEND_FETCH_DIM_RW:
+    case ZEND_FETCH_DIM_IS:
+    case ZEND_FETCH_OBJ_R:
+    case ZEND_FETCH_OBJ_W:
+    case ZEND_FETCH_OBJ_RW:
+    case ZEND_FETCH_OBJ_IS:
+      break;
+    case ZEND_FETCH_DIM_UNSET: /* also {} => {1.2}, which is not modelled yet */
+    case ZEND_FETCH_OBJ_UNSET:
+      break;
     case ZEND_ASSIGN_REF:
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_1);
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       break;
     case ZEND_ASSIGN_OBJ:
-    case ZEND_ASSIGN_DIM: /* ignoring key for now */
-      propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_VALUE, TAINT_OPERAND_MAP);
-      break;
+    case ZEND_ASSIGN_DIM: {
+      zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
+      zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
+      const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
+      zval *dst;
+
+      // if object map: Z_OBJ_HT_P(map)->read_dimension(map, key, IS_CONST, &dst_indirect);
+      if (Z_TYPE_P(map) == IS_ARRAY) {
+        zend_string *key_string = Z_STR_P(key); // check type though...
+        SEPARATE_ARRAY(map);
+        dst = zend_hash_find(Z_ARRVAL_P(map), key_string);
+        propagate_zval_taint(app, execute_data, stack_frame, op, src, dst);
+      }
+    } break;
     case ZEND_ADD_CHAR:
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_RESULT, TAINT_OPERAND_RESULT);
@@ -451,8 +497,9 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       break;
     case ZEND_FE_FETCH:
       propagate_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_VALUE);
-      propagate_zval_taint(app, execute_data, stack_frame, op+1,
-                           get_operand_zval(execute_data, op, TAINT_OPERAND_MAP), TAINT_OPERAND_VALUE);
+      propagate_zval_taint(app, execute_data, stack_frame, op,
+                           get_operand_zval(execute_data, op, TAINT_OPERAND_MAP),
+                           get_operand_zval(execute_data, op+1, TAINT_OPERAND_VALUE));
       break;
     case ZEND_PRE_INC:
     case ZEND_PRE_DEC:
@@ -518,6 +565,34 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       if (taint_var != NULL)
         destroy_taint_variable(taint_var);
     } break;
+  }
+
+  {
+    taint_variable_t *taint_var;
+    const zval *operand = get_zval(execute_data, &op->op1, op->op1_type);
+    if (operand != NULL) {
+      taint_var = taint_var_get(operand);
+      if (taint_var != NULL) {
+        SPOT("<taint> propagated to 1/map of %s:%d(%d)\n", stack_frame->filename->val, op->lineno,
+             (uint) (op - (zend_op *) stack_frame->opcodes));
+      }
+    }
+    operand = get_zval(execute_data, &op->op2, op->op2_type);
+    if (operand != NULL) {
+      taint_var = taint_var_get(operand);
+      if (taint_var != NULL) {
+        SPOT("<taint> propagated to 2/key of %s:%d(%d)\n", stack_frame->filename->val, op->lineno,
+             (uint) (op - (zend_op *) stack_frame->opcodes));
+      }
+    }
+    operand = get_zval(execute_data, &op->result, op->result_type);
+    if (operand != NULL) {
+      taint_var = taint_var_get(operand);
+      if (taint_var != NULL) {
+        SPOT("<taint> propagated to result/value of %s:%d(%d)\n", stack_frame->filename->val,
+             op->lineno, (uint) (op - (zend_op *) stack_frame->opcodes));
+      }
+    }
   }
 }
 
