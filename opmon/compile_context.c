@@ -487,7 +487,10 @@ void function_compiled(zend_op_array *op_array)
             //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
             //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
 
-            if (zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv)) != NULL) {
+            zval *func = zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv));
+            // This is matching user-defined functions...? Needs to be builtins only.
+            if (func != NULL && Z_TYPE_P(func) == IS_PTR &&
+                func->value.func->type == ZEND_INTERNAL_FUNCTION) {
               ignore_call |= !is_opcode_dump_enabled();
               sprintf(routine_name, "builtin:%s", Z_STRVAL_P(op->op2.zv));
               push_fcall_init(i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);

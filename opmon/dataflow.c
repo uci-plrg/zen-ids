@@ -298,7 +298,21 @@ void dump_opcode(zend_op_array *ops, zend_op *op)
 
   if (uses_return_value(op)) {
     if (op->result_type != IS_UNUSED) {
-      dump_operand('r', ops, &op->result, op->result_type);
+      switch (op->opcode) {
+        case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+        case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+        case ZEND_FETCH_DIM_UNSET:
+        case ZEND_FETCH_OBJ_UNSET:
+        case ZEND_ASSIGN_OBJ:
+        case ZEND_ASSIGN_DIM:
+        case ZEND_FE_RESET:
+        case ZEND_FE_FETCH:
+          dump_operand('v', ops, &op->result, op->result_type);
+          break;
+        default:
+          dump_operand('r', ops, &op->result, op->result_type);
+          break;
+      }
       fprintf(opcode_dump_file, " = ");
     }
     if (op->op1_type == IS_UNUSED && op->op2_type == IS_UNUSED) {
@@ -314,7 +328,29 @@ void dump_opcode(zend_op_array *ops, zend_op *op)
     }
   }
   if (op->op1_type != IS_UNUSED) {
-    dump_operand('1', ops, &op->op1, op->op1_type);
+    switch (op->opcode) {
+      case ZEND_FETCH_DIM_R:
+      case ZEND_FETCH_DIM_W:
+      case ZEND_FETCH_DIM_RW:
+      case ZEND_FETCH_DIM_IS:
+      case ZEND_FETCH_OBJ_R:
+      case ZEND_FETCH_OBJ_W:
+      case ZEND_FETCH_OBJ_RW:
+      case ZEND_FETCH_OBJ_IS:
+      case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+      case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+      case ZEND_FETCH_DIM_UNSET:
+      case ZEND_FETCH_OBJ_UNSET:
+      case ZEND_ASSIGN_OBJ:
+      case ZEND_ASSIGN_DIM:
+      case ZEND_FE_RESET:
+      case ZEND_FE_FETCH:
+        dump_operand('m', ops, &op->op1, op->op1_type);
+        break;
+      default:
+        dump_operand('1', ops, &op->op1, op->op1_type);
+        break;
+    }
   } else {
     switch (op->opcode) {
       case ZEND_JMP:
@@ -334,7 +370,29 @@ void dump_opcode(zend_op_array *ops, zend_op *op)
   if (op->op1_type != IS_UNUSED && op->op2_type != IS_UNUSED)
     fprintf(opcode_dump_file, " ? ");
   if (op->op2_type != IS_UNUSED) {
-    dump_operand('2', ops, &op->op2, op->op2_type);
+    switch (op->opcode) {
+      case ZEND_FETCH_DIM_R:
+      case ZEND_FETCH_DIM_W:
+      case ZEND_FETCH_DIM_RW:
+      case ZEND_FETCH_DIM_IS:
+      case ZEND_FETCH_OBJ_R:
+      case ZEND_FETCH_OBJ_W:
+      case ZEND_FETCH_OBJ_RW:
+      case ZEND_FETCH_OBJ_IS:
+      case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+      case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+      case ZEND_FETCH_DIM_UNSET:
+      case ZEND_FETCH_OBJ_UNSET:
+      case ZEND_ASSIGN_OBJ:
+      case ZEND_ASSIGN_DIM:
+      case ZEND_FE_RESET:
+      case ZEND_FE_FETCH:
+        dump_operand('k', ops, &op->op2, op->op2_type);
+        break;
+      default:
+        dump_operand('2', ops, &op->op2, op->op2_type);
+        break;
+    }
   } else {
     switch (op->opcode) {
       case ZEND_JMPZ:
@@ -2175,6 +2233,8 @@ static void propagate_function_dataflow(scarray_t *call_stack, dataflow_routine_
       continue;
 
     callee = (dataflow_routine_t *) sctable_lookup(&dg->routine_table, call->target_hash);
+    if (callee == NULL)
+      continue;
 
     s = scarray_iterator_start(&callee->sinks);
     while ((callee_sink = (dataflow_sink_t *) scarray_iterator_next(s)) != NULL) {
