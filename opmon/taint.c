@@ -1,4 +1,5 @@
 #include "lib/script_cfi_utils.h"
+#include "ext/standard/php_array.h"
 #include "cfg_handler.h"
 #include "taint.h"
 
@@ -342,12 +343,28 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
                                 zend_op_array *stack_frame, zend_op *op)
 {
   zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
-  zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
   zval *dst;
 
   Z_UNWRAP_P(map);
   if (Z_TYPE_P(map) == IS_ARRAY) {
+    zval *key, temp_key;
+
+    if (op->op2_type == IS_UNUSED) { /* it's an append, so point key at the appended element */
+      zend_long count = php_count_recursive(map, COUNT_NORMAL);
+
+      if (count <= 0) {
+        plog(app, "<taint> Error in %s: php array is empty after append at %04d(L%04d)%s\n",
+         zend_get_opcode_name(op->opcode),
+         OP_LINE(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+      } else {
+        ZVAL_LONG(&temp_key, count-1);
+        key = &temp_key;
+      }
+    } else {
+      key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
+    }
+
     if (Z_TYPE_P(key) == IS_LONG) {
       zend_ulong key_long = Z_LVAL_P(key);
       SEPARATE_ARRAY(map);
