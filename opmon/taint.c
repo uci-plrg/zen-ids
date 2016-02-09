@@ -289,6 +289,19 @@ static void merge_operand_taint(application_t *app, zend_execute_data *execute_d
   propagate_operand_taint(app, execute_data, stack_frame, op, false, src, dst);
 }
 
+static bool is_derived_class(zend_class_entry *child_class, zend_class_entry *parent_class)
+{
+  child_class = child_class->parent;
+  while (child_class) {
+    if (child_class == parent_class) {
+      return true;
+    }
+    child_class = child_class->parent;
+  }
+
+  return false;
+}
+
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op)
 {
@@ -384,11 +397,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_FETCH_DIM_R:
     case ZEND_FETCH_DIM_W:
     case ZEND_FETCH_DIM_RW:
-    case ZEND_FETCH_DIM_IS:
-    case ZEND_FETCH_OBJ_R:
-    case ZEND_FETCH_OBJ_W:
-    case ZEND_FETCH_OBJ_RW:
-    case ZEND_FETCH_OBJ_IS: {
+    case ZEND_FETCH_DIM_IS: {
       zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
       zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
       const zval *dst = get_operand_zval(execute_data, op, TAINT_OPERAND_RESULT);
@@ -404,13 +413,201 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
           src = zend_hash_find(Z_ARRVAL_P(map), key_string);
           propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
         }
-      } else if (Z_TYPE_P(map) == IS_OBJECT) {
-        // if object map: Z_OBJ_HT_P(map)->read_dimension(map, key, IS_CONST, &dst_indirect);
+      } else {
+        plog(app, "<taint> Error: found an unknown array type %d\n", Z_TYPE_P(map));
       }
 
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
     } break;
-    case ZEND_ASSIGN_OBJ:
+    case ZEND_FETCH_OBJ_R:
+    case ZEND_FETCH_OBJ_W:
+    case ZEND_FETCH_OBJ_RW:
+    case ZEND_FETCH_OBJ_IS: {
+      zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
+      const zval *dst = get_operand_zval(execute_data, op, TAINT_OPERAND_1);
+      zval *src;
+
+      if (op->op1_type == IS_UNUSED)
+        map = &execute_data->This;
+      else
+        map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
+
+      if (Z_TYPE_P(map) == IS_OBJECT) {
+        if (Z_TYPE_P(key) == IS_LONG) { /* is this possible for an object? */
+          zend_ulong key_long = Z_LVAL_P(key);
+          zend_object *object = Z_OBJ_P(map);
+          void **cache_slot = execute_data->run_time_cache + Z_CACHE_SLOT_P(key);
+          zend_property_info *p = NULL;
+
+          if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
+            p = CACHED_PTR_EX(cache_slot + 1);
+          } else {
+            zval *pp = zend_hash_index_find(&object->ce->properties_info, key_long);
+            if (pp != NULL)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && EG(scope) != object->ce && EG(scope) &&
+              is_derived_class(object->ce, EG(scope))) {
+            zval *pp = zend_hash_index_find(&EG(scope)->properties_info, key_long);
+            if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && cache_slot != NULL)
+            CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
+
+          if (p != NULL) {
+            src = OBJ_PROP(object, p->offset);
+            if (Z_TYPE_P(src) == IS_UNDEF)
+              src = NULL;
+          } else if (object->properties != NULL) {
+            src = zend_hash_index_find(object->properties, key_long);
+          } else if (object->ce->__get != NULL) {
+            plog(app, "<taint> Can't find property #%d, but have a magic getter.\n", key_long);
+          }
+
+          if (src != NULL)
+            propagate_zval_taint(app, execute_data, stack_frame, op, true, src, src, "P");
+          else
+            plog(app, "<taint> Can't find property #%d\n", key_long);
+        } else if (Z_TYPE_P(key) == IS_STRING) {
+          zend_string *key_string = Z_STR_P(key);
+          zend_object *object = Z_OBJ_P(map);
+          void **cache_slot = execute_data->run_time_cache + Z_CACHE_SLOT_P(key);
+          zend_property_info *p = NULL;
+
+          if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
+            p = CACHED_PTR_EX(cache_slot + 1);
+          } else {
+            zval *pp = zend_hash_find(&object->ce->properties_info, key_string);
+            if (pp != NULL)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && EG(scope) != object->ce && EG(scope) &&
+              is_derived_class(object->ce, EG(scope))) {
+            zval *pp = zend_hash_find(&EG(scope)->properties_info, key_string);
+            if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && cache_slot != NULL)
+            CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
+
+          if (p != NULL) {
+            src = OBJ_PROP(object, p->offset);
+            if (Z_TYPE_P(src) == IS_UNDEF)
+              src = NULL;
+          } else if (object->properties != NULL) {
+            src = zend_hash_find(object->properties, key_string);
+          } else if (object->ce->__get != NULL) {
+            plog(app, "<taint> Can't find property %s, but have a magic getter.\n", Z_STRVAL_P(key));
+          }
+
+          if (dst != NULL)
+            propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
+          else
+            plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
+        }
+      } else {
+        plog(app, "<taint> Error: found an unknown object type %d\n", Z_TYPE_P(map));
+      }
+
+      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
+    } break;
+    case ZEND_ASSIGN_OBJ: {
+      zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
+      const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
+      zval *dst;
+
+      if (op->op1_type == IS_UNUSED)
+        map = &execute_data->This;
+      else
+        map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
+
+      if (Z_TYPE_P(map) == IS_OBJECT) {
+        if (Z_TYPE_P(key) == IS_LONG) { /* is this possible for an object? */
+          zend_ulong key_long = Z_LVAL_P(key);
+          zend_object *object = Z_OBJ_P(map);
+          void **cache_slot = execute_data->run_time_cache + Z_CACHE_SLOT_P(key);
+          zend_property_info *p = NULL;
+
+          if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
+            p = CACHED_PTR_EX(cache_slot + 1);
+          } else {
+            zval *pp = zend_hash_index_find(&object->ce->properties_info, key_long);
+            if (pp != NULL)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && EG(scope) != object->ce && EG(scope) &&
+              is_derived_class(object->ce, EG(scope))) {
+            zval *pp = zend_hash_index_find(&EG(scope)->properties_info, key_long);
+            if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && cache_slot != NULL)
+            CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
+
+          if (p != NULL) {
+            dst = OBJ_PROP(object, p->offset);
+            if (Z_TYPE_P(dst) == IS_UNDEF)
+              dst = NULL;
+          } else if (object->properties != NULL) {
+            dst = zend_hash_index_find(object->properties, key_long);
+          } else if (object->ce->__get != NULL) {
+            plog(app, "<taint> Can't find property #%d, but have a magic getter.\n", key_long);
+          }
+
+          if (dst != NULL)
+            propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
+          else
+            plog(app, "<taint> Can't find property #%d\n", key_long);
+        } else if (Z_TYPE_P(key) == IS_STRING) {
+          zend_string *key_string = Z_STR_P(key);
+          zend_object *object = Z_OBJ_P(map);
+          void **cache_slot = execute_data->run_time_cache + Z_CACHE_SLOT_P(key);
+          zend_property_info *p = NULL;
+
+          if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
+            p = CACHED_PTR_EX(cache_slot + 1);
+          } else {
+            zval *pp = zend_hash_find(&object->ce->properties_info, key_string);
+            if (pp != NULL)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && EG(scope) != object->ce && EG(scope) &&
+              is_derived_class(object->ce, EG(scope))) {
+            zval *pp = zend_hash_find(&EG(scope)->properties_info, key_string);
+            if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
+              p = (zend_property_info *) Z_PTR_P(pp);
+          }
+
+          if (p == NULL && cache_slot != NULL)
+            CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
+
+          if (p != NULL) {
+            dst = OBJ_PROP(object, p->offset);
+            if (Z_TYPE_P(dst) == IS_UNDEF)
+              dst = NULL;
+          } else if (object->properties != NULL) {
+            dst = zend_hash_find(object->properties, key_string);
+          } else if (object->ce->__get != NULL) {
+            plog(app, "<taint> Can't find property %s, but have a magic getter.\n", Z_STRVAL_P(key));
+          }
+
+          if (dst != NULL)
+            propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
+          else
+            plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
+        }
+      } else {
+        plog(app, "<taint> Error: found an unknown object type %d\n", Z_TYPE_P(map));
+      }
+    } break;
     case ZEND_ASSIGN_DIM: {
       zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
       zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
@@ -430,7 +627,8 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
           dst = zend_hash_find(Z_ARRVAL_P(map), key_string);
           propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
         }
-      } else if (Z_TYPE_P(map) == IS_OBJECT) {
+      } else {
+        plog(app, "<taint> Error: found an unknown array type %d\n", Z_TYPE_P(map));
       }
     } break;
     case ZEND_FETCH_UNSET:

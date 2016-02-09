@@ -895,6 +895,18 @@ void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op
   fprintf(plog, "\n");
 }
 
+void plog(application_t *app, const char *message, ...)
+{
+  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+
+  va_list args;
+  va_start(args, message);
+
+  vfprintf(plog, message, args);
+
+  va_end(args);
+}
+
 void flush_all_outputs(application_t *app)
 {
   cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
