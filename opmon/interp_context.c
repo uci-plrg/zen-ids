@@ -611,7 +611,8 @@ static void post_propagate_taint()
             if (mod != NULL) {
               const zval *value = get_zval(execute_data, &op->result, op->result_type);
               if (value != NULL) {
-                taint_variable_t *var = create_taint_variable(op_array, op, TAINT_TYPE_SITE_MOD, mod);
+                taint_variable_t *var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
+                                                              op, TAINT_TYPE_SITE_MOD, mod);
                 taint_var_add(cur_frame.cfm.app, value, var);
                 plog_db_mod_result(cur_frame.cfm.app, mod, op);
               }
@@ -689,7 +690,8 @@ void opcode_executing(const zend_op *op)
       input->type = input_type;
       input->value = NULL;
 
-      taint_var = create_taint_variable(op_array, op, TAINT_TYPE_REQUEST_INPUT, input);
+      taint_var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
+                                        op, TAINT_TYPE_REQUEST_INPUT, input);
       taint_var_add(cur_frame.cfm.app, value, taint_var);
     }
   }

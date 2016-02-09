@@ -145,3 +145,13 @@ void cfg_add_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_ind
   cfg_entry->edge.to_routine = to_routine;
   cfg_entry->edge.user_level = user_level;
 }
+
+const char *site_relative_path(application_t *app, zend_op_array *stack_frame)
+{
+  const char *filename = stack_frame->filename->val;
+  if (strstr(filename, app->root) != NULL)
+    return filename + strlen(app->root);
+  else
+    return filename;
+}
+

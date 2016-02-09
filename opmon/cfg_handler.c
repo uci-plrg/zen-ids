@@ -915,6 +915,7 @@ void flush_all_outputs(application_t *app)
   fflush(cfg_files->op_edge);
   fflush(cfg_files->routine_edge);
   fflush(cfg_files->routine_catalog);
+  fflush(cfg_files->persistence);
   if (!is_standalone_app) {
     fflush(cfg_files->request);
     fflush(cfg_files->request_edge);

@@ -120,7 +120,7 @@ void destroy_taint_tracker();
 
 //taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *tainted_op,
 //                                        taint_type_t type, void *taint);
-taint_variable_t *create_taint_variable(zend_op_array *stack_frame, const zend_op *tainted_at,
+taint_variable_t *create_taint_variable(const char *file_path, const zend_op *tainted_at,
                                         taint_type_t type, void *taint);
 
 void destroy_taint_variable(taint_variable_t *taint_var);

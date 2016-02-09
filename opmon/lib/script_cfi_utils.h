@@ -102,6 +102,13 @@ do { \
     ERROR(#ptr" hit stack bottom!\n"); \
 } while (0)
 
+#define Z_UNWRAP_P(val) \
+do { \
+  if (Z_TYPE_P(val) == IS_INDIRECT) \
+    val = Z_INDIRECT_P(val); \
+  ZVAL_DEREF(val); \
+} while (0)
+
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;
