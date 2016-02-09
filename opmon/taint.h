@@ -106,7 +106,7 @@ typedef union _taint_variable_id_t {
 typedef struct _taint_variable_t {
   //taint_variable_type_t var_type;
   //taint_variable_id_t var_id;
-  const zval *value;
+  // const zval *value;
   const char *tainted_at_file;
   const zend_op *tainted_at;
   //zend_op_array *stack_frame;
@@ -120,12 +120,12 @@ void destroy_taint_tracker();
 
 //taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *tainted_op,
 //                                        taint_type_t type, void *taint);
-taint_variable_t *create_taint_variable(const zval *value, zend_op_array *stack_frame,
-                                        const zend_op *tainted_at, taint_type_t type, void *taint);
+taint_variable_t *create_taint_variable(zend_op_array *stack_frame, const zend_op *tainted_at,
+                                        taint_type_t type, void *taint);
 
 void destroy_taint_variable(taint_variable_t *taint_var);
 
-void taint_var_add(application_t *app, taint_variable_t *var);
+void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *taint);
 
 taint_variable_t *taint_var_get(const zval *value);
 
@@ -134,5 +134,12 @@ taint_variable_t *taint_var_remove(const zval *value);
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op);
 
+void taint_prepare_call(zend_execute_data *execute_data, zend_op **args, uint arg_count);
+
+void taint_proagate_into_arg_receivers(application_t *app, zend_execute_data *execute_data,
+                                 zend_op_array *stack_frame, zend_op *op);
+
+void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
+                            zend_op_array *stack_frame, zend_op *call_op);
 #endif
 
