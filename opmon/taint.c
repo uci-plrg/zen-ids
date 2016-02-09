@@ -250,7 +250,7 @@ static bool propagate_zval_taint(application_t *app, zend_execute_data *execute_
   if (clobber) {
     sctable_remove(&taint_table, (uint64) dst);
 
-    SPOT("<taint> remove %s at %04d(L%04d)%s\n", dst_name, OP_LINE(stack_frame, op),
+    plog(app, "<taint> remove %s at %04d(L%04d)%s\n", dst_name, OP_LINE(stack_frame, op),
          op->lineno, stack_frame->filename->val);
   }
 
@@ -260,7 +260,7 @@ static bool propagate_zval_taint(application_t *app, zend_execute_data *execute_
     taint_variable_t *propagation = create_taint_variable(dst, stack_frame, op,
                                                           taint_var->type, taint_var->taint);
     taint_var_add(app, propagation);
-    SPOT("<taint> write %s at %04d(L%04d)%s\n",
+    plog(app, "<taint> write %s at %04d(L%04d)%s\n",
          dst_name, OP_LINE(stack_frame, op), op->lineno, stack_frame->filename->val);
     return true;
   }
@@ -479,6 +479,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
 
           if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
             p = CACHED_PTR_EX(cache_slot + 1);
+            plog(app, "cache hit for property %s\n", key_string->val);
           } else {
             zval *pp = zend_hash_find(&object->ce->properties_info, key_string);
             if (pp != NULL)
@@ -505,7 +506,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
             plog(app, "<taint> Can't find property %s, but have a magic getter.\n", Z_STRVAL_P(key));
           }
 
-          if (dst != NULL)
+          if (src != NULL)
             propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
           else
             plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
@@ -669,7 +670,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     /****************** internal ***************/
     case ZEND_FREE: {
       const zval *value = get_zval(execute_data, &op->op1, op->op1_type);
-      SPOT("Free zval 0x%llx and remove any taint\n", (uint64) value);
+      plog(app, "Free zval 0x%llx and remove any taint\n", (uint64) value);
       taint_variable_t *taint_var = taint_var_remove(value);
       if (taint_var != NULL)
         destroy_taint_variable(taint_var);
@@ -682,7 +683,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        SPOT("<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_1),
+        plog(app, "<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_1),
              OP_LINE(stack_frame, op), op->lineno, stack_frame->filename->val);
       }
     }
@@ -690,7 +691,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        SPOT("<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_2),
+        plog(app, "<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_2),
              OP_LINE(stack_frame, op), op->lineno, stack_frame->filename->val);
       }
     }
@@ -698,7 +699,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        SPOT("<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_RESULT),
+        plog(app, "<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_RESULT),
              OP_LINE(stack_frame, op), op->lineno, stack_frame->filename->val);
       }
     }
