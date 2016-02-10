@@ -38,6 +38,7 @@ void print_taint(FILE *plog, taint_variable_t *taint);
 void plog_taint_var(application_t *app, taint_variable_t *taint_var);
 void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op *db_mod_taint_op);
 void plog(application_t *app, const char *message, ...);
+void plog_disassemble(application_t *app, zend_op_array *stack_frame);
 
 void flush_all_outputs(application_t *app);
 

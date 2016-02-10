@@ -188,6 +188,7 @@ typedef struct _dataflow_opcode_t {
 } dataflow_opcode_t;
 
 void initialize_opcode_dump(const char *path);
+void set_opcode_dump_file(FILE *file);
 void dump_script_header(const char *routine_name, uint function_hash);
 void dump_function_header(const char *unit_path, const char *routine_name, uint function_hash);
 void dump_operand(char index, zend_op_array *ops, znode_op *operand, zend_uchar type);

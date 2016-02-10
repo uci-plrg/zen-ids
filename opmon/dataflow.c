@@ -14,6 +14,11 @@ void initialize_opcode_dump(const char *path)
       ERROR("Failed to open the opcode dump file '%s'\n", path);
 }
 
+void set_opcode_dump_file(FILE *file)
+{
+  opcode_dump_file = file;
+}
+
 void dump_script_header(const char *routine_name, uint function_hash)
 {
   fprintf(opcode_dump_file, " === %s (0x%x)\n", routine_name, function_hash);

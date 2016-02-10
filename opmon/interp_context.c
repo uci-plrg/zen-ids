@@ -500,6 +500,7 @@ static request_input_type_t get_request_input_type(const zend_op *op)
     case ZEND_FETCH_W:
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
+    case ZEND_FETCH_FUNC_ARG:
       if (op->op2_type == IS_UNUSED) {
         const char *superglobal_name = Z_STRVAL_P(op->op1.zv);
         if (superglobal_name != NULL) {
@@ -576,6 +577,24 @@ static void inflate_call(zend_execute_data *execute_data,
 
 static zend_string *executing_builtin = NULL;
 
+static void plog_system_output_taint(const char *category, zend_execute_data *execute_data,
+                                     zend_op_array *stack_frame, zend_op *op,
+                                     zend_op **args, uint arg_count)
+{
+  uint i;
+  taint_variable_t *taint;
+
+  plog_call(cur_frame.cfm.app, category, executing_builtin->val, stack_frame, op, arg_count, args);
+  for (i = 0; i < arg_count; i++) {
+    taint = taint_var_get_arg(execute_data, args[i]);
+    if (taint != NULL) {
+      plog(cur_frame.cfm.app, "<taint> %s in %s(#%d): %04d(L%04d)%s\n",
+           category, executing_builtin->val, i,
+           OP_LINE(stack_frame, op), op->lineno, site_relative_path(cur_frame.cfm.app, stack_frame));
+    }
+  }
+}
+
 static void post_propagate_taint()
 {
   if (prev_frame.execute_data != NULL) {
@@ -585,19 +604,17 @@ static void post_propagate_taint()
 
     switch (op->opcode) {
       case ZEND_DO_FCALL:
-        if (executing_builtin == NULL) {
-          propagate_taint(cur_frame.cfm.app, execute_data, op_array, op);
-        } else {
+        if (executing_builtin != NULL) {
           uint arg_count;
           zend_op *args[0x10];
 
           inflate_call(execute_data, op_array, op, args, &arg_count);
-          if (is_file_sink_function(executing_builtin->val))
-            plog_call(cur_frame.cfm.app, "<file-output>", executing_builtin->val, op_array, op, arg_count, args);
-          else if (is_file_source_function(executing_builtin->val))
+          if (is_file_sink_function(executing_builtin->val)) {
+            plog_system_output_taint("<file-output>", execute_data, op_array, op, args, arg_count);
+          } else if (is_file_source_function(executing_builtin->val))
             plog_call(cur_frame.cfm.app, "<file-input>", executing_builtin->val, op_array, op, arg_count, args);
           else if (is_db_sink_function("mysqli_", executing_builtin->val))
-            plog_call(cur_frame.cfm.app, "<db-output>", executing_builtin->val, op_array, op, arg_count, args);
+            plog_system_output_taint("<db-output>", execute_data, op_array, op, args, arg_count);
           else if (is_db_source_function("mysqli_", executing_builtin->val))
             plog_call(cur_frame.cfm.app, "<db-input>", executing_builtin->val, op_array, op, arg_count, args);
 
@@ -620,7 +637,8 @@ static void post_propagate_taint()
           }
 
           executing_builtin = NULL;
-        } break;
+          break;
+        } /* else FT */
       default:
         propagate_taint(cur_frame.cfm.app, execute_data, op_array, op);
     }
@@ -665,7 +683,7 @@ void opcode_executing(const zend_op *op)
   if (stack_pointer_moved && (op-1)->opcode == ZEND_DO_FCALL)
     taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, (zend_op *) (op - 1));
 
-  if (op > (zend_op *) op_array->opcodes && (op-1)->opcode == ZEND_RECV)
+  if (op > (zend_op *) op_array->opcodes && IS_FIRST_AFTER_ARGS(op))
     taint_proagate_into_arg_receivers(cur_frame.cfm.app, execute_data, op_array, (zend_op *) op);
   else
     post_propagate_taint();
@@ -708,7 +726,7 @@ void opcode_executing(const zend_op *op)
         stack_event.last_opcode = op->opcode;
 
         inflate_call(execute_data, op_array, (zend_op *) op, args, &arg_count);
-        taint_prepare_call(execute_data, args, arg_count);
+        taint_prepare_call(cur_frame.cfm.app, execute_data, args, arg_count);
       }
       break;
     case ZEND_INCLUDE_OR_EVAL:

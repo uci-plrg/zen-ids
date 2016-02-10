@@ -109,6 +109,11 @@ do { \
   ZVAL_DEREF(val); \
 } while (0)
 
+#define OP_LINE(stack_frame, op) ((uint) ((op) - (zend_op *) (stack_frame)->opcodes))
+
+#define IS_ARG_RECEIVE(op) ((op)->opcode == ZEND_RECV || (op)->opcode == ZEND_RECV_INIT)
+#define IS_FIRST_AFTER_ARGS(op) (!IS_ARG_RECEIVE(op) && IS_ARG_RECEIVE(op-1))
+
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;

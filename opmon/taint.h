@@ -129,12 +129,15 @@ void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *ta
 
 taint_variable_t *taint_var_get(const zval *value);
 
+taint_variable_t *taint_var_get_arg(zend_execute_data *execute_data, const zend_op *arg);
+
 taint_variable_t *taint_var_remove(const zval *value);
 
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op);
 
-void taint_prepare_call(zend_execute_data *execute_data, zend_op **args, uint arg_count);
+void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
+                        zend_op **args, uint arg_count);
 
 void taint_proagate_into_arg_receivers(application_t *app, zend_execute_data *execute_data,
                                  zend_op_array *stack_frame, zend_op *op);
