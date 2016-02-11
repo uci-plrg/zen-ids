@@ -702,7 +702,7 @@ void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
     taint_variable_t *taint_send = taint_var_get(send_val);
     if (taint_send != NULL) {
       if (call == NULL) {
-        call = malloc(sizeof(taint_call_t));
+        call = REQUEST_ALLOC(taint_call_t);
         memset(call, 0, sizeof(taint_call_t));
         call->arg_count = arg_count;
         sctable_add(&taint_table, hash, call);
@@ -712,8 +712,8 @@ void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
   }
 }
 
-void taint_proagate_into_arg_receivers(application_t *app, zend_execute_data *execute_data,
-                                       zend_op_array *stack_frame, zend_op *op)
+void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *execute_data,
+                                        zend_op_array *stack_frame, zend_op *op)
 {
   uint64 hash = (uint64) stack_frame;
   taint_call_t *call = (taint_call_t *) sctable_lookup(&taint_table, hash);
@@ -739,7 +739,6 @@ void taint_proagate_into_arg_receivers(application_t *app, zend_execute_data *ex
       }
     }
     sctable_remove(&taint_table, hash);
-    free(call);
   } else {
     plog(app, "<taint> no args tainted in call to %s at %04d(L%04d)%s\n",
          stack_frame->function_name->val,
@@ -779,7 +778,7 @@ void destroy_taint_tracker()
 taint_variable_t *create_taint_variable(const char *file_path, const zend_op *tainted_at,
                                         taint_type_t type, void *taint)
 {
-  taint_variable_t *var = malloc(sizeof(taint_variable_t));
+  taint_variable_t *var = REQUEST_ALLOC(taint_variable_t);
   // var->value = value;
   var->tainted_at_file = strdup(file_path);
   var->tainted_at = tainted_at;
@@ -791,8 +790,8 @@ taint_variable_t *create_taint_variable(const char *file_path, const zend_op *ta
 void destroy_taint_variable(taint_variable_t *taint_var)
 {
   // pool them instead
-  //free((char *) taint_var->tainted_at_file);
-  //free(taint_var);
+  //PROCESS_FREE((char *) taint_var->tainted_at_file);
+  //PROCESS_FREE(taint_var);
 }
 
 /*
@@ -823,7 +822,7 @@ taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *
       return NULL;
   }
 
-  taint_variable_t *var = malloc(sizeof(taint_variable_t));
+  taint_variable_t *var = REQUEST_ALLOC(taint_variable_t);
   var->var_type = var_type;
   var->var_id = var_id;
   var->first_tainted_op = tainted_op;

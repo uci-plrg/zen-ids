@@ -12,7 +12,7 @@ static void expand(scarray_t *a)
 {
   void **new_data = malloc((a->capacity * 2) * sizeof(void *));
   memcpy(new_data, a->data, a->capacity * sizeof(void *));
-  free(a->data);
+  PROCESS_FREE(a->data);
   a->data = new_data;
   a->capacity *= 2;
 }
@@ -27,7 +27,7 @@ void scarray_init(scarray_t *a)
 
 void scarray_destroy(scarray_t *a)
 {
-  free(a->data);
+  PROCESS_FREE(a->data);
 }
 
 void scarray_append(scarray_t *a, void *e)
@@ -56,7 +56,7 @@ void *scarray_remove(scarray_t *a, uint index)
 
 scarray_iterator_t *scarray_iterator_start(scarray_t *a)
 {
-  scarray_iterator_t *iterator = malloc(sizeof(scarray_iterator_t));
+  scarray_iterator_t *iterator = PROCESS_ALLOC(scarray_iterator_t);
   iterator->array = a;
   iterator->item = &iterator->array->data[0];
   iterator->index = 0;
@@ -93,7 +93,7 @@ uint scarray_iterator_index(scarray_t *a, scarray_iterator_t *i)
 
 void scarray_iterator_end(scarray_iterator_t *iterator)
 {
-  free(iterator);
+  PROCESS_FREE(iterator);
 }
 
 void scarray_unit_test()
@@ -131,7 +131,7 @@ void scarray_unit_test()
     if (i == 63)
       SPOT("stop here\n");
     SPOT("Free element %s\n", buffer);
-    free(buffer);
+    PROCESS_FREE(buffer);
   }
   scarray_iterator_end(iter);
 

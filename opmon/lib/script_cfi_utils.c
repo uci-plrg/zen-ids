@@ -7,9 +7,22 @@
 #include "zend_ptr_stack.h"
 #include "zend_globals.h"
 
+#include "script_cfi_array.h"
 #include "script_cfi_utils.h"
 
 #define IS_SESSION(vars) (Z_ISREF_P(&vars) && Z_TYPE_P(Z_REFVAL(vars)) == IS_ARRAY)
+
+static scarray_t request_allocations;
+
+void init_utils()
+{
+  scarray_init(&request_allocations);
+}
+
+void destroy_utils()
+{
+  scarray_destroy(&request_allocations);
+}
 
 uint hash_string(const char *string)
 {
@@ -204,3 +217,29 @@ void tokenize_file(void)
 		ZVAL_UNDEF(&token);
 	}
 }
+
+void *scalloc(size_t size, scalloc_lifespan_t lifespan)
+{
+  void *p = malloc(size);
+
+  if (lifespan == ALLOC_REQUEST)
+    scarray_append(&request_allocations, p);
+
+  return p;
+}
+
+void scfree_process(void *p)
+{
+  free(p);
+}
+
+void scfree_request()
+{
+  uint i;
+
+  for (i = 0; i < request_allocations.size; i++)
+    free(request_allocations.data[i]);
+
+  request_allocations.size = 0;
+}
+

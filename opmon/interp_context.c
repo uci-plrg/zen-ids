@@ -144,7 +144,7 @@ void initialize_interp_context()
 
 void initialize_interp_app_context(application_t *app)
 {
-  stack_frame_t *base_frame = malloc(sizeof(stack_frame_t));
+  stack_frame_t *base_frame = PROCESS_ALLOC(stack_frame_t); // mem: why not static?
   memset(base_frame, 0, sizeof(stack_frame_t));
   base_frame->opcodes = &entry_op;
   base_frame->opcode = entry_op.opcode;
@@ -162,7 +162,7 @@ void initialize_interp_app_context(application_t *app)
 void destroy_interp_app_context(application_t *app)
 {
   routine_cfg_free(((stack_frame_t *) app->base_frame)->cfm.cfg);
-  free(app->base_frame);
+  PROCESS_FREE(app->base_frame);
 }
 
 static void push_exception_frame()
@@ -620,11 +620,12 @@ static void post_propagate_taint()
 
           if (strcmp(executing_builtin->val, "mysqli_query") == 0) {
             const char *query = operand_strdup(execute_data, &args[0]->op1, args[0]->op1_type);
-            site_modification_t *mod = NULL;
-            site_modification_t fake_mod = { SITE_MOD_DB, { query } };
+            site_modification_t *mod = REQUEST_ALLOC(site_modification_t);
 
-            // lookup corresponding site modifications
-            mod = &fake_mod;
+            // actually lookup corresponding site modifications
+            mod->type = SITE_MOD_DB;
+            mod->db_query = query;
+
             if (mod != NULL) {
               const zval *value = get_zval(execute_data, &op->result, op->result_type);
               if (value != NULL) {
@@ -684,7 +685,7 @@ void opcode_executing(const zend_op *op)
     taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, (zend_op *) (op - 1));
 
   if (op > (zend_op *) op_array->opcodes && IS_FIRST_AFTER_ARGS(op))
-    taint_proagate_into_arg_receivers(cur_frame.cfm.app, execute_data, op_array, (zend_op *) op);
+    taint_propagate_into_arg_receivers(cur_frame.cfm.app, execute_data, op_array, (zend_op *) op);
   else
     post_propagate_taint();
 
@@ -702,7 +703,7 @@ void opcode_executing(const zend_op *op)
   if (input_type != REQUEST_INPUT_TYPE_NONE) {
     const zval *value = get_zval(execute_data, &op->result, op->result_type);
     if (value != NULL) {
-      request_input_t *input = malloc(sizeof(request_input_t));
+      request_input_t *input = REQUEST_ALLOC(request_input_t);
       taint_variable_t *taint_var;
 
       input->type = input_type;

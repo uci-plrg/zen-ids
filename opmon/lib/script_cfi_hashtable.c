@@ -8,8 +8,8 @@
 #define HASH_MASK(num_bits) ((~UINT_0) >> (HASH_TAG_BITS-(num_bits)))
 #define HASHTABLE_SIZE(num_bits) (1U << (num_bits))
 
-#define TABLE_ALLOC(size) malloc(size)
-#define TABLE_FREE(ptr) free(ptr)
+#define TABLE_ALLOC(size) scalloc(size, ALLOC_PROCESS)
+#define TABLE_FREE(ptr) scfree_process(ptr)
 
 static void
 sctable_insert(sctable_t *t, sctable_entry_t *e)

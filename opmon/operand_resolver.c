@@ -29,10 +29,10 @@ void destroy_operand_resolver()
   while (app != NULL) {
     next_app = app->next;
     cfg_destroy_application(&app->app);
-    free((char *) app->app.root);
-    free((char *) app->app.name);
+    PROCESS_FREE((char *) app->app.root);
+    PROCESS_FREE((char *) app->app.name);
     cfg_free(app->app.cfg);
-    free(app);
+    PROCESS_FREE(app);
     app = next_app;
   }
   cfg_free(unknown_app.cfg);
@@ -105,7 +105,7 @@ static application_t *new_site_app(char *buffer)
   const char *app_name;
   char *new_app_name;
 
-  new_app = malloc(sizeof(application_list_t));
+  new_app = PROCESS_ALLOC(application_list_t);
 
   app_name = strrchr(buffer, '/');
   if (app_name == NULL)
@@ -200,7 +200,7 @@ application_t *locate_application(const char *filename /*absolute path*/)
     }
 
     loaded_opmon_roots = true;
-    free(buffer);
+    PROCESS_FREE(buffer);
 
     app = lookup_application(filename);
     if (app != NULL)

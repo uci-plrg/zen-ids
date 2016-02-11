@@ -252,12 +252,12 @@ void destroy_cfg_handler()
     request_edge_t *edge;
     scarray_iterator_t *i = scarray_iterator_start(request_state.edge_pool);
     while ((edge = (request_edge_t *) scarray_iterator_next(i)) != NULL)
-      free(edge);
+      PROCESS_FREE(edge);
     scarray_destroy(request_state.edge_pool);
-    free(request_state.edge_pool);
+    PROCESS_FREE(request_state.edge_pool);
     request_state.edge_pool = NULL;
     sctable_destroy(request_state.edges);
-    free(request_state.edges);
+    PROCESS_FREE(request_state.edges);
     request_state.edges = NULL;
   }
 }
@@ -471,7 +471,7 @@ void cfg_initialize_application(application_t *app)
     if (app->cfg_files != NULL)
       ERROR("Overwriting app cfg files!\n");
 
-    app->cfg_files = malloc(sizeof(cfg_files_t));
+    app->cfg_files = PROCESS_ALLOC(cfg_files_t);
     open_output_files_in_dir((cfg_files_t *) app->cfg_files, app_cfg_file_path, "w");
 
     app->dataset = load_dataset(app->name);
@@ -497,7 +497,7 @@ void cfg_destroy_application(application_t *app)
       fclose(cfg_files->request_edge);
     }
     if (!is_standalone_app)
-      free(cfg_files);
+      PROCESS_FREE(cfg_files);
     app->cfg_files = NULL;
   }
 
@@ -515,9 +515,9 @@ void cfg_request(bool start)
     request_state.request_id++;
 
     if (request_state.edges == NULL) { // lazy construct b/c standalone mode doesn't need it
-      request_state.edge_pool = malloc(sizeof(scarray_t));
+      request_state.edge_pool = PROCESS_ALLOC(scarray_t);
       scarray_init(request_state.edge_pool);
-      request_state.edges = malloc(sizeof(sctable_t));
+      request_state.edges = PROCESS_ALLOC(sctable_t);
       request_state.edges->hash_bits = 10;
       sctable_init(request_state.edges);
     } else { // clear the request edges
@@ -542,6 +542,7 @@ void cfg_request(bool start)
       flush_all_outputs(request_state.app);
       request_state.app = NULL;
     }
+    scfree_request();
   }
 }
 
@@ -642,7 +643,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
       if (request_state.pool_index < request_state.edge_pool->size) {
         new_edge = scarray_get(request_state.edge_pool, request_state.pool_index++);
       } else {
-        new_edge = malloc(sizeof(request_edge_t));
+        new_edge = PROCESS_ALLOC(request_edge_t);
         memset(new_edge, 0, sizeof(request_edge_t));
         scarray_append(request_state.edge_pool, new_edge);
         request_state.pool_index++;

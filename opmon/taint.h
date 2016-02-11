@@ -139,8 +139,8 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
 void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
                         zend_op **args, uint arg_count);
 
-void taint_proagate_into_arg_receivers(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op);
+void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *execute_data,
+                                        zend_op_array *stack_frame, zend_op *op);
 
 void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
                             zend_op_array *stack_frame, zend_op *call_op);

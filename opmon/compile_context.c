@@ -32,7 +32,7 @@ typedef struct _compilation_routine_t {
 typedef struct _function_fqn_t {
   compilation_unit_t unit;
   compilation_routine_t function;
-} function_fqn_t;
+} function_fqn_t; // mem: leaking the outer shell here
 
 /* N.B.: in general, fcall stacks are unsafe at runtime because of tricky cases
  * like autoloaders that invoke PHP functions without any associated call. It
@@ -130,7 +130,7 @@ void function_compiled(zend_op_array *op_array)
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
-  function_fqn_t *fqn = malloc(sizeof(function_fqn_t));
+  function_fqn_t *fqn = PROCESS_ALLOC(function_fqn_t);
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename;
@@ -168,7 +168,7 @@ void function_compiled(zend_op_array *op_array)
     }
   } else {
     PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
-    free(fqn);
+    PROCESS_FREE(fqn);
     return;
   }
 
@@ -419,7 +419,7 @@ void function_compiled(zend_op_array *op_array)
                   }
                   strcat(to_unit_path, internal_to_path); // `internal_to_path` is just the to filename
                 }
-                free((char *) internal_to_path);
+                PROCESS_FREE((char *) internal_to_path);
 
                 internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
                 if (internal_to_path == NULL) {
@@ -448,7 +448,7 @@ void function_compiled(zend_op_array *op_array)
               case ZEND_EVAL: {
                 char *eval_body = resolve_eval_body(op);
                 PRINT("Opcode %d calls eval(%s)\n", i, eval_body);
-                free(eval_body);
+                PROCESS_FREE(eval_body);
               } break;
             }
           }
@@ -477,7 +477,7 @@ void function_compiled(zend_op_array *op_array)
                  op->lineno, fqn->function.callee_hash, cfm.dataset == NULL ? "missing" : "found",
                  cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.app, cfm.dataset, i));
           }
-          free((char *) fcall->routine_name);
+          PROCESS_FREE((char *) fcall->routine_name);
         } break;
         case ZEND_INIT_FCALL:
         case ZEND_INIT_FCALL_BY_NAME:

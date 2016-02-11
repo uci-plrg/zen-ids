@@ -114,6 +114,15 @@ do { \
 #define IS_ARG_RECEIVE(op) ((op)->opcode == ZEND_RECV || (op)->opcode == ZEND_RECV_INIT)
 #define IS_FIRST_AFTER_ARGS(op) (!IS_ARG_RECEIVE(op) && IS_ARG_RECEIVE(op-1))
 
+typedef enum _scalloc_lifespan_t {
+  ALLOC_PROCESS,
+  ALLOC_REQUEST
+} scalloc_lifespan_t;
+
+#define PROCESS_ALLOC(type) scalloc(sizeof(type), ALLOC_PROCESS)
+#define PROCESS_FREE(p) scfree_process(p)
+#define REQUEST_ALLOC(type) scalloc(sizeof(type), ALLOC_REQUEST)
+
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;
@@ -130,6 +139,9 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 
 #define ROUTINE_NAME_LENGTH 256
 
+void init_utils();
+void destroy_utils();
+
 uint hash_string(const char *string);
 uint64 hash_addrs(void *first, void *second);
 void opmon_activate_printer();
@@ -143,6 +155,10 @@ const char *operand_strdup(zend_execute_data *execute_data, const znode_op *oper
 const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
 
 void tokenize_file(void);
+
+void *scalloc(size_t size, scalloc_lifespan_t type);
+void scfree_process(void *p);
+void scfree_request();
 
 static inline uint64 hash_addr(void *addr)
 {

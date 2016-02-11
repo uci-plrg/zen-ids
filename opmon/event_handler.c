@@ -83,6 +83,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   if (opcode_dump_path != NULL)
     initialize_opcode_dump(opcode_dump_path);
 
+  init_utils();
   init_compile_context();
   init_cfg_handler();
   init_metadata_handler();
@@ -105,6 +106,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 
 void destroy_event_handler()
 {
+  destroy_utils();
   destroy_metadata_handler();
   destroy_operand_resolver();
   destroy_cfg_handler();

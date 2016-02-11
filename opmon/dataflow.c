@@ -1437,7 +1437,7 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
       found_any = true;
       if (IS_LIVE_GLOBAL(clobbered))
         global_id = clobbered->global_id;
-      free(clobbered);
+      PROCESS_FREE(clobbered);
     }
   }
 
@@ -1449,7 +1449,7 @@ static void assign_destination(scarray_t *live_variables, dataflow_opcode_t *dop
             dop->id.op_index, get_operand_index_code(dst_index));
   }
 
-  dst_var = malloc(sizeof(dataflow_live_variable_t));
+  dst_var = PROCESS_ALLOC(dataflow_live_variable_t); // mem: what scope for dataflow?
   memset(dst_var, 0, sizeof(dataflow_live_variable_t));
   dst_var->is_temp = (dst->value.type == DATAFLOW_VALUE_TYPE_TEMP);
   if (dst_var->is_temp) {
@@ -1485,7 +1485,7 @@ static bool add_predecessor(dataflow_predecessor_t **predecessor, cfg_opcode_id_
     p = p->next;
   }
   if (!existing_predecessor) {
-    dataflow_predecessor_t *p = malloc(sizeof(dataflow_predecessor_t));
+    dataflow_predecessor_t *p = PROCESS_ALLOC(dataflow_predecessor_t);
     p->operand_id.opcode_id = *op_id;
     p->operand_id.operand_index = op_index;
     p->next = *predecessor;
@@ -1575,7 +1575,7 @@ static void link_operand(scarray_t *live_variables, dataflow_opcode_t *dop,
     switch (src->value.type) {
       case DATAFLOW_VALUE_TYPE_VAR:
         if (dop->sink.type == SINK_TYPE_GLOBAL) { /* create an empty live_variable flagged global */
-          dataflow_live_variable_t *global_var = malloc(sizeof(dataflow_live_variable_t));
+          dataflow_live_variable_t *global_var = PROCESS_ALLOC(dataflow_live_variable_t);
           memset(global_var, 0, sizeof(dataflow_live_variable_t));
           global_var->global_id = dop->id;
           global_var->var_name = src->value.var_name;
@@ -1669,7 +1669,7 @@ static void copy_dataflow_variables(scarray_t *dst, scarray_t *src)
 
   i = scarray_iterator_start(src);
   while ((var = (dataflow_live_variable_t *) scarray_iterator_next(i)) != NULL) {
-    copy = malloc(sizeof(dataflow_live_variable_t));
+    copy = PROCESS_ALLOC(dataflow_live_variable_t);
     memcpy(copy, var, sizeof(dataflow_live_variable_t));
     scarray_append(dst, copy);
   }
@@ -1706,7 +1706,7 @@ static void enqueue_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
           droutine->routine_hash, start_index);
 
   if (live_variables == NULL) {
-    live_variables = malloc(sizeof(scarray_t));
+    live_variables = PROCESS_ALLOC(scarray_t);
     scarray_init(live_variables);
   }
 
@@ -1727,7 +1727,7 @@ static void enqueue_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
           }
         }
         if (!found) {
-          dst_var = malloc(sizeof(dataflow_live_variable_t));
+          dst_var = PROCESS_ALLOC(dataflow_live_variable_t);
           memcpy(dst_var, src_var, sizeof(dataflow_live_variable_t));
           scarray_append(pass->live_variables, dst_var);
           modified_variables = true;
@@ -1742,9 +1742,9 @@ static void enqueue_dataflow_link_pass(dataflow_routine_t *droutine, uint start_
 
   /* pass is not prepared yet, so prepare a new one now */
   if (pass == NULL) {
-    pass = malloc(sizeof(dataflow_link_pass_t));
+    pass = PROCESS_ALLOC(dataflow_link_pass_t);
     memset(pass, 0, sizeof(dataflow_link_pass_t));
-    pass->live_variables = malloc(sizeof(scarray_t));
+    pass->live_variables = PROCESS_ALLOC(scarray_t);
     scarray_init(pass->live_variables);
     pass->droutine = droutine;
     pass->start_index = start_index;
@@ -1758,7 +1758,7 @@ static void enqueue_dataflow_link_include_pass(dataflow_routine_t *included_rout
                                                uint resume_index,
                                                scarray_t *incoming_live_variables)
 {
-  dataflow_link_pass_t *pass = malloc(sizeof(dataflow_link_pass_t));
+  dataflow_link_pass_t *pass = PROCESS_ALLOC(dataflow_link_pass_t);
 
   fprintf(opcode_dump_file, "Prepare dataflow link pass for include 0x%x resuming at 0x%x:%d\n",
           included_routine->routine_hash, resume_routine->routine_hash, resume_index);
@@ -1768,7 +1768,7 @@ static void enqueue_dataflow_link_include_pass(dataflow_routine_t *included_rout
   pass->start_index = 0;
   pass->resume_droutine = resume_routine;
   pass->resume_index = resume_index;
-  pass->live_variables = malloc(sizeof(scarray_t));
+  pass->live_variables = PROCESS_ALLOC(scarray_t);
   scarray_init(pass->live_variables);
   copy_dataflow_variables(pass->live_variables, incoming_live_variables);
   scarray_append(&dataflow_link_worklist, pass);
@@ -2097,7 +2097,7 @@ bool propagate_one_source(dataflow_influence_t **influence, dataflow_source_t *s
     dst_influence = dst_influence->next;
   }
 
-  dst_influence = malloc(sizeof(dataflow_influence_t));
+  dst_influence = PROCESS_ALLOC(dataflow_influence_t);
   dst_influence->source = *source;
   dst_influence->next = *influence;
   *influence = dst_influence;
@@ -2319,7 +2319,7 @@ int analyze_dataflow(zend_file_handle *file)
 
   SPOT("static_dataflow() for file %s\n", file->filename);
 
-  dg = malloc(sizeof(dataflow_graph_t));
+  dg = PROCESS_ALLOC(dataflow_graph_t);
   dg->top_routine = NULL;
   dg->routine_table.hash_bits = 9;
   sctable_init(&dg->routine_table);
@@ -2414,8 +2414,8 @@ int analyze_dataflow(zend_file_handle *file)
       destroy_op_array(next_file->zops TSRMLS_CC);
       efree(next_file->zops);
     }
-    free(next_file->path);
-    free(next_file);
+    PROCESS_FREE(next_file->path);
+    PROCESS_FREE(next_file);
     next_file = dataflow_file_list;
   }
 
@@ -2430,14 +2430,14 @@ void destroy_dataflow_analysis()
   if (dg != NULL) {
     sctable_destroy(&dg->routine_table);
     scarray_destroy(&dg->routine_list);
-    free(dg);
+    PROCESS_FREE(dg);
   }
 }
 
 void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops,
                           bool is_function)
 {
-  dataflow_routine_t *routine = malloc(sizeof(dataflow_routine_t));
+  dataflow_routine_t *routine = PROCESS_ALLOC(dataflow_routine_t);
   routine->app = app;
   routine->routine_hash = routine_hash;
   scarray_init(&routine->opcodes);
@@ -2492,7 +2492,7 @@ static void initialize_opcode_index(uint routine_hash, uint index, dataflow_rout
     routine = sctable_lookup(&dg->routine_table, routine_hash);
 
   while (index >= routine->opcodes.size) {
-    opcode = malloc(sizeof(dataflow_opcode_t));
+    opcode = PROCESS_ALLOC(dataflow_opcode_t);
     memset(opcode, 0, sizeof(dataflow_opcode_t));
     scarray_append(&routine->opcodes, opcode);
   }
@@ -2623,7 +2623,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
       initialize_source(opcode, SOURCE_TYPE_PARAMETER);
 
       if (routine->parameters == NULL) {
-        routine->parameters = malloc(sizeof(scarray_t));
+        routine->parameters = PROCESS_ALLOC(scarray_t);
         scarray_init(routine->parameters);
       }
       opcode->source.parameter_index = routine->parameters->size;
@@ -2652,7 +2652,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
 
 void push_dataflow_fcall_init(uint target_hash, const char *routine_name/*must copy*/)
 {
-  dataflow_call_site_t *call = malloc(sizeof(dataflow_call_site_t));
+  dataflow_call_site_t *call = PROCESS_ALLOC(dataflow_call_site_t);
   memset(call, 0, sizeof(dataflow_call_site_t));
   call->target_hash = target_hash;
   scarray_append(&fcall_stack, call);
@@ -2696,7 +2696,7 @@ void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
   }
 
   if (routine->call_sites == NULL) {
-    routine->call_sites = malloc(sizeof(scarray_t));
+    routine->call_sites = PROCESS_ALLOC(scarray_t);
     scarray_init(routine->call_sites);
   }
   scarray_append(routine->call_sites, call);
@@ -2718,7 +2718,7 @@ void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,
   initilize_dataflow_operand(&opcode->op1, zops, &zop->op1, zop->op1_type);
 
   if (call->args == NULL) {
-    call->args = malloc(sizeof(scarray_t));
+    call->args = PROCESS_ALLOC(scarray_t);
     scarray_init(call->args);
   }
 
@@ -2794,7 +2794,7 @@ void add_dataflow_include(uint routine_hash, uint index, zend_op_array *zops,
   if (found)
     return;
 
-  file = malloc(sizeof(dataflow_file_t));
+  file = PROCESS_ALLOC(dataflow_file_t);
   file->path = strdup(include_path);
   file->analyzed = false;
   file->next = dataflow_file_list;
