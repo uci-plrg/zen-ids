@@ -4,6 +4,7 @@
 #include "cfg_handler.h"
 #include "cfg.h"
 #include "dataflow.h"
+#include "taint.h"
 #include "operand_resolver.h"
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_array.h"
@@ -37,6 +38,16 @@ static void init_top_level_script(const char *script_path)
 static void init_worker()
 {
   worker_startup();
+}
+
+static void request_boundary(bool start)
+{
+  cfg_request(start);
+
+  if (!start) {
+    scfree_request();
+    taint_clear();
+  }
 }
 
 const char *get_static_analysis()
@@ -92,7 +103,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
-  monitor->notify_request = cfg_request;
+  monitor->notify_request = request_boundary;
   monitor->notify_database_query = query_executing;
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;

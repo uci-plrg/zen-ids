@@ -105,7 +105,7 @@ static application_t *new_site_app(char *buffer)
   const char *app_name;
   char *new_app_name;
 
-  new_app = PROCESS_ALLOC(application_list_t);
+  new_app = PROCESS_NEW(application_list_t);
 
   app_name = strrchr(buffer, '/');
   if (app_name == NULL)

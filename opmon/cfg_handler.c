@@ -471,7 +471,7 @@ void cfg_initialize_application(application_t *app)
     if (app->cfg_files != NULL)
       ERROR("Overwriting app cfg files!\n");
 
-    app->cfg_files = PROCESS_ALLOC(cfg_files_t);
+    app->cfg_files = PROCESS_NEW(cfg_files_t);
     open_output_files_in_dir((cfg_files_t *) app->cfg_files, app_cfg_file_path, "w");
 
     app->dataset = load_dataset(app->name);
@@ -515,9 +515,9 @@ void cfg_request(bool start)
     request_state.request_id++;
 
     if (request_state.edges == NULL) { // lazy construct b/c standalone mode doesn't need it
-      request_state.edge_pool = PROCESS_ALLOC(scarray_t);
+      request_state.edge_pool = PROCESS_NEW(scarray_t);
       scarray_init(request_state.edge_pool);
-      request_state.edges = PROCESS_ALLOC(sctable_t);
+      request_state.edges = PROCESS_NEW(sctable_t);
       request_state.edges->hash_bits = 10;
       sctable_init(request_state.edges);
     } else { // clear the request edges
@@ -542,7 +542,6 @@ void cfg_request(bool start)
       flush_all_outputs(request_state.app);
       request_state.app = NULL;
     }
-    scfree_request();
   }
 }
 
@@ -643,7 +642,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
       if (request_state.pool_index < request_state.edge_pool->size) {
         new_edge = scarray_get(request_state.edge_pool, request_state.pool_index++);
       } else {
-        new_edge = PROCESS_ALLOC(request_edge_t);
+        new_edge = PROCESS_NEW(request_edge_t);
         memset(new_edge, 0, sizeof(request_edge_t));
         scarray_append(request_state.edge_pool, new_edge);
         request_state.pool_index++;
@@ -856,12 +855,12 @@ void print_taint(FILE *out, taint_variable_t *taint)
   }
 }
 
-void plog_taint_var(application_t *app, taint_variable_t *taint_var)
+void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash)
 {
   //bool plogged = true;
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
 
-  fprintf(plog, "<tainted-op> %s:%d\n", taint_var->tainted_at_file, taint_var->tainted_at->lineno);
+  fprintf(plog, "<tainted-op> %s:%d (0x%llx)\n", taint_var->tainted_at_file, taint_var->tainted_at->lineno, hash);
   fprintf(plog, "<taint-var> ");
   print_taint(plog, taint_var);
 
@@ -904,7 +903,7 @@ void plog_disassemble(application_t *app, zend_op_array *stack_frame)
   set_opcode_dump_file(plog);
 
   fprintf(plog, "\t === %s()", stack_frame->function_name->val);
-  for (op = stack_frame->opcodes; op <= &stack_frame->opcodes[stack_frame->last]; op++)
+  for (op = stack_frame->opcodes; op < &stack_frame->opcodes[stack_frame->last]; op++)
     dump_opcode(stack_frame, op); // fprintf(plog, "\t%04d(L%04d) 0x%x %s%s()", stack_frame->function_name->val);
 }
 

@@ -130,7 +130,7 @@ void function_compiled(zend_op_array *op_array)
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
-  function_fqn_t *fqn = PROCESS_ALLOC(function_fqn_t);
+  function_fqn_t *fqn = PROCESS_NEW(function_fqn_t);
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename;

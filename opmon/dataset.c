@@ -94,7 +94,7 @@ static bool is_fall_through(zend_uchar opcode, uint from_index, uint to_index) {
 
 void *install_dataset(void *dataset)
 {
-  dataset_app_t *dataset_app = PROCESS_ALLOC(dataset_app_t);
+  dataset_app_t *dataset_app = PROCESS_NEW(dataset_app_t);
   dataset_app->dataset_mapping = (uint_ptr_t) dataset;
   dataset_app->hashtable = RESOLVE_PTR(dataset_app, *(uint *) dataset_app->dataset_mapping,
                                        dataset_hashtable_t);

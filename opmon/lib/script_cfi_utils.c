@@ -237,8 +237,12 @@ void scfree_request()
 {
   uint i;
 
+  SPOT("About to free %d allocations from the request\n", request_allocations.size);
+
   for (i = 0; i < request_allocations.size; i++)
     free(request_allocations.data[i]);
+
+  SPOT("Done freeing %d allocations from the request\n", request_allocations.size);
 
   request_allocations.size = 0;
 }

@@ -144,7 +144,7 @@ void initialize_interp_context()
 
 void initialize_interp_app_context(application_t *app)
 {
-  stack_frame_t *base_frame = PROCESS_ALLOC(stack_frame_t); // mem: why not static?
+  stack_frame_t *base_frame = PROCESS_NEW(stack_frame_t); // mem: why not static?
   memset(base_frame, 0, sizeof(stack_frame_t));
   base_frame->opcodes = &entry_op;
   base_frame->opcode = entry_op.opcode;
@@ -620,7 +620,7 @@ static void post_propagate_taint()
 
           if (strcmp(executing_builtin->val, "mysqli_query") == 0) {
             const char *query = operand_strdup(execute_data, &args[0]->op1, args[0]->op1_type);
-            site_modification_t *mod = REQUEST_ALLOC(site_modification_t);
+            site_modification_t *mod = REQUEST_NEW(site_modification_t);
 
             // actually lookup corresponding site modifications
             mod->type = SITE_MOD_DB;
@@ -666,13 +666,13 @@ void opcode_executing(const zend_op *op)
   }
 
   if (op->opcode == ZEND_HANDLE_EXCEPTION) {
-    PRINT("@ Processing ZEND_HANDLE_EXCEPTION in stack state %u of "PX"|"PX"\n",
+    SPOT("@ Processing ZEND_HANDLE_EXCEPTION in stack state %u of "PX"|"PX"\n",
           stack_event.state, p2int(execute_data), p2int(op_array->opcodes));
     if (stack_event.state == STACK_STATE_NONE) {
       //zend_op *throw_op = &cur_frame.opcodes[cur_frame.last_index];
       stack_event.state = STACK_STATE_UNWINDING;
       push_exception_frame();
-      WARN("Exception thrown at op %d in opcodes "PX"|"PX" of routine 0x%x\n",
+      SPOT("Exception thrown at op %d in opcodes "PX"|"PX" of routine 0x%x\n",
            cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
            cur_frame.cfm.cfg->routine_hash);
     }
@@ -686,8 +686,8 @@ void opcode_executing(const zend_op *op)
 
   if (op > (zend_op *) op_array->opcodes && IS_FIRST_AFTER_ARGS(op))
     taint_propagate_into_arg_receivers(cur_frame.cfm.app, execute_data, op_array, (zend_op *) op);
-  else
-    post_propagate_taint();
+
+  post_propagate_taint();
 
   if (!current_session.active) {
     PRINT("<session> Inactive session while executing %s. User level is %d.\n",
@@ -703,7 +703,7 @@ void opcode_executing(const zend_op *op)
   if (input_type != REQUEST_INPUT_TYPE_NONE) {
     const zval *value = get_zval(execute_data, &op->result, op->result_type);
     if (value != NULL) {
-      request_input_t *input = REQUEST_ALLOC(request_input_t);
+      request_input_t *input = REQUEST_NEW(request_input_t);
       taint_variable_t *taint_var;
 
       input->type = input_type;
@@ -727,7 +727,7 @@ void opcode_executing(const zend_op *op)
         stack_event.last_opcode = op->opcode;
 
         inflate_call(execute_data, op_array, (zend_op *) op, args, &arg_count);
-        taint_prepare_call(cur_frame.cfm.app, execute_data, args, arg_count);
+        taint_prepare_call(cur_frame.cfm.app, execute_data, args, arg_count); // TODO: pull the call after returning
       }
       break;
     case ZEND_INCLUDE_OR_EVAL:

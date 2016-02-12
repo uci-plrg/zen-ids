@@ -123,8 +123,6 @@ void destroy_taint_tracker();
 taint_variable_t *create_taint_variable(const char *file_path, const zend_op *tainted_at,
                                         taint_type_t type, void *taint);
 
-void destroy_taint_variable(taint_variable_t *taint_var);
-
 void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *taint);
 
 taint_variable_t *taint_var_get(const zval *value);
@@ -144,5 +142,7 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
 
 void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
                             zend_op_array *stack_frame, zend_op *call_op);
+
+void taint_clear();
 #endif
 

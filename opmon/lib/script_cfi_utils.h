@@ -119,9 +119,9 @@ typedef enum _scalloc_lifespan_t {
   ALLOC_REQUEST
 } scalloc_lifespan_t;
 
-#define PROCESS_ALLOC(type) scalloc(sizeof(type), ALLOC_PROCESS)
+#define PROCESS_NEW(type) (type *) scalloc(sizeof(type), ALLOC_PROCESS)
 #define PROCESS_FREE(p) scfree_process(p)
-#define REQUEST_ALLOC(type) scalloc(sizeof(type), ALLOC_REQUEST)
+#define REQUEST_NEW(type) (type *) scalloc(sizeof(type), ALLOC_REQUEST)
 
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;

@@ -7,8 +7,10 @@ static sctable_t taint_table;
 
 static taint_variable_t *pending_return_taint = NULL;
 
+#define MAX_TAINT_ARGS 0x10
+
 typedef struct _taint_call_t {
-  taint_variable_t *taint_send[0x10];
+  taint_variable_t *taint_send[MAX_TAINT_ARGS];
   uint arg_count;
 } taint_call_t;
 
@@ -144,20 +146,18 @@ static bool propagate_zval_taint(application_t *app, zend_execute_data *execute_
   taint_variable_t *taint_var = taint_var_get(src);
 
   if (clobber) {
-    sctable_remove(&taint_table, (uint64) dst);
+    taint_var_remove(dst);
 
-    plog(app, "<taint> remove %s at %04d(L%04d)%s\n", dst_name, OP_LINE(stack_frame, op),
-         op->lineno, site_relative_path(app, stack_frame));
+    plog(app, "<taint> remove %s (0x%llx) at %04d(L%04d)%s\n", dst_name, (uint64) dst,
+         OP_LINE(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
   }
 
   if (taint_var == NULL) {
     return false;
   } else {
-    //taint_variable_t *propagation = create_taint_variable(dst, stack_frame, op,
-    //                                                      taint_var->type, taint_var->taint);
     plog(app, "<taint> write %s at %04d(L%04d)%s\n",
          dst_name, OP_LINE(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
-    taint_var_add(app, dst, taint_var); // propagation); /* why make a new one? could just attach the existing one */
+    taint_var_add(app, dst, taint_var);
     return true;
   }
 }
@@ -481,6 +481,10 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op)
 {
+  bool skip_arrays = true;
+
+  // if (true) return;
+
   switch (op->opcode) {
     case ZEND_ASSIGN:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_1);
@@ -571,19 +575,22 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_FETCH_DIM_W:
     case ZEND_FETCH_DIM_RW:
     case ZEND_FETCH_DIM_IS:
-      propagate_taint_from_array(app, execute_data, stack_frame, op);
+      propagate_taint_from_array(app, execute_data, stack_frame, op); /* why ok here? */
       break;
     case ZEND_ASSIGN_DIM:
-      propagate_taint_into_array(app, execute_data, stack_frame, op);
+      if (!skip_arrays) /* fail here */
+        propagate_taint_into_array(app, execute_data, stack_frame, op);
       break;
     case ZEND_FETCH_OBJ_R:
     case ZEND_FETCH_OBJ_W:
     case ZEND_FETCH_OBJ_RW:
     case ZEND_FETCH_OBJ_IS:
-      propagate_taint_from_object(app, execute_data, stack_frame, op, true);
+      if (!skip_arrays) /* fail here */
+        propagate_taint_from_object(app, execute_data, stack_frame, op, true);
       break;
     case ZEND_ASSIGN_OBJ:
-      propagate_taint_into_object(app, execute_data, stack_frame, op);
+      if (!skip_arrays) /* fail here */
+        propagate_taint_into_object(app, execute_data, stack_frame, op);
       break;
     case ZEND_FETCH_UNSET:
       // TODO: remove taint from map
@@ -623,10 +630,8 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     /****************** internal ***************/
     case ZEND_FREE: {
       const zval *value = get_zval(execute_data, &op->op1, op->op1_type);
-      plog(app, "Free zval 0x%llx and remove any taint\n", (uint64) value);
-      taint_variable_t *taint_var = taint_var_remove(value);
-      if (taint_var != NULL)
-        destroy_taint_variable(taint_var);
+      plog(app, "<taint> remove (0x%llx)\n", (uint64) value);
+      taint_var_remove(value);
     } break;
   }
 
@@ -676,8 +681,8 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
   }
 }
 
-static const char *disassembly[] = { "createFromGlobals", "createRequestFromFactory" };
-static uint disassembly_count = 2;
+static const char *disassembly[] = { "wp_list_pluck" };
+static uint disassembly_count = 1;
 
 void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
                         zend_op **args, uint arg_count)
@@ -687,6 +692,18 @@ void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
   uint64 hash = (uint64) stack_frame;
   taint_call_t *call = NULL;
   uint i;
+
+  if (arg_count > MAX_TAINT_ARGS) {
+    plog(app, "<taint> Error: too many args (%d) in call to %s!\n", arg_count, callee_name);
+    return;
+  }
+
+  call = (taint_call_t *) sctable_lookup(&taint_table, hash);
+  if (call != NULL) {
+    plog(app, "<taint> Error! Found dangling call.\n");
+    memset(call, 0, sizeof(taint_call_t));
+    call->arg_count = arg_count;
+  }
 
   plog(app, "<taint> prepare call to %s(0x%llx)\n", callee_name, hash);
 
@@ -702,7 +719,7 @@ void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
     taint_variable_t *taint_send = taint_var_get(send_val);
     if (taint_send != NULL) {
       if (call == NULL) {
-        call = REQUEST_ALLOC(taint_call_t);
+        call = REQUEST_NEW(taint_call_t);
         memset(call, 0, sizeof(taint_call_t));
         call->arg_count = arg_count;
         sctable_add(&taint_table, hash, call);
@@ -716,13 +733,21 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
                                         zend_op_array *stack_frame, zend_op *op)
 {
   uint64 hash = (uint64) stack_frame;
-  taint_call_t *call = (taint_call_t *) sctable_lookup(&taint_table, hash);
+  taint_call_t *call = (taint_call_t *) sctable_remove(&taint_table, hash);
 
   if (call != NULL) {
     uint i;
 
     plog(app, "<taint> found call to %s at %04d(L%04d)%s\n", stack_frame->function_name->val,
          OP_LINE(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+
+    if ((op - call->arg_count) < (zend_op *) stack_frame->opcodes) {
+      uint explicit_parameter_count = (uint) (op - (zend_op *) stack_frame->opcodes);
+      plog(app, "Warning: vararg call to %s:%s is not supported by taint yet.\n",
+           stack_frame->filename->val, stack_frame->function_name->val,
+           call->arg_count, explicit_parameter_count);
+      call->arg_count = explicit_parameter_count;
+    }
 
     for (i = 0; i < call->arg_count; i++) {
       if (call->taint_send[i] != NULL) {
@@ -733,12 +758,12 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
           plog(app, "<taint> write arg receive R at %04d(L%04d)%s\n",
                OP_LINE(stack_frame, receive), receive->lineno, site_relative_path(app, stack_frame));
         } else {
-          plog(app, "<taint> Error! Found opcode 0x%x but ZEND_RECV was expected at %04d(L%04d)%s\n",
+          plog(app, "<taint> Error! Found %s but ZEND_RECV was expected at %04d(L%04d)%s\n",
+               zend_get_opcode_name(receive->opcode),
                OP_LINE(stack_frame, receive), receive->lineno, site_relative_path(app, stack_frame));
         }
       }
     }
-    sctable_remove(&taint_table, hash);
   } else {
     plog(app, "<taint> no args tainted in call to %s at %04d(L%04d)%s\n",
          stack_frame->function_name->val,
@@ -768,6 +793,7 @@ void init_taint_tracker()
 {
   taint_table.hash_bits = 6;
   sctable_init(&taint_table);
+  sctable_activate_pool(&taint_table);
 }
 
 void destroy_taint_tracker()
@@ -778,7 +804,7 @@ void destroy_taint_tracker()
 taint_variable_t *create_taint_variable(const char *file_path, const zend_op *tainted_at,
                                         taint_type_t type, void *taint)
 {
-  taint_variable_t *var = REQUEST_ALLOC(taint_variable_t);
+  taint_variable_t *var = REQUEST_NEW(taint_variable_t);
   // var->value = value;
   var->tainted_at_file = strdup(file_path);
   var->tainted_at = tainted_at;
@@ -787,12 +813,6 @@ taint_variable_t *create_taint_variable(const char *file_path, const zend_op *ta
   return var;
 }
 
-void destroy_taint_variable(taint_variable_t *taint_var)
-{
-  // pool them instead
-  //PROCESS_FREE((char *) taint_var->tainted_at_file);
-  //PROCESS_FREE(taint_var);
-}
 
 /*
 taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *tainted_op,
@@ -822,7 +842,7 @@ taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *
       return NULL;
   }
 
-  taint_variable_t *var = REQUEST_ALLOC(taint_variable_t);
+  taint_variable_t *var = REQUEST_NEW(taint_variable_t);
   var->var_type = var_type;
   var->var_id = var_id;
   var->first_tainted_op = tainted_op;
@@ -858,11 +878,9 @@ void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *ta
 {
   uint64 hash = (uint64) taintee;
 
-  plog_taint_var(app, taint);
+  plog_taint_var(app, taint, (uint64) taintee);
 
-  if (sctable_lookup(&taint_table, hash) != NULL)
-    destroy_taint_variable(taint);
-  else
+  if (sctable_lookup(&taint_table, hash) == NULL)
     sctable_add(&taint_table, hash, taint);
 }
 
@@ -881,4 +899,9 @@ taint_variable_t *taint_var_remove(const zval *value)
 {
   uint64 hash = (uint64) value;
   return (taint_variable_t *) sctable_remove(&taint_table, hash);
+}
+
+void taint_clear()
+{
+  sctable_erase(&taint_table);
 }
