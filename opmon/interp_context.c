@@ -681,6 +681,11 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
+  if (strcmp(op_array->filename->val,
+             "/stash/www/html/wordpress/wp-content/themes/attitude_mod/library/structure/header-extensions.php") == 0 &&
+      OP_LINE(op_array, op) == 159)
+    SPOT("watch this one\n");
+
   if (stack_pointer_moved && (op-1)->opcode == ZEND_DO_FCALL)
     taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, (zend_op *) (op - 1));
 

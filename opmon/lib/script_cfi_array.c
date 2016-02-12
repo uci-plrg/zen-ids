@@ -56,7 +56,7 @@ void *scarray_remove(scarray_t *a, uint index)
 
 scarray_iterator_t *scarray_iterator_start(scarray_t *a)
 {
-  scarray_iterator_t *iterator = PROCESS_ALLOC(scarray_iterator_t);
+  scarray_iterator_t *iterator = PROCESS_NEW(scarray_iterator_t);
   iterator->array = a;
   iterator->item = &iterator->array->data[0];
   iterator->index = 0;

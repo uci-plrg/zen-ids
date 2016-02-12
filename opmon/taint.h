@@ -112,6 +112,7 @@ typedef struct _taint_variable_t {
   //zend_op_array *stack_frame;
   taint_type_t type;
   void *taint;
+  uint nothing[0x10];
 } taint_variable_t;
 
 void init_taint_tracker();

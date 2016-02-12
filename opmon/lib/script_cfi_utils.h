@@ -43,6 +43,8 @@ do { \
     fprintf(stderr, "\t> "__VA_ARGS__); \
 } while (0)
 
+#define TEST(match, in) (((in) & (match)) == (match))
+
 #define PX "0x%llx"
 
 #define EVAL_PATH "<eval>"

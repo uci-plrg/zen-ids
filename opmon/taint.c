@@ -3,20 +3,15 @@
 #include "cfg_handler.h"
 #include "taint.h"
 
+/******************************************************************************************
+ * Propagation
+ */
+
 static sctable_t taint_table;
 
 static taint_variable_t *pending_return_taint = NULL;
 
 #define MAX_TAINT_ARGS 0x10
-
-typedef struct _taint_call_t {
-  taint_variable_t *taint_send[MAX_TAINT_ARGS];
-  uint arg_count;
-} taint_call_t;
-
-/******************************************************************************************
- * Propagation
- */
 
 typedef enum _taint_operand_index_t {
   TAINT_OPERAND_RESULT,
@@ -49,8 +44,41 @@ typedef struct _taint_value_t {
   };
 } taint_value_t;
 
+typedef struct _taint_call_t {
+  taint_variable_t *taint_send[MAX_TAINT_ARGS];
+  uint arg_count;
+} taint_call_t;
+
+typedef enum _taint_mapping_flags_t {
+  MAPPING_IS_OBJECT = 0x1,
+  MAPPING_BY_REF = 0x2,
+} taint_mapping_flags_t;
+
+typedef union _taint_cache_slot_t {
+  void **pointer;
+  uint32_t offset;
+} taint_cache_slot_t;
+
+#define CACHE_SLOT(key, flags) \
+  (TEST(MAPPING_BY_REF, (flags)) ? \
+   (taint_cache_slot_t) (execute_data->run_time_cache + Z_CACHE_SLOT_P(key)) : \
+   (taint_cache_slot_t) Z_CACHE_SLOT_P(key))
+
+#define CACHE_SLOT_VALID(slot, ce, flags) \
+  ((slot).pointer != NULL && (ce) == (TEST(MAPPING_BY_REF, (flags)) ? \
+                                           CACHED_PTR_EX((slot).pointer + 1) : \
+                                           CACHED_PTR((slot).offset + 1)))
+
+#define CACHE_LOOKUP(slot, flags) \
+  (TEST(MAPPING_BY_REF, (flags)) ? \
+   CACHED_PTR_EX((slot).pointer + 1) : \
+   CACHED_PTR((slot).offset + 1))
+
 void propagate_taint_from_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op, bool is_object_opcode);
+                                 zend_op_array *stack_frame, zend_op *op, uint flags);
+
+void propagate_taint_into_object(application_t *app, zend_execute_data *execute_data,
+                                 zend_op_array *stack_frame, zend_op *op, uint flags);
 
 static inline const znode_op *get_operand(const zend_op *op, taint_operand_index_t index)
 {
@@ -199,28 +227,34 @@ static bool is_derived_class(zend_class_entry *child_class, zend_class_entry *pa
 }
 
 void propagate_taint_from_array(application_t *app, zend_execute_data *execute_data,
-                                zend_op_array *stack_frame, zend_op *op)
+                                zend_op_array *stack_frame, zend_op *op, uint flags)
 {
   zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
   zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *dst = get_operand_zval(execute_data, op, TAINT_OPERAND_RESULT);
+  zend_ulong key_long = Z_LVAL_P(key);
   zval *src;
 
   Z_UNWRAP_P(map);
   switch (Z_TYPE_P(map)) {
     case IS_ARRAY:
-      if (Z_TYPE_P(key) == IS_LONG) {
-        zend_ulong key_long = Z_LVAL_P(key);
-        src = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
-        propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
-      } else if (Z_TYPE_P(key) == IS_STRING) {
-        zend_string *key_string = Z_STR_P(key);
-        src = zend_hash_find(Z_ARRVAL_P(map), key_string);
-        propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
+      switch (Z_TYPE_P(key)) {
+        case IS_STRING: {
+          zend_string *key_string = Z_STR_P(key);
+          if (op->op2_type == IS_CONST) {
+            src = zend_hash_find(Z_ARRVAL_P(map), key_string);
+            propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
+            break;
+          }
+          ZEND_HANDLE_NUMERIC(key_string, key_long);
+        }
+        case IS_LONG: /* FT */
+          src = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
+          propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
       }
       break;
     case IS_OBJECT:
-      propagate_taint_from_object(app, execute_data, stack_frame, op, false);
+      propagate_taint_from_object(app, execute_data, stack_frame, op, flags);
       break;
     case IS_STRING:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
@@ -235,7 +269,7 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
 }
 
 void propagate_taint_into_array(application_t *app, zend_execute_data *execute_data,
-                                zend_op_array *stack_frame, zend_op *op)
+                                zend_op_array *stack_frame, zend_op *op, uint flags)
 {
   zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
   const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
@@ -262,15 +296,18 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
 
     if (Z_TYPE_P(key) == IS_LONG) {
       zend_ulong key_long = Z_LVAL_P(key);
-      SEPARATE_ARRAY(map);
+      //SEPARATE_ARRAY(map);
       dst = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
       propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
     } else if (Z_TYPE_P(key) == IS_STRING) {
       zend_string *key_string = Z_STR_P(key);
-      SEPARATE_ARRAY(map);
+      //SEPARATE_ARRAY(map);
       dst = zend_hash_find(Z_ARRVAL_P(map), key_string);
       propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
     }
+  } else if (Z_TYPE_P(map) == IS_OBJECT) {
+    flags |= MAPPING_IS_OBJECT;
+    propagate_taint_into_object(app, execute_data, stack_frame, op, flags);
   } else {
     plog(app, "<taint> Error in %s: found an unknown array type %d at %04d(L%04d)%s\n",
          zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -279,7 +316,7 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
 }
 
 void propagate_taint_from_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op, bool is_object_opcode)
+                                 zend_op_array *stack_frame, zend_op *op, uint flags)
 {
   const zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *src, *dst;
@@ -294,83 +331,57 @@ void propagate_taint_from_object(application_t *app, zend_execute_data *execute_
 
   Z_UNWRAP_P(map);
   if (Z_TYPE_P(map) == IS_OBJECT) {
-    if (Z_TYPE_P(key) == IS_LONG) { /* is this possible for an object? */
-      zend_ulong key_long = Z_LVAL_P(key);
-      zend_object *object = Z_OBJ_P(map);
-      void **cache_slot = execute_data->run_time_cache + Z_CACHE_SLOT_P(key);
-      zend_property_info *p = NULL;
+    //zval temp;
+    zend_string *key_string = Z_STR_P(key);
+    zend_object *object = Z_OBJ_P(map);
+    taint_cache_slot_t cache_slot;
+    zend_property_info *p = NULL;
 
-      if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
-        p = CACHED_PTR_EX(cache_slot + 1);
-      } else {
-        zval *pp = zend_hash_index_find(&object->ce->properties_info, key_long);
-        if (pp != NULL)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
+    if (Z_TYPE_P(key) != IS_STRING) {
+      key_string = zval_get_string((zval *) key);
+      //ZVAL_STR(&temp, zval_get_string(key));
+      //key = &temp;
+      cache_slot.pointer = NULL;
+    } else if (TEST(MAPPING_IS_OBJECT, flags) && op->op2_type == IS_CONST) {
+      cache_slot = CACHE_SLOT(key, flags);
+    } else {
+      cache_slot.pointer = NULL;
+    }
 
-      if (p == NULL && EG(scope) != object->ce && EG(scope) &&
-          is_derived_class(object->ce, EG(scope))) {
-        zval *pp = zend_hash_index_find(&EG(scope)->properties_info, key_long);
-        if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
+    if (CACHE_SLOT_VALID(cache_slot, object->ce, flags)) {
+      p = CACHE_LOOKUP(cache_slot, flags);
+    } else if (TEST(MAPPING_BY_REF, flags)) {
+      zval *pp = zend_hash_find(&object->ce->properties_info, key_string);
+      if (pp != NULL)
+        p = (zend_property_info *) Z_PTR_P(pp);
+    }
 
-      if (p == NULL && cache_slot != NULL)
-        CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
+    if (p == NULL && EG(scope) != object->ce && EG(scope) &&
+        is_derived_class(object->ce, EG(scope))) {
+      zval *pp = zend_hash_find(&EG(scope)->properties_info, key_string);
+      if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
+        p = (zend_property_info *) Z_PTR_P(pp);
+    }
 
-      if (p != NULL) {
-        src = OBJ_PROP(object, p->offset);
-        if (Z_TYPE_P(src) == IS_UNDEF)
-          src = NULL;
-      } else if (object->properties != NULL) {
-        src = zend_hash_index_find(object->properties, key_long);
-      } else if (object->ce->__get != NULL) {
-        plog(app, "<taint> Can't find property #%d, but have a magic getter.\n", key_long);
-      }
+    if (p == NULL && cache_slot.pointer != NULL && TEST(MAPPING_BY_REF, flags))
+      CACHE_POLYMORPHIC_PTR_EX(cache_slot.pointer, object->ce, NULL);
 
-      if (src != NULL)
-        propagate_zval_taint(app, execute_data, stack_frame, op, true, src, src, "P");
-      else
-        plog(app, "<taint> Can't find property #%d\n", key_long);
-    } else if (Z_TYPE_P(key) == IS_STRING) {
-      zend_string *key_string = Z_STR_P(key);
-      zend_object *object = Z_OBJ_P(map);
-      void **cache_slot = is_object_opcode ? execute_data->run_time_cache + Z_CACHE_SLOT_P(key) : NULL;
-      zend_property_info *p = NULL;
-
-      if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
-        p = CACHED_PTR_EX(cache_slot + 1);
-      } else {
-        zval *pp = zend_hash_find(&object->ce->properties_info, key_string);
-        if (pp != NULL)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
-
-      if (p == NULL && EG(scope) != object->ce && EG(scope) &&
-          is_derived_class(object->ce, EG(scope))) {
-        zval *pp = zend_hash_find(&EG(scope)->properties_info, key_string);
-        if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
-
-      if (p == NULL && cache_slot != NULL)
-        CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
-
-      if (p != NULL) {
-        src = OBJ_PROP(object, p->offset);
-        if (Z_TYPE_P(src) == IS_UNDEF)
-          src = NULL;
-      } else if (object->properties != NULL) {
+    if (p != NULL) {
+      src = OBJ_PROP(object, p->offset);
+      if (Z_TYPE_P(src) == IS_UNDEF)
+        src = NULL;
+    } else if (TEST(MAPPING_BY_REF, flags)) {
+      if (object->properties != NULL) {
         src = zend_hash_find(object->properties, key_string);
       } else if (object->ce->__get != NULL) {
         plog(app, "<taint> Can't find property %s, but have a magic getter.\n", Z_STRVAL_P(key));
       }
-
-      if (src != NULL)
-        propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
-      else
-        plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
     }
+
+    if (src != NULL)
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
+    else
+      plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
   } else {
     plog(app, "<taint> Error in %s: found an unknown object type %d at %04d(L%04d)%s\n",
          zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -381,7 +392,7 @@ void propagate_taint_from_object(application_t *app, zend_execute_data *execute_
 }
 
 void propagate_taint_into_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op)
+                                 zend_op_array *stack_frame, zend_op *op, uint flags)
 {
   zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
@@ -394,83 +405,58 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
 
   Z_UNWRAP_P(map);
   if (Z_TYPE_P(map) == IS_OBJECT) {
-    if (Z_TYPE_P(key) == IS_LONG) { /* is this possible for an object? */
-      zend_ulong key_long = Z_LVAL_P(key);
-      zend_object *object = Z_OBJ_P(map);
-      void **cache_slot = execute_data->run_time_cache + Z_CACHE_SLOT_P(key);
-      zend_property_info *p = NULL;
+    zend_string *key_string = Z_STR_P(key);
+    zend_object *object = Z_OBJ_P(map);
+    taint_cache_slot_t cache_slot;
+    zend_property_info *p = NULL;
 
-      if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
-        p = CACHED_PTR_EX(cache_slot + 1);
-      } else {
-        zval *pp = zend_hash_index_find(&object->ce->properties_info, key_long);
-        if (pp != NULL)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
+    if (Z_TYPE_P(key) != IS_STRING) {
+      key_string = zval_get_string((zval *) key);
+      //ZVAL_STR(&temp, zval_get_string(key));
+      //key = &temp;
+      cache_slot.pointer = NULL;
+    } else if (op->op2_type == IS_CONST) {
+      cache_slot = CACHE_SLOT(key, flags);
+    } else {
+      cache_slot.pointer = NULL;
+    }
 
-      if (p == NULL && EG(scope) != object->ce && EG(scope) &&
-          is_derived_class(object->ce, EG(scope))) {
-        zval *pp = zend_hash_index_find(&EG(scope)->properties_info, key_long);
-        if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
+    if (CACHE_SLOT_VALID(cache_slot, object->ce, flags)) {
+      p = CACHE_LOOKUP(cache_slot, flags);
+    } else if (TEST(MAPPING_BY_REF, flags)) {
+      zval *pp = zend_hash_find(&object->ce->properties_info, key_string);
+      if (pp != NULL)
+        p = (zend_property_info *) Z_PTR_P(pp);
+    }
 
-      if (p == NULL && cache_slot != NULL)
-        CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
+    // may need to dereference for IS_INDIR?
 
-      if (p != NULL) {
-        dst = OBJ_PROP(object, p->offset);
-        if (Z_TYPE_P(dst) == IS_UNDEF)
-          dst = NULL;
-      } else if (object->properties != NULL) {
-        dst = zend_hash_index_find(object->properties, key_long);
-      } else if (object->ce->__get != NULL) {
-        plog(app, "<taint> Can't find property #%d, but have a magic getter.\n", key_long);
-      }
+    if (p == NULL && EG(scope) != object->ce && EG(scope) &&
+        is_derived_class(object->ce, EG(scope))) {
+      zval *pp = zend_hash_find(&EG(scope)->properties_info, key_string);
+      if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
+        p = (zend_property_info *) Z_PTR_P(pp);
+    }
 
-      if (dst != NULL)
-        propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
-      else
-        plog(app, "<taint> Can't find property #%d\n", key_long);
-    } else if (Z_TYPE_P(key) == IS_STRING) {
-      zend_string *key_string = Z_STR_P(key);
-      zend_object *object = Z_OBJ_P(map);
-      void **cache_slot = execute_data->run_time_cache + Z_CACHE_SLOT_P(key);
-      zend_property_info *p = NULL;
+    if (p == NULL && cache_slot.pointer != NULL && TEST(MAPPING_BY_REF, flags)) // verify
+      CACHE_POLYMORPHIC_PTR_EX(cache_slot.pointer, object->ce, NULL);
 
-      if (cache_slot != NULL && object->ce == CACHED_PTR_EX(cache_slot)) {
-        p = CACHED_PTR_EX(cache_slot + 1);
-      } else {
-        zval *pp = zend_hash_find(&object->ce->properties_info, key_string);
-        if (pp != NULL)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
-
-      if (p == NULL && EG(scope) != object->ce && EG(scope) &&
-          is_derived_class(object->ce, EG(scope))) {
-        zval *pp = zend_hash_find(&EG(scope)->properties_info, key_string);
-        if (pp != NULL && ((zend_property_info*) Z_PTR_P(pp))->flags & ZEND_ACC_PRIVATE)
-          p = (zend_property_info *) Z_PTR_P(pp);
-      }
-
-      if (p == NULL && cache_slot != NULL)
-        CACHE_POLYMORPHIC_PTR_EX(cache_slot, object->ce, NULL);
-
-      if (p != NULL) {
-        dst = OBJ_PROP(object, p->offset);
-        if (Z_TYPE_P(dst) == IS_UNDEF)
-          dst = NULL;
-      } else if (object->properties != NULL) {
+    if (p != NULL) {
+      dst = OBJ_PROP(object, p->offset);
+      if (Z_TYPE_P(dst) == IS_UNDEF)
+        dst = NULL;
+    } else if (TEST(MAPPING_BY_REF, flags)) { // verify
+      if (object->properties != NULL && TEST(MAPPING_BY_REF, flags)) {
         dst = zend_hash_find(object->properties, key_string);
       } else if (object->ce->__get != NULL) {
         plog(app, "<taint> Can't find property %s, but have a magic getter.\n", Z_STRVAL_P(key));
       }
-
-      if (dst != NULL)
-        propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
-      else
-        plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
     }
+
+    if (dst != NULL)
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
+    else
+      plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
   } else {
     plog(app, "<taint> Error in %s: found an unknown object type %d at %04d(L%04d)%s\n",
          zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -481,6 +467,7 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op)
 {
+  uint mapping_flags = 0;
   bool skip_arrays = true;
 
   // if (true) return;
@@ -563,34 +550,46 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_DECLARE_FUNCTION:
       // TODO: taint the function?
       break;
-    case ZEND_FETCH_R:  /* fetch a superglobal */
-    case ZEND_FETCH_W:
+    case ZEND_FETCH_W:  /* fetch a superglobal */
     case ZEND_FETCH_RW:
+    case ZEND_FETCH_R:
     case ZEND_FETCH_IS:
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       // clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       break;
     /****************** arrays and objects *****************/
-    case ZEND_FETCH_DIM_R:
     case ZEND_FETCH_DIM_W:
     case ZEND_FETCH_DIM_RW:
+      mapping_flags |= MAPPING_BY_REF;
+    case ZEND_FETCH_DIM_R:
     case ZEND_FETCH_DIM_IS:
-      propagate_taint_from_array(app, execute_data, stack_frame, op); /* why ok here? */
+      propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
+      break;
+    case ZEND_FETCH_DIM_FUNC_ARG:
+      if (ARG_SHOULD_BE_SENT_BY_REF(execute_data->call->func, op->extended_value & ZEND_FETCH_ARG_MASK))
+        mapping_flags |= MAPPING_BY_REF;
+      propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_DIM:
-      if (!skip_arrays) /* fail here */
-        propagate_taint_into_array(app, execute_data, stack_frame, op);
+      // if (!skip_arrays) /* fail here */
+        propagate_taint_into_array(app, execute_data, stack_frame, op, MAPPING_BY_REF);
       break;
-    case ZEND_FETCH_OBJ_R:
     case ZEND_FETCH_OBJ_W:
     case ZEND_FETCH_OBJ_RW:
+      mapping_flags |= MAPPING_BY_REF;
+    case ZEND_FETCH_OBJ_R:
     case ZEND_FETCH_OBJ_IS:
-      if (!skip_arrays) /* fail here */
-        propagate_taint_from_object(app, execute_data, stack_frame, op, true);
+      mapping_flags |= MAPPING_IS_OBJECT;
+      propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
+      break;
+    case ZEND_FETCH_OBJ_FUNC_ARG:
+      if (ARG_SHOULD_BE_SENT_BY_REF(execute_data->call->func, op->extended_value & ZEND_FETCH_ARG_MASK))
+        mapping_flags |= MAPPING_BY_REF;
+      propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_OBJ:
       if (!skip_arrays) /* fail here */
-        propagate_taint_into_object(app, execute_data, stack_frame, op);
+        propagate_taint_into_object(app, execute_data, stack_frame, op, MAPPING_BY_REF | MAPPING_IS_OBJECT);
       break;
     case ZEND_FETCH_UNSET:
       // TODO: remove taint from map
