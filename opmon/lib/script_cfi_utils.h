@@ -111,7 +111,7 @@ do { \
   ZVAL_DEREF(val); \
 } while (0)
 
-#define OP_LINE(stack_frame, op) ((uint) ((op) - (zend_op *) (stack_frame)->opcodes))
+#define OP_INDEX(stack_frame, op) ((uint) ((op) - (zend_op *) (stack_frame)->opcodes))
 
 #define IS_ARG_RECEIVE(op) ((op)->opcode == ZEND_RECV || (op)->opcode == ZEND_RECV_INIT)
 #define IS_FIRST_AFTER_ARGS(op) (!IS_ARG_RECEIVE(op) && IS_ARG_RECEIVE(op-1))

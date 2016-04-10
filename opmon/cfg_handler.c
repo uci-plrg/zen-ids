@@ -822,8 +822,10 @@ void print_taint(FILE *out, taint_variable_t *taint)
       switch (mod->type) {
         case SITE_MOD_DB:
           fprintf(out, "<query> %s", mod->db_query);
+          break;
         case SITE_MOD_FILE:
           fprintf(out, "<file-path> %s", mod->file_path);
+          break;
         default: ;
       }
     } break;
@@ -860,8 +862,8 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
   //bool plogged = true;
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
 
-  fprintf(plog, "<tainted-op> %s:%d (0x%llx)\n", taint_var->tainted_at_file, taint_var->tainted_at->lineno, hash);
-  fprintf(plog, "<taint-var> ");
+  fprintf(plog, "\t<tainted-op> %s:%d (0x%llx)\n\t", taint_var->tainted_at_file,
+          taint_var->tainted_at->lineno, hash);
   print_taint(plog, taint_var);
 
   /*

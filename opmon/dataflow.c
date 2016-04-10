@@ -243,6 +243,8 @@ static void dump_opcode_header(uint op_index, zend_op *op)
 
 void dump_fcall_opcode(zend_op_array *ops, zend_op *op, const char *routine_name)
 {
+  SPOT("Attempting to dump opcode 0x%x to file 0x%llx\n", op->opcode, (uint64) opcode_dump_file);
+
   dump_opcode_header(op - ops->opcodes, op);
   if (uses_return_value(op)) {
     dump_operand('r', ops, &op->result, op->result_type);

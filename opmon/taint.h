@@ -132,6 +132,8 @@ taint_variable_t *taint_var_get_arg(zend_execute_data *execute_data, const zend_
 
 taint_variable_t *taint_var_remove(const zval *value);
 
+void taint_var_free(const zval *value);
+
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op);
 

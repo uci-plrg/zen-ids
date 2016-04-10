@@ -90,7 +90,10 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   if (static_analysis != NULL)
     run_type = OPMON_RUN_STATIC_ANALYSIS;
 
-  opcode_dump_path = getenv(ENV_OPCODE_DUMP);
+  if (strcmp(EG(sapi_type), "apache2handler") == 0)
+    opcode_dump_path = "/stash/script-safe/log/minibb.opcodes.log";
+  else
+    opcode_dump_path = getenv(ENV_OPCODE_DUMP);
   if (opcode_dump_path != NULL)
     initialize_opcode_dump(opcode_dump_path);
 
@@ -103,6 +106,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
+  monitor->notify_zval_free = taint_var_free;
   monitor->notify_request = request_boundary;
   monitor->notify_database_query = query_executing;
   monitor->notify_worker_startup = init_worker;
