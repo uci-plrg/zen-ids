@@ -78,6 +78,7 @@ typedef enum _request_input_type_t {
   REQUEST_INPUT_TYPE_GET,
   REQUEST_INPUT_TYPE_POST,
   REQUEST_INPUT_TYPE_COOKIE,
+  REQUEST_INPUT_TYPE_SERVER,
   REQUEST_INPUT_TYPE_FILES,
 } request_input_type_t;
 

@@ -189,15 +189,18 @@ typedef struct _dataflow_opcode_t {
 
 void initialize_opcode_dump(const char *path);
 void set_opcode_dump_file(FILE *file);
-void dump_script_header(const char *routine_name, uint function_hash);
-void dump_function_header(const char *unit_path, const char *routine_name, uint function_hash);
-void dump_operand(char index, zend_op_array *ops, znode_op *operand, zend_uchar type);
-void dump_fcall_opcode(zend_op_array *ops, zend_op *op, const char *routine_name);
-void dump_fcall_arg(zend_op_array *ops, zend_op *op, const char *routine_name);
-void dump_map_assignment(zend_op_array *ops, zend_op *op, zend_op *next_op);
-void dump_foreach_fetch(zend_op_array *ops, zend_op *op, zend_op *next_op);
-void dump_opcode(zend_op_array *ops, zend_op *op);
-void identify_sink_operands(zend_op *op, sink_identifier_t id);
+void dump_script_header(application_t *app, const char *routine_name, uint function_hash);
+void dump_function_header(application_t *app, const char *unit_path, const char *routine_name,
+                          uint function_hash);
+void dump_operand(application_t *app, char index, zend_op_array *ops, znode_op *operand,
+                  zend_uchar type);
+void dump_fcall_opcode(application_t *app, zend_op_array *ops, zend_op *op,
+                       const char *routine_name);
+void dump_fcall_arg(application_t *app, zend_op_array *ops, zend_op *op, const char *routine_name);
+void dump_map_assignment(application_t *app, zend_op_array *ops, zend_op *op, zend_op *next_op);
+void dump_foreach_fetch(application_t *app, zend_op_array *ops, zend_op *op, zend_op *next_op);
+void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op);
+void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t id);
 
 bool is_db_source_function(const char *type, const char *name);
 bool is_db_sink_function(const char *type, const char *name);
@@ -206,13 +209,13 @@ bool is_file_sink_function(const char *name);
 bool is_system_source_function(const char *name);
 bool is_system_sink_function(const char *name);
 
-int analyze_dataflow(zend_file_handle *file);
+int analyze_dataflow(application_t *app, zend_file_handle *file);
 void destroy_dataflow_analysis();
 void add_dataflow_routine(application_t *app, uint routine_hash, zend_op_array *zops,
                           bool is_function);
 void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops);
-void push_dataflow_fcall_init(uint target_hash, const char *routine_name);
-void add_dataflow_fcall(uint routine_hash, uint index, zend_op_array *zops,
+void push_dataflow_fcall_init(application_t *app, uint target_hash, const char *routine_name);
+void add_dataflow_fcall(application_t *app, uint routine_hash, uint index, zend_op_array *zops,
                         const char *routine_name);
 void add_dataflow_fcall_arg(uint routine_hash, uint index, zend_op_array *zops,
                         const char *routine_name);

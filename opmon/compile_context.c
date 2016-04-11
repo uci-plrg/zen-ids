@@ -56,8 +56,8 @@ static uint closure_count = 0;
 
 static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL };
 
-static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_hash,
-                                   const char *routine_name)
+static inline void push_fcall_init(application_t *app, uint index, zend_uchar opcode,
+                                   uint routine_hash, const char *routine_name)
 {
   SPOT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
 
@@ -67,7 +67,7 @@ static inline void push_fcall_init(uint index, zend_uchar opcode, uint routine_h
   fcall_frame->routine_name = strdup(routine_name);
   fcall_frame->opcode = opcode;
 
-  push_dataflow_fcall_init(routine_hash, routine_name);
+  push_dataflow_fcall_init(app, routine_hash, routine_name);
 }
 
 static inline void push_fcall_skip(uint index, zend_uchar opcode)
@@ -275,9 +275,9 @@ void function_compiled(zend_op_array *op_array)
 
   if (is_opcode_dump_enabled()) {
     if (is_script_body)
-      dump_script_header(routine_name, fqn->function.caller_hash);
+      dump_script_header(cfm.app, routine_name, fqn->function.caller_hash);
     else
-      dump_function_header(fqn->unit.path, routine_name, fqn->function.caller_hash);
+      dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.caller_hash);
   }
 
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
@@ -313,7 +313,7 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
           if (fcall->routine_name != NULL)
-            dump_fcall_opcode(op_array, op, fcall->routine_name);
+            dump_fcall_opcode(cfm.app, op_array, op, fcall->routine_name);
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER)
             sink_id.call_target = fcall->routine_name;
           break;
@@ -327,22 +327,22 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
           fcall = peek_fcall_init();
-          dump_fcall_arg(op_array, op, fcall->routine_name);
+          dump_fcall_arg(cfm.app, op_array, op, fcall->routine_name);
           sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_ASSIGN_OBJ:
         case ZEND_ASSIGN_DIM:
-          dump_map_assignment(op_array, op, &op_array->opcodes[i+1]);
+          dump_map_assignment(cfm.app, op_array, op, &op_array->opcodes[i+1]);
           break;
         case ZEND_FE_FETCH:
-          dump_foreach_fetch(op_array, op, &op_array->opcodes[i+1]);
+          dump_foreach_fetch(cfm.app, op_array, op, &op_array->opcodes[i+1]);
           break;
         default:
-          dump_opcode(op_array, op);
+          dump_opcode(cfm.app, op_array, op);
       }
 
       if (sink_id.call_target != NULL)
-        identify_sink_operands(op, sink_id);
+        identify_sink_operands(cfm.app, op, sink_id);
     }
 
     if (is_dataflow_analysis()) {
@@ -352,7 +352,7 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_DO_FCALL:
           fcall = peek_fcall_init();
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER)
-            add_dataflow_fcall(fqn->function.caller_hash, i, op_array, fcall->routine_name);
+            add_dataflow_fcall(cfm.app, fqn->function.caller_hash, i, op_array, fcall->routine_name);
           //sink_id.call_target = fcall->routine_name;
           break;
         case ZEND_SEND_VAL:
@@ -463,7 +463,7 @@ void function_compiled(zend_op_array *op_array)
 
           sprintf(routine_name, "new %s", classname);
           to_routine_hash = hash_routine(routine_name);
-          push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
+          push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
         } break;
         case ZEND_DO_FCALL: {
           fcall_init_t *fcall = pop_fcall_init();
@@ -493,7 +493,7 @@ void function_compiled(zend_op_array *op_array)
                 func->value.func->type == ZEND_INTERNAL_FUNCTION) {
               ignore_call |= !is_opcode_dump_enabled();
               sprintf(routine_name, "builtin:%s", Z_STRVAL_P(op->op2.zv));
-              push_fcall_init(i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);
+              push_fcall_init(cfm.app, i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);
               break; // ignore builtins for now (unless dumping ops)
             }
 
@@ -504,7 +504,7 @@ void function_compiled(zend_op_array *op_array)
             sprintf(routine_name, "<var #%d>", var_index);
           }
           to_routine_hash = hash_routine(routine_name);
-          push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
+          push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
         } break;
         case ZEND_INIT_METHOD_CALL: {
           if (op->op2_type == IS_CONST && op->op1_type == IS_UNUSED)
@@ -514,7 +514,7 @@ void function_compiled(zend_op_array *op_array)
 
           sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
           to_routine_hash = hash_routine(routine_name);
-          push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
+          push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
         } break;
         case ZEND_INIT_STATIC_METHOD_CALL: {
           classname = NULL;
@@ -528,7 +528,7 @@ void function_compiled(zend_op_array *op_array)
           if (classname != NULL) {
             sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
             to_routine_hash = hash_routine(routine_name);
-            push_fcall_init(i, op->opcode, to_routine_hash, routine_name);
+            push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
           }
         } break;
         case ZEND_INIT_USER_CALL: {

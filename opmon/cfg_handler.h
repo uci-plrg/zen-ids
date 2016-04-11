@@ -6,6 +6,17 @@
 #include "cfg.h"
 #include "taint.h"
 
+typedef struct _cfg_files_t {
+  FILE *node;
+  FILE *op_edge;
+  FILE *routine_edge;
+  FILE *request;
+  FILE *request_edge;
+  FILE *routine_catalog;
+  FILE *persistence;
+  FILE *opcode_log;
+} cfg_files_t;
+
 void init_cfg_handler();
 void destroy_cfg_handler();
 

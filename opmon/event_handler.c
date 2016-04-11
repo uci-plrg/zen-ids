@@ -28,7 +28,7 @@ typedef enum _opmon_run_type {
 } opmon_run_type;
 
 static const char *static_analysis = NULL;
-static const char *opcode_dump_path;
+static bool opcode_dump_enabled = false;
 static opmon_run_type run_type = OPMON_RUN_EXECUTION;
 static void init_top_level_script(const char *script_path)
 {
@@ -68,7 +68,7 @@ static int start_dataflow_analysis(zend_file_handle *file)
   }
 
   run_type = OPMON_RUN_DATAFLOW_ANALYSIS;
-  return analyze_dataflow(file);
+  return analyze_dataflow(NULL, file);
 }
 
 bool is_dataflow_analysis()
@@ -78,7 +78,7 @@ bool is_dataflow_analysis()
 
 bool is_opcode_dump_enabled()
 {
-  return opcode_dump_path != NULL;
+  return opcode_dump_enabled;
 }
 
 void init_event_handler(zend_opcode_monitor_t *monitor)
@@ -90,12 +90,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   if (static_analysis != NULL)
     run_type = OPMON_RUN_STATIC_ANALYSIS;
 
-  if (strcmp(EG(sapi_type), "apache2handler") == 0)
-    opcode_dump_path = "/stash/script-safe/log/minibb.opcodes.log";
-  else
-    opcode_dump_path = getenv(ENV_OPCODE_DUMP);
-  if (opcode_dump_path != NULL)
-    initialize_opcode_dump(opcode_dump_path);
+  opcode_dump_enabled = (getenv(ENV_OPCODE_DUMP) != NULL);
 
   init_utils();
   init_compile_context();

@@ -540,6 +540,8 @@ static request_input_type_t get_request_input_type(const zend_op *op)
             return REQUEST_INPUT_TYPE_POST;
           if (strcmp(superglobal_name, "_COOKIE") == 0)
             return REQUEST_INPUT_TYPE_COOKIE;
+          if (strcmp(superglobal_name, "_SERVER") == 0)
+            return REQUEST_INPUT_TYPE_SERVER;
           if (strcmp(superglobal_name, "_FILES") == 0)
             return REQUEST_INPUT_TYPE_FILES;
         }
@@ -700,10 +702,8 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
-  if (strcmp(op_array->filename->val,
-             "/stash/www/html/wordpress/wp-includes/nav-menu.php") == 0 &&
-      OP_INDEX(op_array, op) == 173)
-    SPOT("watch this one\n");
+  SPOT("@ %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, op), op->lineno,
+       site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
 
   if (cur_frame.op_index > 0) {
     bool is_loopback = (prev_frame.opcodes == op_array->opcodes && prev_frame.op_index > cur_frame.op_index);
@@ -720,11 +720,15 @@ void opcode_executing(const zend_op *op)
     } else {
       zend_op *last_executed_op;
 
-      if (is_loopback) {
+      if (prev_frame.opcodes == op_array->opcodes && !stack_pointer_moved) {
         last_executed_op = &prev_frame.opcodes[prev_frame.op_index];
       } else  {
         last_executed_op = previous_op;
       }
+
+      SPOT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, last_executed_op), last_executed_op->lineno,
+           site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
+
       propagate_taint(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
     }
   }
@@ -733,11 +737,6 @@ void opcode_executing(const zend_op *op)
     PRINT("<session> Inactive session while executing %s. User level is %d.\n",
           cur_frame.cfm.routine_name, current_session.user_level);
   }
-
-#ifdef SPOT_DEBUG
-  if (cur_frame.cfm.cfg->routine_hash == 0x35b71951)
-    SPOT("\twp-admin/admin.php: %d\n", op->lineno);
-#endif
 
   input_type = get_request_input_type(op); // TODO: combine in following switch
   if (input_type != REQUEST_INPUT_TYPE_NONE) {
