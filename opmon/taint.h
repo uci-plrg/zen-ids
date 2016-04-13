@@ -68,8 +68,9 @@ typedef struct _site_modification_t {
   site_modification_type_t type;
   union {
     const char *file_path;
-    const char *db_query;
+    const char *db_table;
   };
+  const char *db_column;
 } site_modification_t;
 
 typedef enum _request_input_type_t {

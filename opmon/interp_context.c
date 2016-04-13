@@ -88,28 +88,6 @@ static executing_builtin_t executing_builtin = { false, 0 };
 
 #define CONTEXT_ENTRY 0xffffffffU
 
-void query_executing(const char *query)
-{
-  /*
-  site_modification_t *mod = NULL;
-  site_modification_t fake_mod = { SITE_MOD_DB, { query } };
-
-  // lookup corresponding site modifications
-  mod = &fake_mod;
-  if (mod != NULL) {
-    taint_variable_t *var = create_taint_variable(&cur_frame.execute_data->func->op_array,
-                                                  &cur_frame.opcodes[cur_frame.op_index],
-                                                  TAINT_TYPE_SITE_MOD, mod);
-
-    if (var != NULL) {
-      taint_var_add(cur_frame.cfm.app, var);
-      db_mod = mod;
-      db_mod_taint_op = &cur_frame.opcodes[cur_frame.op_index];
-    }
-  }
-  */
-}
-
 static uint get_first_executable_index(zend_op *opcodes)
 {
   uint i;
@@ -639,6 +617,7 @@ static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
   else if (is_db_source_function("mysqli_", executing_builtin.name))
     plog_call(cur_frame.cfm.app, "<db-input>", executing_builtin.name, op_array, op, arg_count, args);
 
+  /*
   if (strcmp(executing_builtin.name, "mysqli_query") == 0) {
     const char *query = operand_strdup(execute_data, &args[0]->op1, args[0]->op1_type);
     site_modification_t *mod = REQUEST_NEW(site_modification_t);
@@ -658,7 +637,14 @@ static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
         plog_db_mod_result(cur_frame.cfm.app, mod, op);
       }
     }
+  } else if (strcmp(executing_builtin.name, "mysqli_fetch_object") == 0 || // WP only uses this fetch
+             strcmp(executing_builtin.name, "mysqli_fetch_row") == 0) {
+    SPOT("executing mysqli_fetch_object/row()\n");
+    // find the $result arg (may be `this`)
+    // lookup pending queries in hashtable (taint table?)
+    // taint the object fields
   }
+  */
 
   executing_builtin.active = false;
 }
@@ -931,6 +917,26 @@ void opcode_executing(const zend_op *op)
     }
   }
   */
+}
+
+void db_site_modification(const zval *value, const char *table_name, const char *column_name)
+{
+  taint_variable_t *var;
+  zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
+  zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+  site_modification_t *mod = REQUEST_NEW(site_modification_t);
+
+  mod->type = SITE_MOD_DB;
+  mod->db_table = table_name;
+  mod->db_column = column_name;
+
+  var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
+                              op, TAINT_TYPE_SITE_MOD, mod);
+
+  plog(cur_frame.cfm.app, "<taint> create site mod at %04d(L%04d)%s\n",
+       cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+  taint_var_add(cur_frame.cfm.app, value, var);
+  plog_db_mod_result(cur_frame.cfm.app, mod, op);
 }
 
 user_level_t get_current_user_level()

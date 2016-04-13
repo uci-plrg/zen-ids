@@ -813,7 +813,7 @@ void print_taint(FILE *out, taint_variable_t *taint)
       site_modification_t *mod = (site_modification_t *) taint->taint;
       switch (mod->type) {
         case SITE_MOD_DB:
-          fprintf(out, "<query> %s", mod->db_query);
+          fprintf(out, "<db-fetch> %s.%s", mod->db_table, mod->db_column);
           break;
         case SITE_MOD_FILE:
           fprintf(out, "<file-path> %s", mod->file_path);

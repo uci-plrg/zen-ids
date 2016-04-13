@@ -813,7 +813,6 @@ taint_variable_t *create_taint_variable(const char *file_path, const zend_op *ta
   return var;
 }
 
-
 /*
 taint_variable_t *create_taint_variable(zend_op_array *op_array, const zend_op *tainted_op,
                                         taint_type_t type, void *taint)
