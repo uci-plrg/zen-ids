@@ -507,7 +507,7 @@ static request_input_type_t get_request_input_type(const zend_op *op)
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
     case ZEND_FETCH_FUNC_ARG:
-      if (op->op2_type == IS_UNUSED) {
+      if (op->op1_type == IS_CONST && op->op2_type == IS_UNUSED) {
         const char *superglobal_name = Z_STRVAL_P(op->op1.zv);
         if (superglobal_name != NULL) {
           if (strcmp(superglobal_name, "_REQUEST") == 0)
@@ -523,7 +523,7 @@ static request_input_type_t get_request_input_type(const zend_op *op)
           if (strcmp(superglobal_name, "_FILES") == 0)
             return REQUEST_INPUT_TYPE_FILES;
         }
-      }
+      } // (op->op1_type == IS_CV && op->op2_type == IS_UNUSED)=> variable var name, e.g.: $$key
       break;
   }
   return REQUEST_INPUT_TYPE_NONE;
@@ -936,7 +936,7 @@ void db_site_modification(const zval *value, const char *table_name, const char 
   plog(cur_frame.cfm.app, "<taint> create site mod at %04d(L%04d)%s\n",
        cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   taint_var_add(cur_frame.cfm.app, value, var);
-  plog_db_mod_result(cur_frame.cfm.app, mod, op);
+  plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
 }
 
 user_level_t get_current_user_level()

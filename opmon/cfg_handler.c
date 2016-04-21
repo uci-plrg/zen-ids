@@ -845,7 +845,7 @@ void print_taint(FILE *out, taint_variable_t *taint)
         default: return;
       }
       if (input->value == NULL)
-        fprintf(out, "<fetch>");
+        fprintf(out, "<dim-fetch>");
       else
         print_var_value(out, input->value);
     } break;
@@ -881,6 +881,12 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
   if (plogged)
   */
     fprintf(plog, "\n");
+}
+
+void plog_taint(application_t *app, taint_variable_t *taint_var)
+{
+  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+  print_taint(plog, taint_var);
 }
 
 void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op *db_mod_taint_op)

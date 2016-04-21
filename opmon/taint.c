@@ -169,13 +169,17 @@ static inline const zval *get_operand_zval(zend_execute_data *execute_data, cons
 
 static bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
                                  zend_op_array *stack_frame, zend_op *op, bool clobber,
-                                 const zval *src, const zval *dst, const char *dst_name)
+                                 const zval *src, const char *src_name,
+                                 const zval *dst, const char *dst_name)
 {
   taint_variable_t *taint_var = taint_var_get(src);
 
+  if (src == NULL || dst == NULL)
+    return false; // bug?
+
   if (clobber) {
     if (taint_var_remove(dst) != NULL) {
-      plog(app, "<taint> remove %s (0x%llx) at %04d(L%04d)%s\n", dst_name, (uint64) dst,
+      plog(app, "<taint> clobber %s (0x%llx) at %04d(L%04d)%s\n", dst_name, (uint64) dst,
            OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
     }
   }
@@ -183,8 +187,9 @@ static bool propagate_zval_taint(application_t *app, zend_execute_data *execute_
   if (taint_var == NULL) {
     return false;
   } else {
-    plog(app, "<taint> write %s at %04d(L%04d)%s\n",
-         dst_name, OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+    plog(app, "<taint> write %s(0x%llx)->%s(0x%llx) at %04d(L%04d)%s\n",
+         src_name, (uint64) src, dst_name, (uint64) dst, OP_INDEX(stack_frame, op), op->lineno,
+         site_relative_path(app, stack_frame));
     taint_var_add(app, dst, taint_var);
     return true;
   }
@@ -195,7 +200,7 @@ static void propagate_operand_taint(application_t *app, zend_execute_data *execu
                                     taint_operand_index_t src, taint_operand_index_t dst)
 {
   propagate_zval_taint(app, execute_data, stack_frame, op, clobber,
-                       get_operand_zval(execute_data, op, src),
+                       get_operand_zval(execute_data, op, src), get_operand_index_name(op, src),
                        get_operand_zval(execute_data, op, dst), get_operand_index_name(op, dst));
 }
 
@@ -243,14 +248,14 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
           zend_string *key_string = Z_STR_P(key);
           if (op->op2_type == IS_CONST) {
             src = zend_hash_find(Z_ARRVAL_P(map), key_string);
-            propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
+            propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "[mapped]", dst, "R");
             break;
           }
           ZEND_HANDLE_NUMERIC(key_string, key_long);
         }
         case IS_LONG: /* FT */
           src = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
-          propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
+          propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "[mapped]", dst, "R");
       }
       break;
     case IS_OBJECT:
@@ -303,12 +308,12 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
       zend_ulong key_long = Z_LVAL_P(key);
       //SEPARATE_ARRAY(map);
       dst = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
-      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
     } else if (Z_TYPE_P(key) == IS_STRING) {
       zend_string *key_string = Z_STR_P(key);
       //SEPARATE_ARRAY(map);
       dst = zend_hash_find(Z_ARRVAL_P(map), key_string);
-      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
     }
     //plog(app, "<taint> Error propagating into %s: found an unknown array type %d at %04d(L%04d)%s\n",
     //     zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -380,7 +385,7 @@ void propagate_taint_from_object(application_t *app, zend_execute_data *execute_
     }
 
     if (src != NULL)
-      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "R");
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "[property]", dst, "R");
     else
       plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
   } else {
@@ -455,7 +460,7 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
     }
 
     if (dst != NULL)
-      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, dst, "A[i]");
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
     else
       plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
   } else {
@@ -499,7 +504,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_IS_SMALLER:
     case ZEND_IS_SMALLER_OR_EQUAL:
     case ZEND_CASE:
-    case ZEND_FETCH_CONSTANT:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
     case ZEND_TYPE_CHECK: /* FT */
     case ZEND_DEFINED:
@@ -515,6 +519,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_ADD_VAR:
     case ZEND_ADD_STRING:
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT); // probably redundant
+    case ZEND_FETCH_CONSTANT:
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       break;
     case ZEND_FETCH_DIM_UNSET: /* also {} => {1.2}, which is not modelled yet */
@@ -535,7 +540,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_FE_FETCH:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_VALUE);
       propagate_zval_taint(app, execute_data, stack_frame, op, true,
-                           get_operand_zval(execute_data, op, TAINT_OPERAND_MAP),
+                           get_operand_zval(execute_data, op, TAINT_OPERAND_MAP), "?",
                            get_operand_zval(execute_data, op+1, TAINT_OPERAND_VALUE), "iter");
       break;
     case ZEND_PRE_INC:
@@ -635,6 +640,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     } break;
   }
 
+  /*
   if (op < &stack_frame->opcodes[stack_frame->last]) {
     switch ((op+1)->opcode) {
       case ZEND_RETURN:
@@ -651,6 +657,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       }
     }
   }
+  */
 
   {
     taint_variable_t *taint_var;
@@ -658,24 +665,31 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, "<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_1),
-             OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+        plog(app, "<taint> on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_1),
+             OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame), (uint64) &op->op1);
+        plog_taint(app, taint_var);
+        plog(app, "\n");
       }
     }
     operand = get_zval(execute_data, &op->op2, op->op2_type);
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, "<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_2),
-             OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+        plog(app, "<taint> on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_2),
+             OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame), (uint64) &op->op2);
+        plog_taint(app, taint_var);
+        plog(app, "\n");
       }
     }
     operand = get_zval(execute_data, &op->result, op->result_type);
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, "<taint> on %s of %04d(L%04d)%s\n", get_operand_index_name(op, TAINT_OPERAND_RESULT),
-             OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+        plog(app, "<taint> on %s of %04d(L%04d)%s (0x%llx) | ",
+             get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
+             op->lineno, site_relative_path(app, stack_frame), (uint64) &op->result);
+        plog_taint(app, taint_var);
+        plog(app, "\n");
       }
     }
   }
@@ -755,8 +769,9 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
         if (receive->opcode == ZEND_RECV || receive->opcode == ZEND_RECV_INIT) {
           const zval *receive_val = get_operand_zval(execute_data, receive, TAINT_OPERAND_RESULT);
           taint_var_add(app, receive_val, call->taint_send[i]);
-          plog(app, "<taint> write arg receive R at %04d(L%04d)%s\n",
-               OP_INDEX(stack_frame, receive), receive->lineno, site_relative_path(app, stack_frame));
+          plog(app, "<taint> write arg receive (0x%llx) at %04d(L%04d)%s\n",
+               (uint64) receive_val, OP_INDEX(stack_frame, receive), receive->lineno,
+               site_relative_path(app, stack_frame));
         } else {
           plog(app, "<taint> Error! Found %s but ZEND_RECV was expected at %04d(L%04d)%s\n",
                zend_get_opcode_name(receive->opcode),
@@ -778,8 +793,9 @@ void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
     const zval *call_result = get_operand_zval(execute_data, call_op, TAINT_OPERAND_RESULT);
     if (call_result != NULL) {
       taint_var_add(app, call_result, pending_return_taint);
-      plog(app, "<taint> write call result R at %04d(L%04d)%s\n",
-           OP_INDEX(stack_frame, call_op), call_op->lineno, site_relative_path(app, stack_frame));
+      plog(app, "<taint> write call result (0x%llx) at %04d(L%04d)%s\n",
+           (uint64) call_result, OP_INDEX(stack_frame, call_op), call_op->lineno,
+           site_relative_path(app, stack_frame));
     }
     pending_return_taint = NULL;
   }
@@ -876,6 +892,9 @@ static inline uint64 hash_taint_var(taint_variable_t *var)
 void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *taint)
 {
   uint64 hash = (uint64) taintee;
+
+  if (hash == 0ULL)
+    return; // bug?
 
   plog_taint_var(app, taint, (uint64) taintee);
 
