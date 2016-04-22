@@ -187,7 +187,7 @@ typedef struct _dataflow_opcode_t {
   };
 } dataflow_opcode_t;
 
-void initialize_opcode_dump(const char *path);
+void init_dataflow_analysis();
 void set_opcode_dump_file(FILE *file);
 void dump_script_header(application_t *app, const char *routine_name, uint function_hash);
 void dump_function_header(application_t *app, const char *unit_path, const char *routine_name,

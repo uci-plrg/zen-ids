@@ -265,10 +265,12 @@ static void lookup_cfm(zend_execute_data *execute_data, zend_op_array *op_array,
                        control_flow_metadata_t *cfm)
 {
   control_flow_metadata_t *monitored_cfm = get_cfm_by_opcodes_address(op_array->opcodes);
-  if (monitored_cfm == NULL)
+  if (monitored_cfm == NULL) {
+    WARN("Failed to find opcodes for hash 0x%llx\n", hash_addr(op_array->opcodes));
     lookup_cfm_by_name(execute_data, op_array, cfm);
-  else
+  } else {
     *cfm = *monitored_cfm;
+  }
 }
 
 static inline zend_execute_data *find_return_target(zend_execute_data *execute_data)
@@ -371,6 +373,11 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     new_prev_frame.opcode = prev_execute_data->opline->opcode;
     new_prev_frame.op_index = (prev_execute_data->opline - prev_op_array->opcodes);
     lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
+
+    if (new_prev_frame.cfm.cfg == NULL) {
+      SPOT("wait here\n");
+      lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
+    }
   }
 
   if (stack_event.state == STACK_STATE_RETURNED && (execute_data->opline - op_array->opcodes) > 0) {
@@ -936,7 +943,7 @@ void db_site_modification(const zval *value, const char *table_name, const char 
   plog(cur_frame.cfm.app, "<taint> create site mod at %04d(L%04d)%s\n",
        cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   taint_var_add(cur_frame.cfm.app, value, var);
-  plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
+  // plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
 }
 
 user_level_t get_current_user_level()

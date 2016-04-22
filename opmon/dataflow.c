@@ -1294,6 +1294,11 @@ static scarray_t fcall_stack; // dataflow_call_site_t *
 static bool analyzing_include = false;
 static bool dataflow_linking_complete, source_propagation_complete, function_propagation_complete;
 
+void init_dataflow_analysis()
+{
+  scarray_init(&fcall_stack);
+}
+
 static int analyze_file_dataflow(zend_file_handle *in, dataflow_file_t *out)
 {
   int retval = FAILURE;

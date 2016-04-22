@@ -98,6 +98,9 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   init_metadata_handler();
   init_taint_tracker();
 
+  if (opcode_dump_enabled)
+    init_dataflow_analysis();
+
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;

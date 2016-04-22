@@ -116,10 +116,10 @@ inline int is_closure(const char *function_name)
 
 void init_compile_context()
 {
-  routines_by_callee_hash.hash_bits = 8;
+  routines_by_callee_hash.hash_bits = 9;
   sctable_init(&routines_by_callee_hash);
 
-  routines_by_opcode_address.hash_bits = 8;
+  routines_by_opcode_address.hash_bits = 9;
   sctable_init(&routines_by_opcode_address);
 
   memset(fcall_stack, 0, sizeof(fcall_init_t));
@@ -280,7 +280,12 @@ void function_compiled(zend_op_array *op_array)
       dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.caller_hash);
   }
 
+  if (fqn->function.caller_hash == 0x7a5637c6)
+    SPOT("wait here \n");
+
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
+  SPOT("Installing hashcodes for %s (0x%x) under hash 0x%llx\n", routine_name,
+       fqn->function.caller_hash, hash_addr(op_array->opcodes));
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn);
 
   if (is_already_compiled) {

@@ -4,7 +4,7 @@
 #define HASH_TAG_BITS ((sizeof(KEY_TYPE)) * 8)
 #define UINT_0 ((KEY_TYPE) 0U)
 
-#define HASH_FUNC(key, table) key & table->hash_mask
+#define HASH_FUNC(key, table) (((key) ^ ((key) >> 8)) & (table)->hash_mask)
 #define HASH_MASK(num_bits) ((~UINT_0) >> (HASH_TAG_BITS-(num_bits)))
 #define HASHTABLE_SIZE(num_bits) (1U << (num_bits))
 
