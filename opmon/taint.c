@@ -308,10 +308,12 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
       zend_ulong key_long = Z_LVAL_P(key);
       dst = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
       propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
-    } else if (false && Z_TYPE_P(key) == IS_STRING) {
+    } else if (Z_TYPE_P(key) == IS_STRING && (Z_ARRVAL_P(map)->u.flags & HASH_MASK_CONSISTENCY) == 0) {
       zend_string *key_string = Z_STR_P(key);
       dst = zend_hash_find(Z_ARRVAL_P(map), key_string);
-      propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, src,
+                           op->op2_type == IS_UNUSED ? "?" : "><",
+                           dst, "A[i]");
     }
     //plog(app, "<taint> Error propagating into %s: found an unknown array type %d at %04d(L%04d)%s\n",
     //     zend_get_opcode_name(op->opcode), Z_TYPE_P(map),

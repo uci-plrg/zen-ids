@@ -898,14 +898,19 @@ void opcode_executing(const zend_op *op)
 void db_site_modification(const zval *value, const char *table_name, const char *column_name)
 {
   if (is_taint_analysis_enabled()) {
+    char *str;
     taint_variable_t *var;
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
     site_modification_t *mod = REQUEST_NEW(site_modification_t);
 
     mod->type = SITE_MOD_DB;
-    mod->db_table = table_name;
-    mod->db_column = column_name;
+    str = REQUEST_ALLOC(strlen(table_name) + 1);
+    strcpy(str, table_name);
+    mod->db_table = str;
+    str = REQUEST_ALLOC(strlen(column_name) + 1);
+    strcpy(str, column_name);
+    mod->db_column = str;
 
     var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
                                 op, TAINT_TYPE_SITE_MOD, mod);
