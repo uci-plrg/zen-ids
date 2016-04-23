@@ -59,7 +59,7 @@ static control_flow_metadata_t last_eval_cfm = { "<uninitialized>", NULL, NULL }
 static inline void push_fcall_init(application_t *app, uint index, zend_uchar opcode,
                                    uint routine_hash, const char *routine_name)
 {
-  SPOT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
+  // SPOT("Opcode %d prepares call to %s (0x%x)\n", index, routine_name, routine_hash);
 
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
@@ -473,11 +473,11 @@ void function_compiled(zend_op_array *op_array)
         case ZEND_DO_FCALL: {
           fcall_init_t *fcall = pop_fcall_init();
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER) {
-            SPOT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
+            PRINT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
             write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
                                fcall->routine_hash, 0, USER_LEVEL_TOP);
-          } else if (fcall->opcode > 0) {
-            SPOT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
+          } else if (fcall->routine_hash == 0 && fcall->opcode > 0) {
+            PRINT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
                  "Dataset: %s. edges: %d.\n", i, fcall->opcode, cfm.routine_name, fqn->unit.path,
                  op->lineno, fqn->function.callee_hash, cfm.dataset == NULL ? "missing" : "found",
                  cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.app, cfm.dataset, i));

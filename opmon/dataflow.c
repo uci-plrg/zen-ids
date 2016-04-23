@@ -247,8 +247,6 @@ void dump_fcall_opcode(application_t *app, zend_op_array *ops, zend_op *op,
 {
   FILE *oplog = ((cfg_files_t *) app->cfg_files)->opcode_log;
 
-  SPOT("Attempting to dump opcode 0x%x to file 0x%llx\n", op->opcode, (uint64) oplog);
-
   dump_opcode_header(oplog, op - ops->opcodes, op);
   if (uses_return_value(op)) {
     log_operand(oplog, 'r', ops, &op->result, op->result_type);

@@ -3,6 +3,7 @@
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_hashtable.h"
+#include "event_handler.h"
 #include "metadata_handler.h"
 #include "dataset.h"
 #include "dataflow.h"
@@ -33,6 +34,7 @@ typedef struct _stack_frame_t {
     uint throw_index;
   };
   control_flow_metadata_t cfm;
+  const char *last_builtin_name;
 } stack_frame_t;
 
 typedef stack_frame_t exception_frame_t;
@@ -56,12 +58,14 @@ typedef struct _stack_event_t {
   const char *return_target_name;
 } stack_event_t;
 
+/*
 typedef struct _executing_builtin_t {
   bool active;
   const char *name;
   zend_op_array *op_array;
   zend_op *call_op;
 } executing_builtin_t;
+*/
 
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
 static exception_frame_t *exception_frame;
@@ -84,7 +88,7 @@ static pthread_t first_thread_id;
 
 static zend_op entry_op;
 
-static executing_builtin_t executing_builtin = { false, 0 };
+// static executing_builtin_t executing_builtin = { false, 0 };
 
 #define CONTEXT_ENTRY 0xffffffffU
 
@@ -597,12 +601,12 @@ static void plog_system_output_taint(const char *category, zend_execute_data *ex
   uint i;
   taint_variable_t *taint;
 
-  plog_call(cur_frame.cfm.app, category, executing_builtin.name, stack_frame, op, arg_count, args);
+  plog_call(cur_frame.cfm.app, category, cur_frame.last_builtin_name, stack_frame, op, arg_count, args);
   for (i = 0; i < arg_count; i++) {
     taint = taint_var_get_arg(execute_data, args[i]);
     if (taint != NULL) {
       plog(cur_frame.cfm.app, "<taint> %s in %s(#%d): %04d(L%04d)%s\n",
-           category, executing_builtin.name, i,
+           category, cur_frame.last_builtin_name, i,
            OP_INDEX(stack_frame, op), op->lineno, site_relative_path(cur_frame.cfm.app, stack_frame));
     }
   }
@@ -615,45 +619,16 @@ static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
   uint arg_count;
 
   inflate_call(execute_data, op_array, op, args, &arg_count);
-  if (is_file_sink_function(executing_builtin.name))
+  if (is_file_sink_function(cur_frame.last_builtin_name))
     plog_system_output_taint("<file-output>", execute_data, op_array, op, args, arg_count);
-  else if (is_file_source_function(executing_builtin.name))
-    plog_call(cur_frame.cfm.app, "<file-input>", executing_builtin.name, op_array, op, arg_count, args);
-  else if (is_db_sink_function("mysqli_", executing_builtin.name))
+  else if (is_file_source_function(cur_frame.last_builtin_name))
+    plog_call(cur_frame.cfm.app, "<file-input>", cur_frame.last_builtin_name, op_array, op, arg_count, args);
+  else if (is_db_sink_function("mysqli_", cur_frame.last_builtin_name))
     plog_system_output_taint("<db-output>", execute_data, op_array, op, args, arg_count);
-  else if (is_db_source_function("mysqli_", executing_builtin.name))
-    plog_call(cur_frame.cfm.app, "<db-input>", executing_builtin.name, op_array, op, arg_count, args);
+  else if (is_db_source_function("mysqli_", cur_frame.last_builtin_name))
+    plog_call(cur_frame.cfm.app, "<db-input>", cur_frame.last_builtin_name, op_array, op, arg_count, args);
 
-  /*
-  if (strcmp(executing_builtin.name, "mysqli_query") == 0) {
-    const char *query = operand_strdup(execute_data, &args[0]->op1, args[0]->op1_type);
-    site_modification_t *mod = REQUEST_NEW(site_modification_t);
-
-    // actually lookup corresponding site modifications
-    mod->type = SITE_MOD_DB;
-    mod->db_query = query;
-
-    if (mod != NULL) {
-      const zval *value = get_zval(execute_data, &op->result, op->result_type);
-      if (value != NULL) {
-        taint_variable_t *var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
-                                                      op, TAINT_TYPE_SITE_MOD, mod);
-        plog(cur_frame.cfm.app, "<taint> create request input at %04d(L%04d)%s\n",
-             OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
-        taint_var_add(cur_frame.cfm.app, value, var);
-        plog_db_mod_result(cur_frame.cfm.app, mod, op);
-      }
-    }
-  } else if (strcmp(executing_builtin.name, "mysqli_fetch_object") == 0 || // WP only uses this fetch
-             strcmp(executing_builtin.name, "mysqli_fetch_row") == 0) {
-    SPOT("executing mysqli_fetch_object/row()\n");
-    // find the $result arg (may be `this`)
-    // lookup pending queries in hashtable (taint table?)
-    // taint the object fields
-  }
-  */
-
-  executing_builtin.active = false;
+  cur_frame.last_builtin_name = NULL;
 }
 
 void opcode_executing(const zend_op *op)
@@ -661,11 +636,6 @@ void opcode_executing(const zend_op *op)
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
   bool stack_pointer_moved, caught_exception = false;
-  request_input_type_t input_type;
-
-  if (executing_builtin.active &&
-      (op_array != executing_builtin.op_array || (op - 1) != executing_builtin.call_op))
-    ERROR("Executing user code during builtin!\n");
 
   update_user_session();
 
@@ -695,10 +665,10 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
-  SPOT("@ %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, op), op->lineno,
-       site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
+  PRINT("@ %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, op), op->lineno,
+        site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
 
-  if (cur_frame.op_index > 0) {
+  if (is_taint_analysis_enabled() && cur_frame.op_index > 0) {
     bool is_loopback = (prev_frame.opcodes == op_array->opcodes && prev_frame.op_index > cur_frame.op_index);
     zend_op *previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
 
@@ -708,7 +678,7 @@ void opcode_executing(const zend_op *op)
     if (!is_loopback && IS_FIRST_AFTER_ARGS(op))
       taint_propagate_into_arg_receivers(cur_frame.cfm.app, execute_data, op_array, (zend_op *) op);
 
-    if (!is_loopback && executing_builtin.active && previous_op->opcode == ZEND_DO_FCALL) {
+    if (!is_loopback && cur_frame.last_builtin_name != NULL && previous_op->opcode == ZEND_DO_FCALL) {
       post_propagate_builtin(op_array,  previous_op);
     } else {
       zend_op *last_executed_op;
@@ -719,8 +689,8 @@ void opcode_executing(const zend_op *op)
         last_executed_op = previous_op;
       }
 
-      SPOT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, last_executed_op), last_executed_op->lineno,
-           site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
+      PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, last_executed_op), last_executed_op->lineno,
+            site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
 
       propagate_taint(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
     }
@@ -731,32 +701,31 @@ void opcode_executing(const zend_op *op)
           cur_frame.cfm.routine_name, current_session.user_level);
   }
 
-  input_type = get_request_input_type(op); // TODO: combine in following switch
-  if (input_type != REQUEST_INPUT_TYPE_NONE) {
-    const zval *value = get_zval(execute_data, &op->result, op->result_type);
-    if (value != NULL) {
-      request_input_t *input = REQUEST_NEW(request_input_t);
-      taint_variable_t *taint_var;
+  if (is_taint_analysis_enabled()) {
+    request_input_type_t input_type = get_request_input_type(op); // TODO: combine in following switch
+    if (input_type != REQUEST_INPUT_TYPE_NONE) {
+      const zval *value = get_zval(execute_data, &op->result, op->result_type);
+      if (value != NULL) {
+        request_input_t *input = REQUEST_NEW(request_input_t);
+        taint_variable_t *taint_var;
 
-      input->type = input_type;
-      input->value = NULL;
+        input->type = input_type;
+        input->value = NULL;
 
-      taint_var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
-                                        op, TAINT_TYPE_REQUEST_INPUT, input);
-      plog(cur_frame.cfm.app, "<taint> create request input at %04d(L%04d)%s\n",
-           OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
-      taint_var_add(cur_frame.cfm.app, value, taint_var);
+        taint_var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
+                                          op, TAINT_TYPE_REQUEST_INPUT, input);
+        plog(cur_frame.cfm.app, "<taint> create request input at %04d(L%04d)%s\n",
+             OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+        taint_var_add(cur_frame.cfm.app, value, taint_var);
+      }
     }
   }
 
   switch (op->opcode) {
     case ZEND_DO_FCALL:
       if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
-        executing_builtin.active = true;
-        executing_builtin.name = EX(call)->func->common.function_name->val;
-        executing_builtin.op_array = op_array;
-        executing_builtin.call_op = (zend_op *) op;
-      } else {
+        cur_frame.last_builtin_name = EX(call)->func->common.function_name->val;
+      } else if (is_taint_analysis_enabled()) {
         zend_op *args[0x10];
         uint arg_count;
 
@@ -928,22 +897,24 @@ void opcode_executing(const zend_op *op)
 
 void db_site_modification(const zval *value, const char *table_name, const char *column_name)
 {
-  taint_variable_t *var;
-  zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
-  zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
-  site_modification_t *mod = REQUEST_NEW(site_modification_t);
+  if (is_taint_analysis_enabled()) {
+    taint_variable_t *var;
+    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
+    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+    site_modification_t *mod = REQUEST_NEW(site_modification_t);
 
-  mod->type = SITE_MOD_DB;
-  mod->db_table = table_name;
-  mod->db_column = column_name;
+    mod->type = SITE_MOD_DB;
+    mod->db_table = table_name;
+    mod->db_column = column_name;
 
-  var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
-                              op, TAINT_TYPE_SITE_MOD, mod);
+    var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
+                                op, TAINT_TYPE_SITE_MOD, mod);
 
-  plog(cur_frame.cfm.app, "<taint> create site mod at %04d(L%04d)%s\n",
-       cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
-  taint_var_add(cur_frame.cfm.app, value, var);
-  // plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
+    plog(cur_frame.cfm.app, "<taint> create site mod at %04d(L%04d)%s\n",
+         cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+    taint_var_add(cur_frame.cfm.app, value, var);
+    // plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
+  }
 }
 
 user_level_t get_current_user_level()

@@ -14,6 +14,7 @@
 #define MAX_STACK_FRAME 256
 #define ENV_STATIC_ANALYSIS "OPMON_STATIC_ANALYSIS"
 #define ENV_OPCODE_DUMP "OPMON_OPCODE_DUMP"
+#define ENV_TAINT_ANALYSIS "OPMON_TAINT_ANALYSIS"
 
 #define CHECK_FUNCTION_NAME_LENGTH(len) \
 do { \
@@ -29,6 +30,7 @@ typedef enum _opmon_run_type {
 
 static const char *static_analysis = NULL;
 static bool opcode_dump_enabled = false;
+static bool taint_analysis_enabled = false;
 static opmon_run_type run_type = OPMON_RUN_EXECUTION;
 static void init_top_level_script(const char *script_path)
 {
@@ -81,6 +83,11 @@ bool is_opcode_dump_enabled()
   return opcode_dump_enabled;
 }
 
+bool is_taint_analysis_enabled()
+{
+  return taint_analysis_enabled;
+}
+
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   // scarray_unit_test();
@@ -91,6 +98,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     run_type = OPMON_RUN_STATIC_ANALYSIS;
 
   opcode_dump_enabled = (getenv(ENV_OPCODE_DUMP) != NULL);
+  taint_analysis_enabled = (getenv(ENV_TAINT_ANALYSIS) != NULL);
 
   init_utils();
   init_compile_context();

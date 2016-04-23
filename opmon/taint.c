@@ -306,12 +306,10 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
 
     if (Z_TYPE_P(key) == IS_LONG) {
       zend_ulong key_long = Z_LVAL_P(key);
-      //SEPARATE_ARRAY(map);
       dst = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
       propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
-    } else if (Z_TYPE_P(key) == IS_STRING) {
+    } else if (false && Z_TYPE_P(key) == IS_STRING) {
       zend_string *key_string = Z_STR_P(key);
-      //SEPARATE_ARRAY(map);
       dst = zend_hash_find(Z_ARRVAL_P(map), key_string);
       propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
     }
@@ -639,25 +637,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       taint_var_remove(value);
     } break;
   }
-
-  /*
-  if (op < &stack_frame->opcodes[stack_frame->last]) {
-    switch ((op+1)->opcode) {
-      case ZEND_RETURN:
-      case ZEND_RETURN_REF: {
-        zend_op *return_op = (op+1);
-        const zval *return_value = get_operand_zval(execute_data, return_op, TAINT_OPERAND_1);
-        if (return_value != NULL) {
-          pending_return_taint = taint_var_get(return_value);
-          if (pending_return_taint != NULL) {
-            plog(app, "<taint> return 1 of %04d(L%04d)%s\n",
-                 OP_INDEX(stack_frame, return_op), return_op->lineno, site_relative_path(app, stack_frame));
-          }
-        }
-      }
-    }
-  }
-  */
 
   {
     taint_variable_t *taint_var;
