@@ -517,7 +517,10 @@ void function_compiled(zend_op_array *op_array)
           else
             classname = "<class-instance>";
 
-          sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+          if (op->op2_type == IS_CONST)
+            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+          else
+            sprintf(routine_name, "%s:<var>", classname);
           to_routine_hash = hash_routine(routine_name);
           push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
         } break;

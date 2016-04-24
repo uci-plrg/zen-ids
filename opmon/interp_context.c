@@ -928,9 +928,9 @@ void internal_dataflow(const zval *src, const char *src_name, const zval *dst, c
     return;
 
   propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
-                        &cur_frame.execute_data->func->op_array,
-                        &cur_frame.opcodes[cur_frame.op_index], true,
-                        src, src_name, dst, dst_name);
+                       &cur_frame.execute_data->func->op_array,
+                       &cur_frame.opcodes[cur_frame.op_index], true,
+                       src, src_name, dst, dst_name);
 }
 
 user_level_t get_current_user_level()

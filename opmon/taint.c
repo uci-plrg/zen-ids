@@ -185,6 +185,10 @@ bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
   }
 
   if (taint_var == NULL) {
+    if (op->opcode == ZEND_ASSIGN_DIM || op->opcode == ZEND_ASSIGN_OBJ) {
+      plog(app, "<taint> no taint on %s src (0x%llx)\n",
+           zend_get_opcode_name(op->opcode), (uint64) src);
+    }
     return false;
   } else {
     plog(app, "<taint> write %s(0x%llx)->%s(0x%llx) at %04d(L%04d)%s\n",
@@ -477,7 +481,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op)
 {
   uint mapping_flags = 0;
-  bool skip_arrays = true;
+  // bool skip_arrays = true;
 
   // if (true) return;
 
@@ -580,8 +584,10 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_DIM:
+      plog(app, "ZEND_ASSIGN_DIM: %04d(L%04d)%s\n", OP_INDEX(stack_frame, op), op->lineno,
+           site_relative_path(app, stack_frame));
       // if (!skip_arrays) /* fail here */
-        propagate_taint_into_array(app, execute_data, stack_frame, op, MAPPING_BY_REF);
+        // propagate_taint_into_array(app, execute_data, stack_frame, op, MAPPING_BY_REF);
       break;
     case ZEND_FETCH_OBJ_W:
     case ZEND_FETCH_OBJ_RW:
@@ -597,8 +603,10 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_OBJ:
-      if (!skip_arrays) /* fail here */
-        propagate_taint_into_object(app, execute_data, stack_frame, op, MAPPING_BY_REF | MAPPING_IS_OBJECT);
+      plog(app, "ZEND_ASSIGN_OBJ: %04d(L%04d)%s\n", OP_INDEX(stack_frame, op), op->lineno,
+           site_relative_path(app, stack_frame));
+      // if (!skip_arrays) /* fail here */
+      //  propagate_taint_into_object(app, execute_data, stack_frame, op, MAPPING_BY_REF | MAPPING_IS_OBJECT);
       break;
     case ZEND_FETCH_UNSET:
       // TODO: remove taint from map
