@@ -136,6 +136,11 @@ taint_variable_t *taint_var_remove(const zval *value);
 
 void taint_var_free(const zval *value);
 
+bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
+                          zend_op_array *stack_frame, zend_op *op, bool clobber,
+                          const zval *src, const char *src_name,
+                          const zval *dst, const char *dst_name);
+
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, zend_op *op);
 

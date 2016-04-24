@@ -167,7 +167,7 @@ static inline const zval *get_operand_zval(zend_execute_data *execute_data, cons
   return get_zval(execute_data, get_operand(op, index), get_operand_type(op, index));
 }
 
-static bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
+bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
                                  zend_op_array *stack_frame, zend_op *op, bool clobber,
                                  const zval *src, const char *src_name,
                                  const zval *dst, const char *dst_name)
@@ -303,6 +303,9 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
     } else {
       key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
     }
+
+    if ((Z_ARRVAL_P(map)->u.flags & HASH_MASK_CONSISTENCY) != 0)
+      SPOT("huh?\n");
 
     if (Z_TYPE_P(key) == IS_LONG) {
       zend_ulong key_long = Z_LVAL_P(key);

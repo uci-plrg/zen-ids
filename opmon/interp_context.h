@@ -13,6 +13,7 @@ void pop_interp_context();
 void opcode_executing(const zend_op *op);
 
 void db_site_modification(const zval *value, const char *table_name, const char *column_name);
+void internal_dataflow(const zval *src, const char *src_name, const zval *dst, const char *dst_name);
 user_level_t get_current_user_level();
 
 #endif
