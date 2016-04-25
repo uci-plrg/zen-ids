@@ -142,6 +142,8 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 
 #define ROUTINE_NAME_LENGTH 256
 
+#define TAINT_ALL false
+
 void init_utils();
 void destroy_utils();
 

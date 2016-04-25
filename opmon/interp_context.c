@@ -619,14 +619,16 @@ static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
   uint arg_count;
 
   inflate_call(execute_data, op_array, op, args, &arg_count);
-  if (is_file_sink_function(cur_frame.last_builtin_name))
-    plog_system_output_taint("<file-output>", execute_data, op_array, op, args, arg_count);
-  else if (is_file_source_function(cur_frame.last_builtin_name))
-    plog_call(cur_frame.cfm.app, "<file-input>", cur_frame.last_builtin_name, op_array, op, arg_count, args);
-  else if (is_db_sink_function("mysqli_", cur_frame.last_builtin_name))
-    plog_system_output_taint("<db-output>", execute_data, op_array, op, args, arg_count);
-  else if (is_db_source_function("mysqli_", cur_frame.last_builtin_name))
-    plog_call(cur_frame.cfm.app, "<db-input>", cur_frame.last_builtin_name, op_array, op, arg_count, args);
+  if (TAINT_ALL) {
+    if (is_file_sink_function(cur_frame.last_builtin_name))
+      plog_system_output_taint("<file-output>", execute_data, op_array, op, args, arg_count);
+    else if (is_file_source_function(cur_frame.last_builtin_name))
+      plog_call(cur_frame.cfm.app, "<file-input>", cur_frame.last_builtin_name, op_array, op, arg_count, args);
+    else if (is_db_sink_function("mysqli_", cur_frame.last_builtin_name))
+      plog_system_output_taint("<db-output>", execute_data, op_array, op, args, arg_count);
+    else if (is_db_source_function("mysqli_", cur_frame.last_builtin_name))
+      plog_call(cur_frame.cfm.app, "<db-input>", cur_frame.last_builtin_name, op_array, op, arg_count, args);
+  }
 
   cur_frame.last_builtin_name = NULL;
 }
@@ -703,7 +705,7 @@ void opcode_executing(const zend_op *op)
 
   if (is_taint_analysis_enabled()) {
     request_input_type_t input_type = get_request_input_type(op); // TODO: combine in following switch
-    if (input_type != REQUEST_INPUT_TYPE_NONE) {
+    if (input_type != REQUEST_INPUT_TYPE_NONE && TAINT_ALL) {
       const zval *value = get_zval(execute_data, &op->result, op->result_type);
       if (value != NULL) {
         request_input_t *input = REQUEST_NEW(request_input_t);
@@ -897,7 +899,7 @@ void opcode_executing(const zend_op *op)
 
 void db_site_modification(const zval *value, const char *table_name, const char *column_name)
 {
-  if (is_taint_analysis_enabled()) {
+  if (is_taint_analysis_enabled() && TAINT_ALL) {
     char *str;
     taint_variable_t *var;
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];

@@ -273,12 +273,14 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.callee_hash);
   }
 
+  /*
   if (is_opcode_dump_enabled()) {
     if (is_script_body)
       dump_script_header(cfm.app, routine_name, fqn->function.caller_hash);
     else
       dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.caller_hash);
   }
+  */
 
   if (fqn->function.caller_hash == 0x7a5637c6)
     SPOT("wait here \n");
