@@ -615,6 +615,8 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
       fwrite(&from_index, sizeof(uint), 1, cfg_files->request_edge);
     }
 
+    plog(app, "@ 0x%lx\n", request_state.r->request_time);
+
     write_request_entry(cfg_files);
 
     request_state.is_new_request = false;
@@ -900,14 +902,12 @@ void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op
 
 void plog_disassemble(application_t *app, zend_op_array *stack_frame)
 {
-  /*
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
   zend_op *op;
 
   fprintf(plog, "\t === %s()", stack_frame->function_name->val);
   for (op = stack_frame->opcodes; op < &stack_frame->opcodes[stack_frame->last]; op++)
     dump_opcode(app, stack_frame, op); // fprintf(plog, "\t%04d(L%04d) 0x%x %s%s()", stack_frame->function_name->val);
-  */
 }
 
 void plog(application_t *app, const char *message, ...)

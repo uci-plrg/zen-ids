@@ -308,9 +308,6 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
       key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
     }
 
-    if ((Z_ARRVAL_P(map)->u.flags & HASH_MASK_CONSISTENCY) != 0)
-      SPOT("huh?\n");
-
     if (Z_TYPE_P(key) == IS_LONG) {
       zend_ulong key_long = Z_LVAL_P(key);
       dst = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
@@ -924,8 +921,8 @@ void taint_var_free(const zval *value)
   if (taint_var == NULL) {
     PRINT("nothing to remove for 0x%llx\n", (uint64) value);
   } else {
-    SPOT("removed taint for %s:%d (0x%llx)\n", taint_var->tainted_at_file,
-         taint_var->tainted_at->lineno, (uint64) value);
+    PRINT("removed taint for %s:%d (0x%llx)\n", taint_var->tainted_at_file,
+          taint_var->tainted_at->lineno, (uint64) value);
   }
 }
 

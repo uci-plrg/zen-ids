@@ -249,7 +249,7 @@ static void lookup_cfm_by_name(zend_execute_data *execute_data, zend_op_array *o
 
   sprintf(routine_name, "%s:%s", classname, function_name);
 
-  SPOT("Lookup cfm by name %s\n", routine_name);
+  PRINT("Lookup cfm by name %s\n", routine_name);
 
   monitored_cfm = get_cfm_by_name(routine_name);
 
@@ -377,11 +377,6 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     new_prev_frame.opcode = prev_execute_data->opline->opcode;
     new_prev_frame.op_index = (prev_execute_data->opline - prev_op_array->opcodes);
     lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
-
-    if (new_prev_frame.cfm.cfg == NULL) {
-      SPOT("wait here\n");
-      lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
-    }
   }
 
   if (stack_event.state == STACK_STATE_RETURNED && (execute_data->opline - op_array->opcodes) > 0) {
@@ -404,8 +399,8 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
                compiled_target.type, new_prev_op->opcode);
         }
         if (IS_SAME_FRAME(new_prev_frame, *(stack_frame_t *) new_cur_frame.cfm.app->base_frame)) {
-          SPOT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
-               new_cur_frame.cfm.cfg->routine_hash);
+          PRINT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
+                new_cur_frame.cfm.cfg->routine_hash);
         }
       }
 
@@ -899,7 +894,7 @@ void opcode_executing(const zend_op *op)
 
 void db_site_modification(const zval *value, const char *table_name, const char *column_name)
 {
-  if (is_taint_analysis_enabled() && TAINT_ALL) {
+  if (is_taint_analysis_enabled()) { // && TAINT_ALL) {
     char *str;
     taint_variable_t *var;
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
@@ -917,7 +912,7 @@ void db_site_modification(const zval *value, const char *table_name, const char 
     var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
                                 op, TAINT_TYPE_SITE_MOD, mod);
 
-    plog(cur_frame.cfm.app, "<taint> create site mod at %04d(L%04d)%s\n",
+    plog(cur_frame.cfm.app, "<taint> db-fetch at %04d(L%04d)%s\n",
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
     taint_var_add(cur_frame.cfm.app, value, var);
     // plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
