@@ -168,9 +168,9 @@ static inline const zval *get_operand_zval(zend_execute_data *execute_data, cons
 }
 
 bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op, bool clobber,
-                                 const zval *src, const char *src_name,
-                                 const zval *dst, const char *dst_name)
+                          zend_op_array *stack_frame, zend_op *op, bool clobber,
+                          const zval *src, const char *src_name,
+                          const zval *dst, const char *dst_name)
 {
   taint_variable_t *taint_var = taint_var_get(src);
 
@@ -594,12 +594,12 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_FETCH_OBJ_R:
     case ZEND_FETCH_OBJ_IS:
       mapping_flags |= MAPPING_IS_OBJECT;
-      propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
+      if (false) propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_FETCH_OBJ_FUNC_ARG:
       if (ARG_SHOULD_BE_SENT_BY_REF(execute_data->call->func, op->extended_value & ZEND_FETCH_ARG_MASK))
         mapping_flags |= MAPPING_BY_REF;
-      propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
+      if (false) propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_OBJ:
       if (TAINT_ALL) {
@@ -817,7 +817,7 @@ taint_variable_t *create_taint_variable(const char *file_path, const zend_op *ta
 {
   taint_variable_t *var = REQUEST_NEW(taint_variable_t);
   // var->value = value;
-  var->tainted_at_file = strdup(file_path);
+  var->tainted_at_file = request_strdup(file_path);
   var->tainted_at = tainted_at;
   var->type = type;
   var->taint = taint;
@@ -895,6 +895,27 @@ void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *ta
 
   if (sctable_lookup(&taint_table, hash) == NULL)
     sctable_add(&taint_table, hash, taint);
+}
+
+void propagate_args_to_result(application_t *app, zend_execute_data *execute_data,
+                              zend_op *op, zend_op **args, uint arg_count,
+                              const char *builtin_name)
+{
+  zend_op_array *stack_frame = &execute_data->func->op_array;
+  taint_variable_t *arg_taint;
+  const zval *arg_value, *result = get_operand_zval(execute_data, op, TAINT_OPERAND_RESULT);
+  char arg_id[128];
+  uint i;
+
+  for (i = 0; i < arg_count; i++) {
+    arg_value = get_operand_zval(execute_data, args[i], TAINT_OPERAND_1);
+    arg_taint = taint_var_get(arg_value);
+    if (arg_taint != NULL) {
+      snprintf(arg_id, 128, "%s(#%d)", builtin_name, i);
+      propagate_zval_taint(app, execute_data, stack_frame, op, false,
+                           arg_value, arg_id, result, "result");
+    }
+  }
 }
 
 taint_variable_t *taint_var_get(const zval *value)

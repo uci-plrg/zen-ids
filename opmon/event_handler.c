@@ -112,7 +112,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
-  monitor->notify_dataflow = internal_dataflow;
+  monitor->dataflow.notify_dataflow = internal_dataflow;
   monitor->notify_zval_free = taint_var_free;
   monitor->notify_request = request_boundary;
   monitor->notify_site_modification_fetch = db_site_modification;

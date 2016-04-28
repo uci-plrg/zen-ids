@@ -71,6 +71,7 @@ typedef struct _site_modification_t {
     const char *db_table;
   };
   const char *db_column;
+  const char *db_value;
 } site_modification_t;
 
 typedef enum _request_input_type_t {
@@ -127,6 +128,10 @@ taint_variable_t *create_taint_variable(const char *file_path, const zend_op *ta
                                         taint_type_t type, void *taint);
 
 void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *taint);
+
+void propagate_args_to_result(application_t *app, zend_execute_data *execute_data,
+                              zend_op *op, zend_op **args, uint arg_count,
+                              const char *builtin_name);
 
 taint_variable_t *taint_var_get(const zval *value);
 

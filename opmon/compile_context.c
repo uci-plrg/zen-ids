@@ -275,9 +275,9 @@ void function_compiled(zend_op_array *op_array)
 
   if (is_opcode_dump_enabled()) {
     if (is_script_body)
-      dump_script_header(cfm.app, routine_name, fqn->function.caller_hash);
+      dump_script_header(cfm.app, routine_name, fqn->function.callee_hash);
     else
-      dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.caller_hash);
+      dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.callee_hash);
   }
 
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);

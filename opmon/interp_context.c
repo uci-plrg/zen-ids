@@ -614,6 +614,10 @@ static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
   uint arg_count;
 
   inflate_call(execute_data, op_array, op, args, &arg_count);
+
+  propagate_args_to_result(cur_frame.cfm.app, execute_data, op, args, arg_count,
+                           cur_frame.last_builtin_name);
+
   if (TAINT_ALL) {
     if (is_file_sink_function(cur_frame.last_builtin_name))
       plog_system_output_taint("<file-output>", execute_data, op_array, op, args, arg_count);
@@ -895,19 +899,19 @@ void opcode_executing(const zend_op *op)
 void db_site_modification(const zval *value, const char *table_name, const char *column_name)
 {
   if (is_taint_analysis_enabled()) { // && TAINT_ALL) {
-    char *str;
     taint_variable_t *var;
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
     site_modification_t *mod = REQUEST_NEW(site_modification_t);
 
     mod->type = SITE_MOD_DB;
-    str = REQUEST_ALLOC(strlen(table_name) + 1);
-    strcpy(str, table_name);
-    mod->db_table = str;
-    str = REQUEST_ALLOC(strlen(column_name) + 1);
-    strcpy(str, column_name);
-    mod->db_column = str;
+    mod->db_table = request_strdup(table_name);
+    mod->db_column = request_strdup(column_name);
+
+    if (Z_TYPE_P(value) == IS_STRING)
+      mod->db_value = request_strdup(Z_STRVAL_P(value));
+    else
+      mod->db_value = NULL;
 
     var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
                                 op, TAINT_TYPE_SITE_MOD, mod);

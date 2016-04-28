@@ -95,6 +95,8 @@ bool is_php_session_active()
   return PS(id) != NULL && IS_SESSION(PS(http_session_vars));
 }
 
+zend_dataflow_monitor_t *dataflow_monitor = NULL;
+
 zval *php_session_set_var(zend_string *key, zval *value)
 {
   zval *cell;
@@ -132,17 +134,24 @@ void set_opmon_user_level(long user_level)
   }
 }
 
+char *request_strdup(const char *src)
+{
+  char *dst = REQUEST_ALLOC(strlen(src) + 1);
+  strcpy(dst, src);
+  return dst;
+}
+
 const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type)
 {
   switch (type) {
     case IS_CONST:
       if (operand->zv->u1.v.type == IS_STRING)
-        return strdup(Z_STRVAL_P(operand->zv));
+        return request_strdup(Z_STRVAL_P(operand->zv));
       break;
     case IS_VAR:
     case IS_TMP_VAR:
     case IS_CV:
-      return strdup(Z_STRVAL_P(EX_VAR(operand->var)));
+      return request_strdup(Z_STRVAL_P(EX_VAR(operand->var)));
   }
 
   return NULL;
