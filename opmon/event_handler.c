@@ -88,6 +88,11 @@ bool is_taint_analysis_enabled()
   return taint_analysis_enabled;
 }
 
+static zend_bool zval_has_taint(const zval *value)
+{
+  return taint_var_get(value) != NULL;
+}
+
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   // scarray_unit_test();
@@ -110,6 +115,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     init_dataflow_analysis();
 
   monitor->set_top_level_script = init_top_level_script;
+  monitor->has_taint = zval_has_taint;
   monitor->notify_opcode_interp = opcode_executing;
   monitor->notify_function_compile_complete = function_compiled;
   monitor->dataflow.notify_dataflow = internal_dataflow;

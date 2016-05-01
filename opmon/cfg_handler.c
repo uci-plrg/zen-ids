@@ -623,6 +623,9 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     request_state.app = app;
   }
   if (is_new_in_process) {
+    if (from_routine_hash == 0x359e4465)
+      SPOT("hm?\n");
+
     fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
     fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->routine_edge);
     fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);

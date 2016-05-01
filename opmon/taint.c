@@ -942,8 +942,8 @@ void taint_var_free(const zval *value)
   if (taint_var == NULL) {
     PRINT("nothing to remove for 0x%llx\n", (uint64) value);
   } else {
-    PRINT("removed taint for %s:%d (0x%llx)\n", taint_var->tainted_at_file,
-          taint_var->tainted_at->lineno, (uint64) value);
+    SPOT("<taint> remove %s:%d (0x%llx)\n", taint_var->tainted_at_file,
+         taint_var->tainted_at->lineno, (uint64) value);
   }
 }
 

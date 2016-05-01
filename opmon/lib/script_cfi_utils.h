@@ -4,6 +4,7 @@
 #include "php.h"
 #include "../../php/ext/session/php_session.h"
 
+#define ALWAYS_LEVEL 0
 #define ERROR_LEVEL 1
 #define WARN_LEVEL 2
 #define MESSAGE_LEVEL 3
@@ -40,6 +41,12 @@ do { \
 #define PRINT(...) \
 do { \
   if (OPMON_G(verbose) >= MESSAGE_LEVEL) \
+    fprintf(stderr, "\t> "__VA_ARGS__); \
+} while (0)
+
+#define LOG_AT(level, ...) \
+do { \
+  if (OPMON_G(verbose) >= level) \
     fprintf(stderr, "\t> "__VA_ARGS__); \
 } while (0)
 
@@ -159,6 +166,7 @@ void set_opmon_user_level(long user_level);
 char *request_strdup(const char *src);
 const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
 const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
+const zval *get_arg_zval(zend_execute_data *execute_data, const zend_op *arg /* ZEND_SEND_* */);
 
 void tokenize_file(void);
 

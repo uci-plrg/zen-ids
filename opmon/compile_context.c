@@ -471,8 +471,10 @@ void function_compiled(zend_op_array *op_array)
           fcall_init_t *fcall = pop_fcall_init();
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER) {
             PRINT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
-            write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
-                               fcall->routine_hash, 0, USER_LEVEL_TOP);
+            if (is_static_analysis()) {
+              write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
+                                 fcall->routine_hash, 0, USER_LEVEL_TOP);
+            }
           } else if (fcall->routine_hash == 0 && fcall->opcode > 0) {
             PRINT("Unresolved routine edge at index %d (op 0x%x) in %s at %s:%d (0x%x). "
                  "Dataset: %s. edges: %d.\n", i, fcall->opcode, cfm.routine_name, fqn->unit.path,

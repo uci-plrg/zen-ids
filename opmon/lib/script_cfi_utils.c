@@ -171,6 +171,11 @@ const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, z
   }
 }
 
+const zval *get_arg_zval(zend_execute_data *execute_data, const zend_op *arg /* ZEND_SEND_* */)
+{
+  return get_zval(execute_data, &arg->op1, arg->op1_type);
+}
+
 void tokenize_file(void)
 {
 	zval token;

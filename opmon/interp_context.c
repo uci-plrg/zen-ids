@@ -88,6 +88,9 @@ static pthread_t first_thread_id;
 
 static zend_op entry_op;
 
+static zend_execute_data *trace_start_frame = NULL;
+static bool trace_all_opcodes = false;
+
 // static executing_builtin_t executing_builtin = { false, 0 };
 
 #define CONTEXT_ENTRY 0xffffffffU
@@ -415,6 +418,11 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     }
   }
 
+  if (trace_start_frame == execute_data) {
+    trace_start_frame = NULL;
+    trace_all_opcodes = false;
+  }
+
   cur_frame = new_cur_frame;
   prev_frame = new_prev_frame;
   return true;
@@ -666,8 +674,13 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(op);
 
-  PRINT("@ %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, op), op->lineno,
-        site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
+  if (trace_all_opcodes) {
+    plog(cur_frame.cfm.app, "\t@ %04d(L%04d)%s:%s\n", OP_INDEX(op_array, op), op->lineno,
+         site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
+  } else {
+    PRINT("\t@ %04d(L%04d)%s:%s\n", OP_INDEX(op_array, op), op->lineno,
+          site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
+  }
 
   if (is_taint_analysis_enabled() && cur_frame.op_index > 0) {
     bool is_loopback = (prev_frame.opcodes == op_array->opcodes && prev_frame.op_index > cur_frame.op_index);
@@ -723,20 +736,108 @@ void opcode_executing(const zend_op *op)
   }
 
   switch (op->opcode) {
-    case ZEND_DO_FCALL:
+    case ZEND_DO_FCALL: {
+      zend_op *args[0x10];
+      uint arg_count;
+      const char *callee_name = EX(call)->func->common.function_name->val;
+
+      /*
+      if (strcmp(callee_name, "get_option") == 0) {
+        trace_start_frame = execute_data;
+        trace_all_opcodes = true;
+        plog(cur_frame.cfm.app, "Calling get_option at %04d(L%04d)%s\n",
+             cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+      } else if (strcmp(callee_name, "set_permalink_structure") == 0) {
+        plog(cur_frame.cfm.app, "Calling set_permalink_structure at %04d(L%04d)%s\n",
+             cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+      }
+      */
+
+      if (strcmp(callee_name, "wp_load_alloptions") == 0) {
+        trace_start_frame = execute_data;
+        trace_all_opcodes = true;
+        plog(cur_frame.cfm.app, "Calling wp_load_alloptions at %04d(L%04d)%s\n",
+             cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+      }
+
+      inflate_call(execute_data, op_array, (zend_op *) op, args, &arg_count);
+
       if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
-        cur_frame.last_builtin_name = EX(call)->func->common.function_name->val;
+        cur_frame.last_builtin_name = callee_name;
       } else if (is_taint_analysis_enabled()) {
-        zend_op *args[0x10];
-        uint arg_count;
 
         stack_event.state = STACK_STATE_CALL;
         stack_event.last_opcode = op->opcode;
 
-        inflate_call(execute_data, op_array, (zend_op *) op, args, &arg_count);
-        taint_prepare_call(cur_frame.cfm.app, execute_data, args, arg_count); // TODO: pull the call after returning
+        taint_prepare_call(cur_frame.cfm.app, execute_data, args, arg_count);
       }
-      break;
+
+      if (trace_all_opcodes) {
+        uint i;
+        const zval *arg_value;
+
+        plog(cur_frame.cfm.app, "\tcall %s(", callee_name);
+        for (i = 0; i < arg_count; i++) {
+          arg_value = get_arg_zval(execute_data, args[i]);
+          switch (Z_TYPE_P(arg_value)) {
+            case IS_UNDEF:
+              plog(cur_frame.cfm.app, "?");
+              break;
+            case IS_NULL:
+              plog(cur_frame.cfm.app, "null");
+              break;
+            case IS_TRUE:
+              plog(cur_frame.cfm.app, "true");
+              break;
+            case IS_FALSE:
+              plog(cur_frame.cfm.app, "false");
+              break;
+            case IS_STRING:
+              plog(cur_frame.cfm.app, "%.20s", Z_STRVAL_P(arg_value));
+              break;
+            case IS_LONG:
+              plog(cur_frame.cfm.app, "%d", Z_LVAL_P(arg_value));
+              break;
+            case IS_DOUBLE:
+              plog(cur_frame.cfm.app, "%f", Z_DVAL_P(arg_value));
+              break;
+            case IS_ARRAY:
+              plog(cur_frame.cfm.app, "<arr>");
+              break;
+            case IS_OBJECT:
+              plog(cur_frame.cfm.app, "<obj>");
+              break;
+            case IS_RESOURCE:
+              plog(cur_frame.cfm.app, "<res>");
+              break;
+            case IS_REFERENCE:
+              plog(cur_frame.cfm.app, "<ref>");
+              break;
+            case IS_CONSTANT:
+              plog(cur_frame.cfm.app, "<const>");
+              break;
+            case IS_INDIRECT:
+              plog(cur_frame.cfm.app, "<ind>");
+              break;
+            default:
+              plog(cur_frame.cfm.app, "<%d>", Z_TYPE_P(arg_value));
+              break;
+          }
+          if (i < (arg_count - 1))
+            plog(cur_frame.cfm.app, ", ");
+        }
+        plog(cur_frame.cfm.app, ")\n");
+
+        plog(cur_frame.cfm.app, "\t     %s(", callee_name);
+        for (i = 0; i < arg_count; i++) {
+          arg_value = get_arg_zval(execute_data, args[i]);
+          plog(cur_frame.cfm.app, "0x%llx", (uint64) arg_value);
+          if (i < (arg_count - 1))
+            plog(cur_frame.cfm.app, ", ");
+        }
+        plog(cur_frame.cfm.app, ")\n");
+      }
+    } break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
         stack_event.state = STACK_STATE_CALL;
@@ -923,15 +1024,32 @@ void db_site_modification(const zval *value, const char *table_name, const char 
   }
 }
 
-void internal_dataflow(const zval *src, const char *src_name, const zval *dst, const char *dst_name)
+zend_bool internal_dataflow(const zval *src, const char *src_name, const zval *dst, const char *dst_name)
 {
   if (cur_frame.execute_data == NULL)
-    return;
+    return false;
 
-  propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
-                       &cur_frame.execute_data->func->op_array,
-                       &cur_frame.opcodes[cur_frame.op_index], true,
-                       src, src_name, dst, dst_name);
+  /*
+  if (cur_frame.opcodes[cur_frame.op_index].lineno == 2076 &&
+      strstr(cur_frame.execute_data->func->op_array.filename->val, "rewrite.php") != NULL) {
+    trace_all_opcodes = true;
+    plog(cur_frame.cfm.app, "before get_option('permalink_structure')\n");
+  } else if (cur_frame.opcodes[cur_frame.op_index].lineno == 2077 &&
+      strstr(cur_frame.execute_data->func->op_array.filename->val, "rewrite.php") != NULL) {
+    trace_all_opcodes = false;
+    plog(cur_frame.cfm.app, "after get_option('permalink_structure')\n");
+  }
+  */
+
+  if (cur_frame.opcodes[cur_frame.op_index].lineno == 2112 &&
+      strstr(cur_frame.execute_data->func->op_array.filename->val, "rewrite.php") != NULL) {
+    SPOT("hm?\n");
+  }
+
+  return propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
+                              &cur_frame.execute_data->func->op_array,
+                              &cur_frame.opcodes[cur_frame.op_index], true,
+                              src, src_name, dst, dst_name);
 }
 
 user_level_t get_current_user_level()
