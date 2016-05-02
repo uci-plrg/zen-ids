@@ -509,6 +509,8 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_IS_SMALLER_OR_EQUAL:
     case ZEND_CASE:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
+      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
+      break;
     case ZEND_TYPE_CHECK: /* FT */
     case ZEND_DEFINED:
     case ZEND_CAST:

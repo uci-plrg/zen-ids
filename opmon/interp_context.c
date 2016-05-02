@@ -594,7 +594,7 @@ static void inflate_call(zend_execute_data *execute_data,
           break;
       }
     }
-  } while ((--walk >= (zend_op *) &op_array[0]) && !done);
+  } while ((--walk >= op_array->opcodes) && !done);
 }
 
 static void plog_system_output_taint(const char *category, zend_execute_data *execute_data,
@@ -751,13 +751,18 @@ void opcode_executing(const zend_op *op)
         plog(cur_frame.cfm.app, "Calling set_permalink_structure at %04d(L%04d)%s\n",
              cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
       }
-      */
 
       if (strcmp(callee_name, "wp_load_alloptions") == 0) {
         trace_start_frame = execute_data;
         trace_all_opcodes = true;
         plog(cur_frame.cfm.app, "Calling wp_load_alloptions at %04d(L%04d)%s\n",
              cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+      }
+      */
+
+      if (strcmp(callee_name, "substr") == 0 && op->lineno == 2087 &&
+          strstr(cur_frame.execute_data->func->op_array.filename->val, "rewrite.php") != NULL) {
+        SPOT("Quoi?\n");
       }
 
       inflate_call(execute_data, op_array, (zend_op *) op, args, &arg_count);
@@ -1024,10 +1029,14 @@ void db_site_modification(const zval *value, const char *table_name, const char 
   }
 }
 
-zend_bool internal_dataflow(const zval *src, const char *src_name, const zval *dst, const char *dst_name)
+zend_bool internal_dataflow(const zval *src, const char *src_name,
+                            const zval *dst, const char *dst_name,
+                            zend_bool is_internal_transfer)
 {
+  zend_bool has_taint = false;
+
   if (cur_frame.execute_data == NULL)
-    return false;
+    return has_taint;
 
   /*
   if (cur_frame.opcodes[cur_frame.op_index].lineno == 2076 &&
@@ -1041,15 +1050,13 @@ zend_bool internal_dataflow(const zval *src, const char *src_name, const zval *d
   }
   */
 
-  if (cur_frame.opcodes[cur_frame.op_index].lineno == 2112 &&
-      strstr(cur_frame.execute_data->func->op_array.filename->val, "rewrite.php") != NULL) {
-    SPOT("hm?\n");
-  }
-
-  return propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
-                              &cur_frame.execute_data->func->op_array,
-                              &cur_frame.opcodes[cur_frame.op_index], true,
-                              src, src_name, dst, dst_name);
+  has_taint = propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
+                                   &cur_frame.execute_data->func->op_array,
+                                   &cur_frame.opcodes[cur_frame.op_index], true,
+                                   src, src_name, dst, dst_name);
+  if (has_taint && is_internal_transfer)
+    taint_var_remove(src);
+  return has_taint;
 }
 
 user_level_t get_current_user_level()
