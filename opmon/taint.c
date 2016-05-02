@@ -620,10 +620,13 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       // TODO: remove taint
       break;
     case ZEND_ISSET_ISEMPTY_VAR:
+      clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
+      break;
     case ZEND_ISSET_ISEMPTY_DIM_OBJ:
     case ZEND_ISSET_ISEMPTY_PROP_OBJ:
-      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
-      // clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
+      /* both merge because the value itself is propagated to the result internally */
+      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_KEY, TAINT_OPERAND_RESULT);
+      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
       break;
     /****************** calls *****************/
     case ZEND_DO_FCALL:

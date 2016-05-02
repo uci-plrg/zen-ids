@@ -12,7 +12,8 @@ void push_interp_context(zend_op* op_array, uint branch_index, control_flow_meta
 void pop_interp_context();
 void opcode_executing(const zend_op *op);
 
-void db_site_modification(const zval *value, const char *table_name, const char *column_name);
+void db_site_modification(uint32_t field_count, const char **table_names, const char **column_names,
+                          const zval **values);
 zend_bool internal_dataflow(const zval *src, const char *src_name,
                             const zval *dst, const char *dst_name,
                             zend_bool is_internal_transfer);
