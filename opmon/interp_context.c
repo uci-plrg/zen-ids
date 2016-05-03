@@ -158,6 +158,11 @@ void destroy_interp_app_context(application_t *app)
   PROCESS_FREE(app->base_frame);
 }
 
+void implicit_taint_clear()
+{
+  sctable_clear(&implicit_taint_table);
+}
+
 static void push_exception_frame()
 {
   INCREMENT_STACK(exception_stack, exception_frame);
@@ -485,15 +490,35 @@ static uint get_previous_executable_index(uint from_index)
   }
 }
 
-static bool is_fallthrough()
+static bool is_unconditional_fallthrough()
 {
   uint from_index;
   if (prev_frame.execute_data == NULL)
     return true;
 
+  if (cur_frame.op_index == 0)
+    return true;
+
+  switch (cur_frame.opcodes[cur_frame.op_index].opcode) {
+    case ZEND_SEND_VAL:
+    case ZEND_SEND_VAL_EX:
+    case ZEND_SEND_VAR:
+    case ZEND_SEND_VAR_NO_REF:
+    case ZEND_SEND_REF:
+    case ZEND_SEND_VAR_EX:
+    case ZEND_SEND_UNPACK:
+    case ZEND_SEND_ARRAY:
+    case ZEND_SEND_USER:
+      return true;
+  }
+
   switch (prev_frame.opcodes[prev_frame.op_index].opcode) {
     case ZEND_RETURN:
     case ZEND_JMP:
+    case ZEND_JMPZ:
+    case ZEND_JMPZNZ:
+    case ZEND_JMPZ_EX:
+    case ZEND_JMPNZ_EX:
     case ZEND_BRK:
     case ZEND_CONT:
       return false;
@@ -791,9 +816,6 @@ void opcode_executing(const zend_op *op)
   const zval *jump_predicate = NULL;
   bool stack_pointer_moved, caught_exception = false, opcode_verified = false;
 
-  if (execute_data->old_error_reporting != 0)
-    SPOT("not zero\n");
-
   update_user_session();
 
   op_execution_count++;
@@ -830,31 +852,40 @@ void opcode_executing(const zend_op *op)
           site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
   }
 
-  if (is_taint_analysis_enabled() && cur_frame.op_index > 0) {
-    bool is_loopback = (prev_frame.opcodes == op_array->opcodes && prev_frame.op_index > cur_frame.op_index);
-    zend_op *previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
+  if (is_taint_analysis_enabled()) {
+    zend_op *previous_op = NULL;
+    bool is_loopback = (prev_frame.opcodes == op_array->opcodes &&
+                        prev_frame.op_index > cur_frame.op_index);
 
-    if (stack_pointer_moved && previous_op->opcode == ZEND_DO_FCALL)
+    if (cur_frame.op_index > 0)
+      previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
+
+    if (stack_pointer_moved && previous_op != NULL && previous_op->opcode == ZEND_DO_FCALL)
       taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, previous_op);
 
-    if (!is_loopback && IS_FIRST_AFTER_ARGS(op))
+    if (!is_loopback && (previous_op == NULL || IS_FIRST_AFTER_ARGS(op)))
       taint_propagate_into_arg_receivers(cur_frame.cfm.app, execute_data, op_array, (zend_op *) op);
 
-    if (!is_loopback && cur_frame.last_builtin_name != NULL && previous_op->opcode == ZEND_DO_FCALL) {
+    if (!is_loopback && cur_frame.last_builtin_name != NULL && previous_op != NULL &&
+        previous_op->opcode == ZEND_DO_FCALL) {
       post_propagate_builtin(op_array,  previous_op);
     } else {
       zend_op *last_executed_op;
 
       if (prev_frame.opcodes == op_array->opcodes && !stack_pointer_moved) {
         last_executed_op = &prev_frame.opcodes[prev_frame.op_index];
-      } else  {
+      } else {
         last_executed_op = previous_op;
       }
 
-      PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, last_executed_op), last_executed_op->lineno,
-            site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
+      if (last_executed_op != NULL) {
+        PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, last_executed_op), last_executed_op->lineno,
+              site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
 
-      propagate_taint(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
+        propagate_taint(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
+      } else if (cur_frame.op_index > 0 || prev_frame.opcodes == op_array->opcodes) {
+        ERROR("Failed to identify the last executed op within a stack frame!\n");
+      }
     }
   }
 
@@ -988,7 +1019,7 @@ void opcode_executing(const zend_op *op)
     }
 
     // slightly weak for returns: not checking continuation pc
-    if (stack_event.state == STACK_STATE_RETURNED || is_fallthrough()) {
+    if (stack_event.state == STACK_STATE_RETURNED || is_unconditional_fallthrough()) {
       PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
             prev_frame.op_index, cur_frame.op_index,
             cur_frame.cfm.cfg->routine_hash);
@@ -1032,7 +1063,7 @@ void opcode_executing(const zend_op *op)
   }
 
   if (pending_implicit_taint.end_op != NULL) {
-    //if (!opcode_verified) { // or put the JZ fall-through in the CFG (change is_fallthrough())
+    //if (!opcode_verified) { // or put the JZ fall-through in the CFG (change is_unconditional_fallthrough())
     implicit_taint_t *implicit;
     if (op == pending_implicit_taint.end_op)
       pending_implicit_taint.end_op = find_spanning_block_tail(op, op_array);
@@ -1073,7 +1104,7 @@ void opcode_executing(const zend_op *op)
         case ZEND_SEND_UNPACK:
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
-        also returns
+        also returns?
         */
           lValue = get_zval(execute_data, &op->op1, op->op1_type);
           plog(cur_frame.cfm.app, "<taint> implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
@@ -1121,7 +1152,7 @@ void opcode_executing(const zend_op *op)
     }
   }
 
-  if (!opcode_verified) {
+  if (false && !opcode_verified) {
     plog(cur_frame.cfm.app, "<cfg> unverified opcode %04d(L%04d)%s\n",
          OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   }
@@ -1186,6 +1217,18 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
     }
   }
 }
+
+void db_query(const char *query)
+{
+  if (is_taint_analysis_enabled()) { // && TAINT_ALL) {
+    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
+    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+
+    plog(cur_frame.cfm.app, "<db> query {%s} at %04d(L%04d)%s\n", query,
+         cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+  }
+}
+
 
 zend_bool internal_dataflow(const zval *src, const char *src_name,
                             const zval *dst, const char *dst_name,

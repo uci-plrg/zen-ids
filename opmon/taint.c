@@ -268,6 +268,9 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
     case IS_STRING:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
       break;
+    case IS_NULL:
+    case IS_FALSE:
+      break; /* ignore */
     default:
       ERROR("<taint> Error propagating from %s: found an unknown array type %d at %04d(L%04d)%s\n",
             zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -947,8 +950,8 @@ void taint_var_free(const zval *value)
   if (taint_var == NULL) {
     PRINT("nothing to remove for 0x%llx\n", (uint64) value);
   } else {
-    SPOT("<taint> remove %s:%d (0x%llx)\n", taint_var->tainted_at_file,
-         taint_var->tainted_at->lineno, (uint64) value);
+    PRINT("<taint> remove %s:%d (0x%llx)\n", taint_var->tainted_at_file,
+          taint_var->tainted_at->lineno, (uint64) value);
   }
 }
 

@@ -121,7 +121,7 @@ do { \
 #define OP_INDEX(stack_frame, op) ((uint) ((op) - (zend_op *) (stack_frame)->opcodes))
 
 #define IS_ARG_RECEIVE(op) ((op)->opcode == ZEND_RECV || (op)->opcode == ZEND_RECV_INIT)
-#define IS_FIRST_AFTER_ARGS(op) (!IS_ARG_RECEIVE(op) && IS_ARG_RECEIVE(op-1))
+#define IS_FIRST_AFTER_ARGS(op) (!IS_ARG_RECEIVE(op) && IS_ARG_RECEIVE((op)-1))
 
 typedef enum _scalloc_lifespan_t {
   ALLOC_PROCESS,
