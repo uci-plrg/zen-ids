@@ -514,7 +514,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_TYPE_CHECK: /* FT */
     case ZEND_DEFINED:
     case ZEND_CAST:
-    case ZEND_QM_ASSIGN: /* ? */
+    case ZEND_QM_ASSIGN:
     case ZEND_STRLEN:
     case ZEND_FE_RESET:
     case ZEND_BOOL:

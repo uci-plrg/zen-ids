@@ -28,6 +28,7 @@
 typedef struct _implicit_taint_t {
   const zend_op *end_op;
   taint_variable_t *taint;
+  uint id;
 } implicit_taint_t;
 
 typedef struct _stack_frame_t {
@@ -89,6 +90,7 @@ static zend_execute_data *trace_start_frame = NULL;
 static bool trace_all_opcodes = false;
 
 static implicit_taint_t pending_implicit_taint = { NULL, NULL };
+static uint implicit_taint_id = 0;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
@@ -500,6 +502,17 @@ static bool is_fallthrough()
   return cur_frame.op_index == get_next_executable_index(from_index);
 }
 
+static bool is_return(zend_uchar opcode)
+{
+  switch(opcode) {
+    case ZEND_RETURN:
+    case ZEND_RETURN_BY_REF:
+    case ZEND_FAST_RET:
+      return true;
+  }
+  return false;
+}
+
 /*
 static bool is_lambda_call_init(const zend_op *op)
 {
@@ -743,6 +756,33 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
   }
 }
 
+static zend_op *find_spanning_block_tail(const zend_op *cur_op, zend_op_array *op_array)
+{
+  zend_op *top = op_array->opcodes, *walk = &op_array->opcodes[prev_frame.op_index - 1];
+
+  while (walk > top) {
+    switch (walk->opcode) {
+      case ZEND_JMPZ:
+      case ZEND_JMPZNZ:
+      case ZEND_JMPZ_EX:
+      case ZEND_JMPNZ_EX:
+        if (walk->op2.jmp_addr > cur_op)
+          return walk->op2.jmp_addr;
+    }
+    walk--;
+  }
+  return &op_array->opcodes[op_array->last - 1];
+}
+
+static void remove_implicit_taint()
+{
+  if (cur_frame.implicit_taint != NULL) {
+    sctable_remove(&implicit_taint_table, hash_addr(cur_frame.execute_data));
+    // REQUEST_FREE(cur_frame.implicit_taint);
+    cur_frame.implicit_taint = NULL;
+  }
+}
+
 void opcode_executing(const zend_op *op)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
@@ -843,20 +883,6 @@ void opcode_executing(const zend_op *op)
     }
   }
 
-  if (pending_implicit_taint.end_op != NULL) {
-    if (op != pending_implicit_taint.end_op) {
-      implicit_taint_t *implicit = REQUEST_NEW(implicit_taint_t);
-      *implicit = pending_implicit_taint;
-      sctable_add(&implicit_taint_table, hash_addr(execute_data), implicit);
-      cur_frame.implicit_taint = implicit;
-    }
-    pending_implicit_taint.end_op = NULL;
-  } else if (cur_frame.implicit_taint != NULL && op >= cur_frame.implicit_taint->end_op) {
-    sctable_remove(&implicit_taint_table, hash_addr(execute_data));
-    // REQUEST_FREE(cur_frame.implicit_taint);
-    cur_frame.implicit_taint = NULL;
-  }
-
   switch (op->opcode) {
     case ZEND_DO_FCALL:
       fcall_executing(execute_data, op_array, (zend_op *) op);
@@ -865,20 +891,6 @@ void opcode_executing(const zend_op *op)
       if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
         stack_event.state = STACK_STATE_CALL;
         stack_event.last_opcode = op->opcode;
-      }
-      break;
-    case ZEND_JMPZ:
-    case ZEND_JMPZNZ:
-      if (op->op2.jmp_addr > op) {
-        jump_target = op->op2.jmp_addr;
-        jump_predicate = get_zval(execute_data, &op->op1, op->op1_type);
-      }
-      break;
-    case ZEND_JMPZ_EX:
-    case ZEND_JMPNZ_EX:
-      if (op->op2.jmp_addr > op) {
-        jump_target = op->op2.jmp_addr;
-        jump_predicate = get_zval(execute_data, &op->result, op->result_type);
       }
       break;
     case ZEND_RETURN:
@@ -895,16 +907,15 @@ void opcode_executing(const zend_op *op)
       }
       PRINT("Preparing return at op %d of %s to %s\n", cur_frame.op_index, cur_frame.cfm.routine_name,
             stack_event.return_target_name);
-      if (cur_frame.implicit_taint != NULL) {
-        sctable_remove(&implicit_taint_table, hash_addr(execute_data));
-        // REQUEST_FREE(cur_frame.implicit_taint);
-        cur_frame.implicit_taint = NULL;
-      }
       stack_event.state = STACK_STATE_RETURNING;
+      if (cur_frame.implicit_taint != NULL)
+        remove_implicit_taint();
     } break;
     case ZEND_FAST_RET:
       //exception_frame->suspended = false;
       stack_event.state = STACK_STATE_UNWINDING;
+      if (cur_frame.implicit_taint != NULL)
+        remove_implicit_taint();
       break;
     case ZEND_CATCH:
       break;
@@ -912,14 +923,6 @@ void opcode_executing(const zend_op *op)
       if (stack_event.state == STACK_STATE_UNWINDING)
         stack_event.state = STACK_STATE_NONE;
       break;
-  }
-
-  if (jump_target != NULL && cur_frame.implicit_taint == NULL) {
-    taint_variable_t *taint = taint_var_get(jump_predicate);
-    if (taint != NULL) {
-      pending_implicit_taint.end_op = jump_target;
-      pending_implicit_taint.taint = taint;
-    }
   }
 
   if (op->opcode == ZEND_CATCH) {
@@ -1028,11 +1031,99 @@ void opcode_executing(const zend_op *op)
     }
   }
 
-  if (!opcode_verified && cur_frame.implicit_taint != NULL) {
-    plog(cur_frame.cfm.app, "<taint> +implicit on %04d(L%04d)%s until %04d(L%04d)\n",
-         OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array),
-         OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
-    plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
+  if (pending_implicit_taint.end_op != NULL) {
+    //if (!opcode_verified) { // or put the JZ fall-through in the CFG (change is_fallthrough())
+    implicit_taint_t *implicit;
+    if (op == pending_implicit_taint.end_op)
+      pending_implicit_taint.end_op = find_spanning_block_tail(op, op_array);
+
+    //if (!is_return(pending_implicit_taint.end_op->opcode)) {
+      implicit = REQUEST_NEW(implicit_taint_t);
+      *implicit = pending_implicit_taint;
+      implicit->id = implicit_taint_id++;
+      sctable_add(&implicit_taint_table, hash_addr(execute_data), implicit);
+      cur_frame.implicit_taint = implicit;
+
+      plog(cur_frame.cfm.app, "<taint> activating I%d from %04d(L%04d)-%04d(L%04d)%s\n",
+           cur_frame.implicit_taint->id,
+           OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, pending_implicit_taint.end_op),
+           pending_implicit_taint.end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+    //}
+
+    pending_implicit_taint.end_op = NULL;
+  } else if (cur_frame.implicit_taint != NULL) {
+    if (op < cur_frame.implicit_taint->end_op) {
+      const zval *lValue;
+
+      switch (op->opcode) {
+        case ZEND_ASSIGN_REF:
+          lValue = get_zval(execute_data, &op->result, op->result_type);
+          plog(cur_frame.cfm.app, "<taint> implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
+               zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
+               OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+          taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
+        case ZEND_ASSIGN: /* FT */
+        /*
+        case ZEND_SEND_VAL:
+        case ZEND_SEND_VAL_EX:
+        case ZEND_SEND_VAR:
+        case ZEND_SEND_VAR_NO_REF:
+        case ZEND_SEND_REF:
+        case ZEND_SEND_VAR_EX:
+        case ZEND_SEND_UNPACK:
+        case ZEND_SEND_ARRAY:
+        case ZEND_SEND_USER:
+        also returns
+        */
+          lValue = get_zval(execute_data, &op->op1, op->op1_type);
+          plog(cur_frame.cfm.app, "<taint> implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
+               zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
+               OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+          taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
+          opcode_verified = true;
+      }
+
+      /*
+      plog(cur_frame.cfm.app, "<taint> +implicit on %04d(L%04d)%s until %04d(L%04d)\n",
+           OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array),
+           OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
+      plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
+      */
+    } else {
+      remove_implicit_taint();
+    }
+  }
+
+  if (cur_frame.implicit_taint == NULL) {
+    switch (op->opcode) {
+      case ZEND_JMPZ:
+      case ZEND_JMPZNZ:
+        if (op->op2.jmp_addr > op) {
+          jump_target = op->op2.jmp_addr;
+          jump_predicate = get_zval(execute_data, &op->op1, op->op1_type);
+        }
+        break;
+      case ZEND_JMPZ_EX:
+      case ZEND_JMPNZ_EX:
+        if (op->op2.jmp_addr > op) {
+          jump_target = op->op2.jmp_addr;
+          jump_predicate = get_zval(execute_data, &op->result, op->result_type);
+        }
+        break;
+    }
+
+    if (jump_target != NULL && !is_return(jump_target->opcode)) {
+      taint_variable_t *taint = taint_var_get(jump_predicate);
+      if (taint != NULL) {
+        pending_implicit_taint.end_op = jump_target;
+        pending_implicit_taint.taint = taint;
+      }
+    }
+  }
+
+  if (!opcode_verified) {
+    plog(cur_frame.cfm.app, "<cfg> unverified opcode %04d(L%04d)%s\n",
+         OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   }
 
   /*
@@ -1053,6 +1144,7 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
   if (is_taint_analysis_enabled()) { // && TAINT_ALL) {
     uint i;
     taint_variable_t *var;
+    bool found_name = false;
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
     site_modification_t *mod;
@@ -1062,11 +1154,15 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
       return;
 
     for (i = 0; i < field_count; i++) {
-      if (strcmp(column_names[i], "option_name") == 0 &&
-          (strcmp(Z_STRVAL_P(values[i]), "permalink_structure") != 0 &&
-           strcmp(Z_STRVAL_P(values[i]), "rewrite_rules") != 0))
-        return;
+      if (strcmp(column_names[i], "option_name") == 0) {
+        if (strcmp(Z_STRVAL_P(values[i]), "permalink_structure") != 0 &&
+            strcmp(Z_STRVAL_P(values[i]), "rewrite_rules") != 0)
+          return;
+        found_name = true;
+      }
     }
+    if (!found_name)
+      return;
     /* hack filter */
 
     for (i = 0; i < field_count; i++) {
@@ -1112,12 +1208,25 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
   }
   */
 
-  has_taint = propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
-                                   &cur_frame.execute_data->func->op_array,
-                                   &cur_frame.opcodes[cur_frame.op_index], true,
-                                   src, src_name, dst, dst_name);
+  if (cur_frame.implicit_taint != NULL) {
+    zend_op_array *stack_frame = &cur_frame.execute_data->func->op_array;
+    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
+
+    plog(cur_frame.cfm.app, "<taint> implicit %s(I%d)->%s(0x%llx) at %04d(L%04d)%s\n",
+         src_name, cur_frame.implicit_taint->id, dst_name, (uint64) dst, cur_frame.op_index,
+         op->lineno, site_relative_path(cur_frame.cfm.app, stack_frame));
+    taint_var_add(cur_frame.cfm.app, dst, cur_frame.implicit_taint->taint);
+    has_taint = true;
+  } else {
+    has_taint = propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
+                                     &cur_frame.execute_data->func->op_array,
+                                     &cur_frame.opcodes[cur_frame.op_index], true,
+                                     src, src_name, dst, dst_name);
+  }
+
   if (has_taint && is_internal_transfer)
     taint_var_remove(src);
+
   return has_taint;
 }
 
