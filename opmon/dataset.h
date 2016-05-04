@@ -18,5 +18,6 @@ bool dataset_verify_opcode_edge(dataset_routine_t *dataset, uint from_index,
 bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *dataset, uint from_index,
                                  uint to_index, uint to_routine_hash, uint user_level);
 uint dataset_get_call_target_count(application_t *app, dataset_routine_t *dataset, uint from_index);
+uint dataset_routine_get_node_user_level(dataset_routine_t *dataset, uint index);
 
 #endif

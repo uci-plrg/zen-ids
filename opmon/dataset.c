@@ -40,12 +40,12 @@ typedef enum _dataset_node_type_t {
 typedef struct _dataset_node_t {
   zend_uchar opcode;
   zend_uchar type;
-  zend_uchar pad[2];
+  ushort line_number;
   union {
-    uint zero; // [normal node]
-    uint target_index; // [branch node]
-    uint call_targets; // dataset_call_targets_t * [call node] (relative to dataset top)
-    uint eval_targets; // dataset_eval_targets_t * [eval node] (relative to dataset top)
+    uint user_level;   // normal node: [user level | zero]
+    uint target_index; // branch node: [user level | branch target index]
+    uint call_targets; // call node:   dataset_call_targets_t * (relative to dataset top)
+    uint eval_targets; // eval node:   dataset_eval_targets_t * (relative to dataset top)
   };
 } dataset_node_t;
 
@@ -172,12 +172,12 @@ void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset,
                                           uint from_index, uint to_index)
 {
   dataset_node_t *node = &dataset->nodes[from_index];
-  if (to_index == (from_index + 1) || node->target_index == to_index ||
+  if (to_index == (from_index + 1) || MASK_TARGET_INDEX(node->target_index) == to_index ||
       is_fall_through(node->opcode, from_index, to_index)) {
     MON("Verified compiled edge from %d to %d\n", from_index, to_index);
   } else {
     MON("Opcode edge mismatch at index %d: expected target %d but found target %d\n",
-          from_index, node->target_index, to_index);
+          from_index, MASK_TARGET_INDEX(node->target_index), to_index);
   }
 }
 
@@ -208,7 +208,7 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
     dataset_app_t *dataset = (dataset_app_t *) app->dataset;
 
     if (node->type == DATASET_NODE_TYPE_CALL) {
-      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, node->call_targets,
+      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, MASK_TARGET_INDEX(node->call_targets),
                                                     dataset_call_targets_t);
       for (i = 0; i < targets->target_count; i++) {
         if (targets->targets[i].routine_hash == to_routine_hash &&
@@ -218,7 +218,7 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
       }
       return false; // for debug stopping
     } else if (node->type == DATASET_NODE_TYPE_EVAL) {
-      dataset_eval_targets_t *targets = RESOLVE_PTR(dataset, node->eval_targets,
+      dataset_eval_targets_t *targets = RESOLVE_PTR(dataset, MASK_TARGET_INDEX(node->eval_targets),
                                                     dataset_eval_targets_t);
       for (i = 0; i < targets->target_count; i++) {
         if (MASK_TARGET_INDEX(targets->targets[i].index) == to_index &&
@@ -237,10 +237,17 @@ uint dataset_get_call_target_count(application_t *app, dataset_routine_t *routin
     dataset_node_t *node = &routine->nodes[from_index];
     dataset_app_t *dataset = (dataset_app_t *) app->dataset;
     if (node->type == DATASET_NODE_TYPE_CALL) {
-      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, node->call_targets,
+      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, MASK_TARGET_INDEX(node->call_targets),
                                                     dataset_call_targets_t);
       return targets->target_count;
     }
   }
   return 0;
 }
+
+uint dataset_routine_get_node_user_level(dataset_routine_t *dataset, uint index)
+{
+  dataset_node_t *node = &dataset->nodes[index];
+  return MASK_USER_LEVEL(node->user_level);
+}
+

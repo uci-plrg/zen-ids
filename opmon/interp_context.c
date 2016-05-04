@@ -655,7 +655,7 @@ static void plog_system_output_taint(const char *category, zend_execute_data *ex
 static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
 {
   zend_execute_data *execute_data = cur_frame.execute_data;
-  zend_op *args[0x10];
+  zend_op *args[0x20];
   uint arg_count;
 
   inflate_call(execute_data, op_array, op, args, &arg_count);
@@ -679,7 +679,7 @@ static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
 
 static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_array, zend_op *op)
 {
-  zend_op *args[0x10];
+  zend_op *args[0x20];
   uint arg_count;
   const char *callee_name = EX(call)->func->common.function_name->val;
 
@@ -854,7 +854,7 @@ void opcode_executing(const zend_op *op)
 
   if (is_taint_analysis_enabled()) {
     zend_op *previous_op = NULL;
-    bool is_loopback = (prev_frame.opcodes == op_array->opcodes &&
+    bool is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) &&
                         prev_frame.op_index > cur_frame.op_index);
 
     if (cur_frame.op_index > 0)
@@ -1063,23 +1063,22 @@ void opcode_executing(const zend_op *op)
   }
 
   if (pending_implicit_taint.end_op != NULL) {
-    //if (!opcode_verified) { // or put the JZ fall-through in the CFG (change is_unconditional_fallthrough())
-    implicit_taint_t *implicit;
-    if (op == pending_implicit_taint.end_op)
-      pending_implicit_taint.end_op = find_spanning_block_tail(op, op_array);
+    if (dataset_routine_get_node_user_level(cur_frame.cfm.dataset,
+                                            cur_frame.op_index) > current_session.user_level) {
+      implicit_taint_t *implicit = REQUEST_NEW(implicit_taint_t);
 
-    //if (!is_return(pending_implicit_taint.end_op->opcode)) {
-      implicit = REQUEST_NEW(implicit_taint_t);
       *implicit = pending_implicit_taint;
+      if (op == pending_implicit_taint.end_op)
+        implicit->end_op = find_spanning_block_tail(op, op_array);
       implicit->id = implicit_taint_id++;
       sctable_add(&implicit_taint_table, hash_addr(execute_data), implicit);
       cur_frame.implicit_taint = implicit;
 
       plog(cur_frame.cfm.app, "<taint> activating I%d from %04d(L%04d)-%04d(L%04d)%s\n",
            cur_frame.implicit_taint->id,
-           OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, pending_implicit_taint.end_op),
-           pending_implicit_taint.end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
-    //}
+           OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, implicit->end_op),
+           implicit->end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+    }
 
     pending_implicit_taint.end_op = NULL;
   } else if (cur_frame.implicit_taint != NULL) {
@@ -1192,7 +1191,7 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
         found_name = true;
       }
     }
-    if (!found_name)
+    if (true || !found_name)
       return;
     /* hack filter */
 
