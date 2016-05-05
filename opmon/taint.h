@@ -130,7 +130,7 @@ taint_variable_t *create_taint_variable(const char *file_path, const zend_op *ta
 void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *taint);
 
 void propagate_args_to_result(application_t *app, zend_execute_data *execute_data,
-                              zend_op *op, zend_op **args, uint arg_count,
+                              const zend_op *op, const zend_op **args, uint arg_count,
                               const char *builtin_name);
 
 taint_variable_t *taint_var_get(const zval *value);
@@ -142,21 +142,21 @@ taint_variable_t *taint_var_remove(const zval *value);
 void taint_var_free(const zval *value);
 
 bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
-                          zend_op_array *stack_frame, zend_op *op, bool clobber,
+                          zend_op_array *stack_frame, const zend_op *op, bool clobber,
                           const zval *src, const char *src_name,
                           const zval *dst, const char *dst_name);
 
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
-                     zend_op_array *stack_frame, zend_op *op);
+                     zend_op_array *stack_frame, const zend_op *op);
 
 void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
-                        zend_op **args, uint arg_count);
+                        const zend_op **args, uint arg_count);
 
 void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *execute_data,
                                         zend_op_array *stack_frame, zend_op *op);
 
 void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
-                            zend_op_array *stack_frame, zend_op *call_op);
+                            zend_op_array *stack_frame, const zend_op *call_op);
 
 void taint_clear();
 #endif

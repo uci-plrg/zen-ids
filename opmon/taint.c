@@ -75,10 +75,10 @@ typedef union _taint_cache_slot_t {
    CACHED_PTR((slot).offset + 1))
 
 void propagate_taint_from_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op, uint flags);
+                                 zend_op_array *stack_frame, const zend_op *op, uint flags);
 
 void propagate_taint_into_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op, uint flags);
+                                 zend_op_array *stack_frame, const zend_op *op, uint flags);
 
 static inline const znode_op *get_operand(const zend_op *op, taint_operand_index_t index)
 {
@@ -108,7 +108,7 @@ static inline const zend_uchar get_operand_type(const zend_op *op, taint_operand
   }
 }
 
-static const char *get_operand_index_name(zend_op *op, taint_operand_index_t index)
+static const char *get_operand_index_name(const zend_op *op, taint_operand_index_t index)
 {
   switch (op->opcode) {
     case ZEND_FETCH_DIM_R:
@@ -168,7 +168,7 @@ static inline const zval *get_operand_zval(zend_execute_data *execute_data, cons
 }
 
 bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
-                          zend_op_array *stack_frame, zend_op *op, bool clobber,
+                          zend_op_array *stack_frame, const zend_op *op, bool clobber,
                           const zval *src, const char *src_name,
                           const zval *dst, const char *dst_name)
 {
@@ -200,7 +200,7 @@ bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
 }
 
 static void propagate_operand_taint(application_t *app, zend_execute_data *execute_data,
-                                    zend_op_array *stack_frame, zend_op *op, bool clobber,
+                                    zend_op_array *stack_frame, const zend_op *op, bool clobber,
                                     taint_operand_index_t src, taint_operand_index_t dst)
 {
   propagate_zval_taint(app, execute_data, stack_frame, op, clobber,
@@ -209,14 +209,14 @@ static void propagate_operand_taint(application_t *app, zend_execute_data *execu
 }
 
 static void clobber_operand_taint(application_t *app, zend_execute_data *execute_data,
-                                  zend_op_array *stack_frame, zend_op *op,
+                                  zend_op_array *stack_frame, const zend_op *op,
                                   taint_operand_index_t src, taint_operand_index_t dst)
 {
   propagate_operand_taint(app, execute_data, stack_frame, op, true, src, dst);
 }
 
 static void merge_operand_taint(application_t *app, zend_execute_data *execute_data,
-                                zend_op_array *stack_frame, zend_op *op,
+                                zend_op_array *stack_frame, const zend_op *op,
                                 taint_operand_index_t src, taint_operand_index_t dst)
 {
   propagate_operand_taint(app, execute_data, stack_frame, op, false, src, dst);
@@ -236,7 +236,7 @@ static bool is_derived_class(zend_class_entry *child_class, zend_class_entry *pa
 }
 
 void propagate_taint_from_array(application_t *app, zend_execute_data *execute_data,
-                                zend_op_array *stack_frame, zend_op *op, uint flags)
+                                zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
   zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
   zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
@@ -281,7 +281,7 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
 }
 
 void propagate_taint_into_array(application_t *app, zend_execute_data *execute_data,
-                                zend_op_array *stack_frame, zend_op *op, uint flags)
+                                zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
   zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
   const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
@@ -329,7 +329,7 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
 }
 
 void propagate_taint_from_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op, uint flags)
+                                 zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
   const zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *src, *dst;
@@ -405,7 +405,7 @@ void propagate_taint_from_object(application_t *app, zend_execute_data *execute_
 }
 
 void propagate_taint_into_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, zend_op *op, uint flags)
+                                 zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
   zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
@@ -478,7 +478,7 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
 }
 
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
-                     zend_op_array *stack_frame, zend_op *op)
+                     zend_op_array *stack_frame, const zend_op *op)
 {
   uint mapping_flags = 0;
   // bool skip_arrays = true;
@@ -700,7 +700,7 @@ static const char *disassembly[] = { "wp_get_nav_menu_items" };
 static uint disassembly_count = 1;
 
 void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
-                        zend_op **args, uint arg_count)
+                        const zend_op **args, uint arg_count)
 {
   const char *callee_name = EX(call)->func->common.function_name->val;
   zend_op_array *stack_frame = &EX(call)->func->op_array;
@@ -790,7 +790,7 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
 }
 
 void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
-                            zend_op_array *stack_frame, zend_op *call_op)
+                            zend_op_array *stack_frame, const zend_op *call_op)
 {
   if (pending_return_taint != NULL) {
     const zval *call_result = get_operand_zval(execute_data, call_op, TAINT_OPERAND_RESULT);
@@ -906,7 +906,7 @@ void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *ta
 }
 
 void propagate_args_to_result(application_t *app, zend_execute_data *execute_data,
-                              zend_op *op, zend_op **args, uint arg_count,
+                              const zend_op *op, const zend_op **args, uint arg_count,
                               const char *builtin_name)
 {
   zend_op_array *stack_frame = &execute_data->func->op_array;

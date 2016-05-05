@@ -26,9 +26,10 @@
 #define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
 
 typedef struct _implicit_taint_t {
+  uint id;
   const zend_op *end_op;
   taint_variable_t *taint;
-  uint id;
+  int last_applied_op_index;
 } implicit_taint_t;
 
 typedef struct _stack_frame_t {
@@ -89,8 +90,9 @@ static zend_op entry_op;
 static zend_execute_data *trace_start_frame = NULL;
 static bool trace_all_opcodes = false;
 
-static implicit_taint_t pending_implicit_taint = { NULL, NULL };
+static implicit_taint_t pending_implicit_taint = { 0, NULL, NULL, -1 };
 static uint implicit_taint_id = 0;
+static zend_execute_data *implicit_taint_call_chain_start_frame = NULL;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
@@ -169,12 +171,13 @@ static void push_exception_frame()
   *exception_frame = cur_frame;
 }
 
-static void generate_routine_edge(bool is_new_in_process, control_flow_metadata_t *from_cfm,
+static bool generate_routine_edge(bool is_new_in_process, control_flow_metadata_t *from_cfm,
                                   uint from_index, routine_cfg_t *to_cfg, uint to_index)
 {
-  if (is_new_in_process)
+  if (is_new_in_process) {
     cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index, to_cfg, to_index,
                          current_session.user_level);
+  }
 
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_index, to_index,
@@ -192,6 +195,8 @@ static void generate_routine_edge(bool is_new_in_process, control_flow_metadata_
   }
   write_routine_edge(is_new_in_process, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
                      to_cfg->routine_hash, to_index, current_session.user_level);
+
+  return is_new_in_process;
 }
 
 static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, uint to_index)
@@ -392,35 +397,37 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     PRINT("<0x%x> Routine return from %s to %s with opcodes at "PX"|"PX" and cfg "PX".\n",
           getpid(), cur_frame.cfm.routine_name, new_cur_frame.cfm.routine_name, p2int(execute_data),
           p2int(op_array->opcodes), p2int(cur_frame.cfm.cfg));
-  } else {
-    // TODO: skip builtins like `EX(call)->func->type == ZEND_INTERNAL_FUNCTION`
-    if (new_cur_frame.cfm.cfg != NULL) {
-      zend_op *new_prev_op = &new_prev_frame.opcodes[new_prev_frame.op_index];
-      compiled_edge_target_t compiled_target = get_compiled_edge_target(new_prev_op,
-                                                                        new_prev_frame.op_index);
-      bool is_new_in_process = !cfg_has_routine_edge(new_prev_frame.cfm.app->cfg,
-                                                     new_prev_frame.cfm.cfg,
-                                                     new_prev_frame.op_index,
-                                                     new_cur_frame.cfm.cfg, 0);
-      if (is_new_in_process) {
-        if (compiled_target.type != COMPILED_EDGE_CALL && new_prev_op->opcode != ZEND_NEW) {
-          WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n",
-               compiled_target.type, new_prev_op->opcode);
-        }
-        if (IS_SAME_FRAME(new_prev_frame, *(stack_frame_t *) new_cur_frame.cfm.app->base_frame)) {
-          PRINT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
-                new_cur_frame.cfm.cfg->routine_hash);
-        }
+  } else if (new_cur_frame.cfm.cfg != NULL) { // TODO: skip `EX(call)->func->type == ZEND_INTERNAL_FUNCTION`?
+    zend_op *new_prev_op = &new_prev_frame.opcodes[new_prev_frame.op_index];
+    compiled_edge_target_t compiled_target = get_compiled_edge_target(new_prev_op,
+                                                                      new_prev_frame.op_index);
+    bool is_new_in_process = !cfg_has_routine_edge(new_prev_frame.cfm.app->cfg,
+                                                   new_prev_frame.cfm.cfg,
+                                                   new_prev_frame.op_index,
+                                                   new_cur_frame.cfm.cfg, 0);
+    if (is_new_in_process) {
+      if (compiled_target.type != COMPILED_EDGE_CALL && new_prev_op->opcode != ZEND_NEW) {
+        WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n",
+             compiled_target.type, new_prev_op->opcode);
       }
+      if (IS_SAME_FRAME(new_prev_frame, *(stack_frame_t *) new_cur_frame.cfm.app->base_frame)) {
+        PRINT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
+              new_cur_frame.cfm.cfg->routine_hash);
+      }
+    }
 
-      generate_routine_edge(is_new_in_process, &new_prev_frame.cfm, new_prev_frame.op_index,
-                            new_cur_frame.cfm.cfg, 0); // op index 0 just means entry
+    is_new_in_process = generate_routine_edge(is_new_in_process, &new_prev_frame.cfm,
+                                              new_prev_frame.op_index, new_cur_frame.cfm.cfg,
+                                              0/*routine entry*/);
 
-      if (is_new_in_process) {
+     if (is_new_in_process && cur_frame.implicit_taint == NULL &&
+         implicit_taint_call_chain_start_frame == NULL) {
+       plog(cur_frame.cfm.app, "<cfg> call unverified: %04d(L%04d) %s -> %s\n",
+            new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
+            new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
         PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
-              getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
-              p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
-      }
+            getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
+            p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
     }
   }
 
@@ -522,7 +529,6 @@ static bool is_unconditional_fallthrough()
   return cur_frame.op_index == get_next_executable_index(from_index);
 }
 
-/*
 static bool is_return(zend_uchar opcode)
 {
   switch(opcode) {
@@ -534,6 +540,7 @@ static bool is_return(zend_uchar opcode)
   return false;
 }
 
+/*
 static bool is_lambda_call_init(const zend_op *op)
 {
   zend_op_array *op_array = &EG(current_execute_data)->func->op_array;
@@ -576,12 +583,12 @@ static request_input_type_t get_request_input_type(const zend_op *op)
 }
 
 static void inflate_call(zend_execute_data *execute_data,
-                         zend_op_array *op_array, zend_op *call_op,
-                         zend_op **args, uint *arg_count)
+                         zend_op_array *op_array, const zend_op *call_op,
+                         const zend_op **args, uint *arg_count)
 {
   bool done = false;
   uint init_count = 0;
-  zend_op *walk = (call_op - 1);
+  const zend_op *walk = (call_op - 1);
 
   *arg_count = 0;
 
@@ -630,8 +637,8 @@ static void inflate_call(zend_execute_data *execute_data,
 }
 
 static void plog_system_output_taint(const char *category, zend_execute_data *execute_data,
-                                     zend_op_array *stack_frame, zend_op *op,
-                                     zend_op **args, uint arg_count)
+                                     zend_op_array *stack_frame, const zend_op *op,
+                                     const zend_op **args, uint arg_count)
 {
   uint i;
   taint_variable_t *taint;
@@ -647,10 +654,10 @@ static void plog_system_output_taint(const char *category, zend_execute_data *ex
   }
 }
 
-static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
+static void post_propagate_builtin(zend_op_array *op_array, const zend_op *op)
 {
   zend_execute_data *execute_data = cur_frame.execute_data;
-  zend_op *args[0x20];
+  const zend_op *args[0x20];
   uint arg_count;
 
   inflate_call(execute_data, op_array, op, args, &arg_count);
@@ -672,9 +679,9 @@ static void post_propagate_builtin(zend_op_array *op_array, zend_op *op)
   cur_frame.last_builtin_name = NULL;
 }
 
-static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_array, zend_op *op)
+static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_array, const zend_op *op)
 {
-  zend_op *args[0x20];
+  const zend_op *args[0x20];
   uint arg_count;
   const char *callee_name = EX(call)->func->common.function_name->val;
 
@@ -697,7 +704,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
   }
   */
 
-  inflate_call(execute_data, op_array, (zend_op *) op, args, &arg_count);
+  inflate_call(execute_data, op_array, op, args, &arg_count);
 
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
     cur_frame.last_builtin_name = callee_name;
@@ -807,7 +814,7 @@ void opcode_executing(const zend_op *op)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
-  const zend_op *jump_target = NULL;
+  const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
   const zval *jump_predicate = NULL;
   bool stack_pointer_moved, caught_exception = false, opcode_verified = false, is_loopback;
   uint op_user_level = USER_LEVEL_TOP;
@@ -849,38 +856,37 @@ void opcode_executing(const zend_op *op)
   }
 
   is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) && prev_frame.op_index > cur_frame.op_index);
+  if (cur_frame.op_index > 0)
+    cur_frame_previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
+  if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved) {
+    last_executed_op = &prev_frame.opcodes[prev_frame.op_index];
+  } else {
+    last_executed_op = cur_frame_previous_op; /* assuming a call continuation */
+
+    if (last_executed_op == NULL && cur_frame.op_index > 0)
+      ERROR("Failed to identify the last executed op within a stack frame!\n");
+  }
 
   if (is_taint_analysis_enabled()) {
-    zend_op *previous_op = NULL;
+    if (stack_pointer_moved && last_executed_op != NULL && last_executed_op->opcode == ZEND_DO_FCALL) {
+      taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
 
-    if (cur_frame.op_index > 0)
-      previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
+      if (execute_data == implicit_taint_call_chain_start_frame)
+        implicit_taint_call_chain_start_frame = NULL;
+    }
 
-    if (stack_pointer_moved && previous_op != NULL && previous_op->opcode == ZEND_DO_FCALL)
-      taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, previous_op);
-
-    if (!is_loopback && (previous_op == NULL || IS_FIRST_AFTER_ARGS(op)))
+    if (!is_loopback && (cur_frame_previous_op == NULL || IS_FIRST_AFTER_ARGS(op)))
       taint_propagate_into_arg_receivers(cur_frame.cfm.app, execute_data, op_array, (zend_op *) op);
 
-    if (!is_loopback && cur_frame.last_builtin_name != NULL && previous_op != NULL &&
-        previous_op->opcode == ZEND_DO_FCALL) {
-      post_propagate_builtin(op_array,  previous_op);
-    } else {
-      zend_op *last_executed_op;
-
-      if (prev_frame.opcodes == op_array->opcodes && !stack_pointer_moved) {
-        last_executed_op = &prev_frame.opcodes[prev_frame.op_index];
+    if (last_executed_op != NULL) {
+      if (!is_loopback && cur_frame.last_builtin_name != NULL &&
+          last_executed_op->opcode == ZEND_DO_FCALL) {
+        post_propagate_builtin(op_array,  last_executed_op);
       } else {
-        last_executed_op = previous_op;
-      }
-
-      if (last_executed_op != NULL) {
         PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, last_executed_op), last_executed_op->lineno,
               site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
 
         propagate_taint(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
-      } else if (cur_frame.op_index > 0 || prev_frame.opcodes == op_array->opcodes) {
-        ERROR("Failed to identify the last executed op within a stack frame!\n");
       }
     }
   }
@@ -913,6 +919,8 @@ void opcode_executing(const zend_op *op)
   switch (op->opcode) {
     case ZEND_DO_FCALL:
       fcall_executing(execute_data, op_array, (zend_op *) op);
+      if (cur_frame.implicit_taint != NULL && implicit_taint_call_chain_start_frame == NULL)
+        implicit_taint_call_chain_start_frame = execute_data;
       break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
@@ -935,14 +943,10 @@ void opcode_executing(const zend_op *op)
       PRINT("Preparing return at op %d of %s to %s\n", cur_frame.op_index, cur_frame.cfm.routine_name,
             stack_event.return_target_name);
       stack_event.state = STACK_STATE_RETURNING;
-      if (cur_frame.implicit_taint != NULL)
-        remove_implicit_taint();
     } break;
     case ZEND_FAST_RET:
       //exception_frame->suspended = false;
       stack_event.state = STACK_STATE_UNWINDING;
-      if (cur_frame.implicit_taint != NULL)
-        remove_implicit_taint();
       break;
     case ZEND_CATCH:
       break;
@@ -1049,7 +1053,7 @@ void opcode_executing(const zend_op *op)
       }
       if (edge_found && !edge_changed) {
         PRINT("@ Verified opcode edge %u -> %u\n", prev_frame.op_index, cur_frame.op_index);
-        opcode_verified = true;
+        /* not marking `opcode_verified` because taint is required on every pass */
       } else { // slightly weak
         compiled_edge_target_t compiled_target;
         compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
@@ -1076,6 +1080,7 @@ void opcode_executing(const zend_op *op)
         implicit->end_op = find_spanning_block_tail(op, op_array);
       implicit->id = implicit_taint_id++;
       sctable_add(&implicit_taint_table, hash_addr(execute_data), implicit);
+      implicit->last_applied_op_index = -1;
       cur_frame.implicit_taint = implicit;
 
       plog(cur_frame.cfm.app, "<taint> activating I%d from %04d(L%04d)-%04d(L%04d)%s\n",
@@ -1116,6 +1121,7 @@ void opcode_executing(const zend_op *op)
                zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
                OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
           taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
+          cur_frame.implicit_taint->last_applied_op_index = cur_frame.op_index;
       }
 
       /*
@@ -1125,7 +1131,15 @@ void opcode_executing(const zend_op *op)
       plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
       */
       opcode_verified = true;
+
+      if (is_return(op->opcode))
+        remove_implicit_taint();
     } else {
+      if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
+          last_executed_op->opcode == ZEND_JMP &&
+          last_executed_op < cur_frame.implicit_taint->end_op) {
+        opcode_verified = true; /* extend to bottom of branch diamond */
+      }
       remove_implicit_taint();
     }
   }
@@ -1163,13 +1177,15 @@ void opcode_executing(const zend_op *op)
       if (taint != NULL) {
         pending_implicit_taint.end_op = jump_target;
         pending_implicit_taint.taint = taint;
+        pending_implicit_taint.last_applied_op_index = -1;
       }
     }
   }
 
   if (!opcode_verified) {
-    plog(cur_frame.cfm.app, "<cfg> unverified opcode %04d(L%04d)%s\n",
-         OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+    plog(cur_frame.cfm.app, "<cfg> opcode unverified %s %04d(L%04d)%s\n",
+         zend_get_opcode_name(op->opcode), OP_INDEX(op_array, op), op->lineno,
+         site_relative_path(cur_frame.cfm.app, op_array));
   }
 
   /*
@@ -1266,7 +1282,8 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
   }
   */
 
-  if (cur_frame.implicit_taint != NULL) {
+  if (cur_frame.implicit_taint != NULL && !is_internal_transfer &&
+      cur_frame.implicit_taint->last_applied_op_index != cur_frame.op_index) {
     zend_op_array *stack_frame = &cur_frame.execute_data->func->op_array;
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
 
@@ -1274,6 +1291,7 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
          src_name, cur_frame.implicit_taint->id, dst_name, (uint64) dst, cur_frame.op_index,
          op->lineno, site_relative_path(cur_frame.cfm.app, stack_frame));
     taint_var_add(cur_frame.cfm.app, dst, cur_frame.implicit_taint->taint);
+    cur_frame.implicit_taint->last_applied_op_index = cur_frame.op_index;
     has_taint = true;
   } else {
     has_taint = propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,

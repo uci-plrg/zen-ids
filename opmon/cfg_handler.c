@@ -796,8 +796,8 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
 }
 
 void plog_call(application_t *app, const char *tag, const char *callee_name,
-               zend_op_array *op_array, zend_op *call_op,
-               uint arg_count, zend_op **args)
+               zend_op_array *op_array, const zend_op *call_op,
+               uint arg_count, const zend_op **args)
 {
   uint i;
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
