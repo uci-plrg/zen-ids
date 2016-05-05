@@ -500,15 +500,9 @@ static bool is_unconditional_fallthrough()
     return true;
 
   switch (cur_frame.opcodes[cur_frame.op_index].opcode) {
-    case ZEND_SEND_VAL:
-    case ZEND_SEND_VAL_EX:
-    case ZEND_SEND_VAR:
-    case ZEND_SEND_VAR_NO_REF:
-    case ZEND_SEND_REF:
-    case ZEND_SEND_VAR_EX:
-    case ZEND_SEND_UNPACK:
-    case ZEND_SEND_ARRAY:
-    case ZEND_SEND_USER:
+    case ZEND_RECV:
+    case ZEND_RECV_INIT:
+    case ZEND_RECV_VARIADIC:
       return true;
   }
 
@@ -519,6 +513,7 @@ static bool is_unconditional_fallthrough()
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
+    case ZEND_FE_RESET:
     case ZEND_BRK:
     case ZEND_CONT:
       return false;
@@ -815,6 +810,7 @@ void opcode_executing(const zend_op *op)
   const zend_op *jump_target = NULL;
   const zval *jump_predicate = NULL;
   bool stack_pointer_moved, caught_exception = false, opcode_verified = false;
+  uint op_user_level = USER_LEVEL_TOP;
 
   update_user_session();
 
@@ -986,6 +982,7 @@ void opcode_executing(const zend_op *op)
       }
       DECREMENT_STACK(exception_stack, exception_frame);
       caught_exception = true;
+      // what to do with implicit taint here?
     } // else it was matching the Exception type (and missed)
   } else if (stack_event.state == STACK_STATE_UNWINDING) {
     WARN("Executing op %s while unwinding an exception!\n", zend_get_opcode_name(op->opcode));
@@ -1004,9 +1001,11 @@ void opcode_executing(const zend_op *op)
       return;
     }
 
-    PRINT("@ Executing %s at index %u of 0x%x\n",
+    op_user_level = dataset_routine_get_node_user_level(cur_frame.cfm.dataset, cur_frame.op_index);
+
+    PRINT("@ Executing %s at index %u of 0x%x (user level %d)\n",
           zend_get_opcode_name(cur_frame.opcode), cur_frame.op_index,
-          cur_frame.cfm.cfg->routine_hash);
+          cur_frame.cfm.cfg->routine_hash, op_user_level);
 
     expected_opcode = routine_cfg_get_opcode(cur_frame.cfm.cfg, cur_frame.op_index);
     if (cur_frame.opcode != expected_opcode->opcode &&
@@ -1016,15 +1015,21 @@ void opcode_executing(const zend_op *op)
             zend_get_opcode_name(expected_opcode->opcode), cur_frame.op_index,
             zend_get_opcode_name(cur_frame.opcode), p2int(execute_data),
             p2int(op_array->opcodes), cur_frame.cfm.cfg->routine_hash);
+      op_user_level = USER_LEVEL_TOP;
     }
 
     // slightly weak for returns: not checking continuation pc
-    if (stack_event.state == STACK_STATE_RETURNED || is_unconditional_fallthrough()) {
-      PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
-            prev_frame.op_index, cur_frame.op_index,
-            cur_frame.cfm.cfg->routine_hash);
+    if (stack_event.state == STACK_STATE_RETURNED || stack_pointer_moved ||
+        is_unconditional_fallthrough() || current_session.user_level >= op_user_level) {
+      if (is_unconditional_fallthrough()) {
+        PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
+              prev_frame.op_index, cur_frame.op_index,
+              cur_frame.cfm.cfg->routine_hash);
+      } else {
+        PRINT("@ Verified node %u in 0x%x\n", cur_frame.op_index, cur_frame.cfm.cfg->routine_hash);
+      }
       opcode_verified = true;
-    } else if (!caught_exception && !stack_pointer_moved) {
+    } else if (!caught_exception) {
       uint i;
       bool edge_found = false, edge_changed = false;
       zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
@@ -1063,8 +1068,7 @@ void opcode_executing(const zend_op *op)
   }
 
   if (pending_implicit_taint.end_op != NULL) {
-    if (dataset_routine_get_node_user_level(cur_frame.cfm.dataset,
-                                            cur_frame.op_index) > current_session.user_level) {
+    if (!opcode_verified) {
       implicit_taint_t *implicit = REQUEST_NEW(implicit_taint_t);
 
       *implicit = pending_implicit_taint;
@@ -1093,7 +1097,6 @@ void opcode_executing(const zend_op *op)
                OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
           taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
         case ZEND_ASSIGN: /* FT */
-        /*
         case ZEND_SEND_VAL:
         case ZEND_SEND_VAL_EX:
         case ZEND_SEND_VAR:
@@ -1103,6 +1106,7 @@ void opcode_executing(const zend_op *op)
         case ZEND_SEND_UNPACK:
         case ZEND_SEND_ARRAY:
         case ZEND_SEND_USER:
+        /*
         also returns?
         */
           lValue = get_zval(execute_data, &op->op1, op->op1_type);
@@ -1151,7 +1155,7 @@ void opcode_executing(const zend_op *op)
     }
   }
 
-  if (false && !opcode_verified) {
+  if (!opcode_verified) {
     plog(cur_frame.cfm.app, "<cfg> unverified opcode %04d(L%04d)%s\n",
          OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   }
@@ -1219,7 +1223,7 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
 
 void db_query(const char *query)
 {
-  if (is_taint_analysis_enabled()) { // && TAINT_ALL) {
+  if (is_taint_analysis_enabled() && current_session.user_level > 2) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
 
