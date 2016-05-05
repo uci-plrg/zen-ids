@@ -522,6 +522,7 @@ static bool is_unconditional_fallthrough()
   return cur_frame.op_index == get_next_executable_index(from_index);
 }
 
+/*
 static bool is_return(zend_uchar opcode)
 {
   switch(opcode) {
@@ -533,7 +534,6 @@ static bool is_return(zend_uchar opcode)
   return false;
 }
 
-/*
 static bool is_lambda_call_init(const zend_op *op)
 {
   zend_op_array *op_array = &EG(current_execute_data)->func->op_array;
@@ -809,7 +809,7 @@ void opcode_executing(const zend_op *op)
   zend_op_array *op_array = &execute_data->func->op_array;
   const zend_op *jump_target = NULL;
   const zval *jump_predicate = NULL;
-  bool stack_pointer_moved, caught_exception = false, opcode_verified = false;
+  bool stack_pointer_moved, caught_exception = false, opcode_verified = false, is_loopback;
   uint op_user_level = USER_LEVEL_TOP;
 
   update_user_session();
@@ -848,10 +848,10 @@ void opcode_executing(const zend_op *op)
           site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
   }
 
+  is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) && prev_frame.op_index > cur_frame.op_index);
+
   if (is_taint_analysis_enabled()) {
     zend_op *previous_op = NULL;
-    bool is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) &&
-                        prev_frame.op_index > cur_frame.op_index);
 
     if (cur_frame.op_index > 0)
       previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
@@ -1019,7 +1019,7 @@ void opcode_executing(const zend_op *op)
     }
 
     // slightly weak for returns: not checking continuation pc
-    if (stack_event.state == STACK_STATE_RETURNED || stack_pointer_moved ||
+    if (stack_event.state == STACK_STATE_RETURNED || stack_pointer_moved || is_loopback/*safe w/o goto*/ ||
         is_unconditional_fallthrough() || current_session.user_level >= op_user_level) {
       if (is_unconditional_fallthrough()) {
         PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
@@ -1082,6 +1082,8 @@ void opcode_executing(const zend_op *op)
            cur_frame.implicit_taint->id,
            OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, implicit->end_op),
            implicit->end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+
+      opcode_verified = true;
     }
 
     pending_implicit_taint.end_op = NULL;
@@ -1114,7 +1116,6 @@ void opcode_executing(const zend_op *op)
                zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
                OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
           taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
-          opcode_verified = true;
       }
 
       /*
@@ -1123,30 +1124,41 @@ void opcode_executing(const zend_op *op)
            OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
       plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
       */
+      opcode_verified = true;
     } else {
       remove_implicit_taint();
     }
   }
 
   if (cur_frame.implicit_taint == NULL) {
-    switch (op->opcode) {
-      case ZEND_JMPZ:
-      case ZEND_JMPZNZ:
-        if (op->op2.jmp_addr > op) {
-          jump_target = op->op2.jmp_addr;
-          jump_predicate = get_zval(execute_data, &op->op1, op->op1_type);
-        }
-        break;
-      case ZEND_JMPZ_EX:
-      case ZEND_JMPNZ_EX:
-        if (op->op2.jmp_addr > op) {
-          jump_target = op->op2.jmp_addr;
-          jump_predicate = get_zval(execute_data, &op->result, op->result_type);
-        }
-        break;
+    const zend_op *jump_op = op;
+
+    while (true) {
+      switch (jump_op->opcode) {
+        case ZEND_JMPZ:
+        case ZEND_JMPZNZ:
+          if (jump_op->op2.jmp_addr > jump_op) {
+            jump_target = jump_op->op2.jmp_addr;
+            if (jump_predicate == NULL)
+              jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
+          }
+          break;
+        case ZEND_JMPZ_EX:
+        case ZEND_JMPNZ_EX:
+          if (jump_op->op2.jmp_addr > jump_op) {
+            jump_op = jump_op->op2.jmp_addr;
+            if (jump_predicate == NULL)
+              jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
+            continue;
+            //jump_target = op->op2.jmp_addr;
+            //jump_predicate = get_zval(execute_data, &op->result, op->result_type);
+          }
+          break;
+      }
+      break;
     }
 
-    if (jump_target != NULL && !is_return(jump_target->opcode)) {
+    if (jump_target != NULL) {
       taint_variable_t *taint = taint_var_get(jump_predicate);
       if (taint != NULL) {
         pending_implicit_taint.end_op = jump_target;
@@ -1195,7 +1207,7 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
         found_name = true;
       }
     }
-    if (true || !found_name)
+    if (!found_name)
       return;
     /* hack filter */
 
