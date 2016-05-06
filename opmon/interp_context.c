@@ -1250,15 +1250,20 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
   }
 }
 
-void db_query(const char *query)
+/* returns true if admin is logged in */
+zend_bool db_query(const char *query)
 {
-  if (is_taint_analysis_enabled() && current_session.user_level > 2) { // && TAINT_ALL) {
+  zend_bool is_admin = current_session.user_level > 2;
+
+  if (is_taint_analysis_enabled() && is_admin) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
 
     plog(cur_frame.cfm.app, "<db> query {%s} at %04d(L%04d)%s\n", query,
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   }
+
+  return is_admin;
 }
 
 
