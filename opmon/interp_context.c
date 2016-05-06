@@ -1005,7 +1005,8 @@ void opcode_executing(const zend_op *op)
       return;
     }
 
-    op_user_level = dataset_routine_get_node_user_level(cur_frame.cfm.dataset, cur_frame.op_index);
+    if (cur_frame.cfm.dataset != NULL)
+      op_user_level = dataset_routine_get_node_user_level(cur_frame.cfm.dataset, cur_frame.op_index);
 
     PRINT("@ Executing %s at index %u of 0x%x (user level %d)\n",
           zend_get_opcode_name(cur_frame.opcode), cur_frame.op_index,
