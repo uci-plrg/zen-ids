@@ -6,18 +6,19 @@ DROP TABLE IF EXISTS opmon_evolution;
 DROP TABLE IF EXISTS opmon_evolution_staging;
 
 CREATE TABLE opmon_evolution (
+  id BIGINT(20) KEY AUTO_INCREMENT,
   table_name VARCHAR(24),
   column_name VARCHAR(24),
-  id BIGINT(20),
-  PRIMARY KEY (table_name, column_name, id)
+  table_key BIGINT(20),
+  UNIQUE KEY (table_name, column_name, table_key)
 );
 
 CREATE TABLE opmon_evolution_staging (
   table_name VARCHAR(24),
   column_name VARCHAR(24),
-  id BIGINT(20),
+  table_key BIGINT(20),
   connection_id INT,
-  PRIMARY KEY (table_name, column_name, id, connection_id)
+  PRIMARY KEY (table_name, column_name, table_key, connection_id)
 );
 
 
@@ -30,8 +31,8 @@ DELIMITER $$
 
 CREATE PROCEDURE opmon_evolution_commit()
 BEGIN
-  REPLACE INTO opmon_evolution (
-    SELECT table_name, column_name, id
+  REPLACE INTO opmon_evolution (table_name, column_name, table_key) (
+    SELECT table_name, column_name, table_key
     FROM opmon_evolution_staging
     WHERE connection_id = connection_id());
   CALL opmon_evolution_discard();

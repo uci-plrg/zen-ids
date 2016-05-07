@@ -25,6 +25,8 @@
 
 #define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
 
+#define PLOG_CFG false
+
 typedef struct _implicit_taint_t {
   uint id;
   const zend_op *end_op;
@@ -420,12 +422,15 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
                                               new_prev_frame.op_index, new_cur_frame.cfm.cfg,
                                               0/*routine entry*/);
 
-     if (is_new_in_process && cur_frame.implicit_taint == NULL &&
-         implicit_taint_call_chain_start_frame == NULL) {
-       plog(cur_frame.cfm.app, "<cfg> call unverified: %04d(L%04d) %s -> %s\n",
-            new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
-            new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
-        PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
+    if (is_new_in_process && cur_frame.implicit_taint == NULL &&
+        implicit_taint_call_chain_start_frame == NULL) {
+
+      if (PLOG_CFG) {
+        plog(cur_frame.cfm.app, "<cfg> call unverified: %04d(L%04d) %s -> %s\n",
+             new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
+             new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
+      }
+      PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
             getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
             p2int(execute_data), p2int(op_array->opcodes), p2int(new_cur_frame.cfm.cfg));
     }
@@ -1183,7 +1188,7 @@ void opcode_executing(const zend_op *op)
     }
   }
 
-  if (!opcode_verified) {
+  if (!opcode_verified && PLOG_CFG) {
     plog(cur_frame.cfm.app, "<cfg> opcode unverified %s %04d(L%04d)%s\n",
          zend_get_opcode_name(op->opcode), OP_INDEX(op_array, op), op->lineno,
          site_relative_path(cur_frame.cfm.app, op_array));
@@ -1201,8 +1206,21 @@ void opcode_executing(const zend_op *op)
   */
 }
 
-void db_site_modification(uint32_t field_count, const char **table_names, const char **column_names,
-                          const zval **values)
+void db_site_modification(const char *table_name, const char *column_name,
+                          unsigned long long table_key)
+{
+  if (is_taint_analysis_enabled()) {
+    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
+    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+
+    plog(cur_frame.cfm.app, "<db-mod> %s.%s[%lld] at %04d(L%04d)%s\n",
+         table_name, column_name, table_key,
+         cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+  }
+}
+
+void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
+              const zval **values)
 {
   if (is_taint_analysis_enabled()) { // && TAINT_ALL) {
     uint i;
@@ -1224,7 +1242,7 @@ void db_site_modification(uint32_t field_count, const char **table_names, const 
         found_name = true;
       }
     }
-    if (!found_name)
+    if (true || !found_name)
       return;
     /* hack filter */
 

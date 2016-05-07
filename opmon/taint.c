@@ -241,9 +241,13 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
   zval *map = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_MAP);
   zval *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *dst = get_operand_zval(execute_data, op, TAINT_OPERAND_RESULT);
-  zend_ulong key_long = Z_LVAL_P(key);
+  zend_ulong key_long;
   zval *src;
 
+  if (key == NULL)
+    return; // ignore--will handle this via internal callback
+
+  key_long = Z_LVAL_P(key);
   Z_UNWRAP_P(map);
   switch (Z_TYPE_P(map)) {
     case IS_ARRAY:

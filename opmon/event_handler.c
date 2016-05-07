@@ -121,8 +121,9 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_function_compile_complete = function_compiled;
   monitor->dataflow.notify_dataflow = internal_dataflow;
   monitor->notify_zval_free = taint_var_free;
-  monitor->notify_request = request_boundary;
-  monitor->notify_site_modification_fetch = db_site_modification;
+  monitor->notify_http_request = request_boundary;
+  monitor->notify_database_site_modification = db_site_modification;
+  monitor->notify_database_fetch = db_fetch;
   monitor->notify_database_query = db_query;
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;
