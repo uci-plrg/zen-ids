@@ -68,13 +68,19 @@ typedef struct _stack_event_t {
   const char *return_target_name;
 } stack_event_t;
 
+
+typedef struct _evo_taint_t {
+  const char *table_name;
+  const char *column_name;
+  unsigned long long table_key;
+} evo_taint_t;
+
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
 static exception_frame_t *exception_frame;
 
 static lambda_frame_t lambda_stack[MAX_STACK_FRAME_lambda_stack];
 static lambda_frame_t *lambda_frame;
 
-static sctable_t implicit_taint_table;
 static stack_frame_t void_frame;
 static stack_frame_t prev_frame;
 static stack_frame_t cur_frame;
@@ -92,9 +98,13 @@ static zend_op entry_op;
 static zend_execute_data *trace_start_frame = NULL;
 static bool trace_all_opcodes = false;
 
+static sctable_t implicit_taint_table;
 static implicit_taint_t pending_implicit_taint = { 0, NULL, NULL, -1 };
 static uint implicit_taint_id = 0;
 static zend_execute_data *implicit_taint_call_chain_start_frame = NULL;
+
+static sctable_t evo_key_table;
+static sctable_t evo_taint_table;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
@@ -105,10 +115,18 @@ static uint get_first_executable_index(zend_op *opcodes)
   return i;
 }
 
+static bool evo_taint_comparator(void *a, void *b)
+{
+  evo_taint_t *first = (evo_taint_t *) a;
+  evo_taint_t *second = (evo_taint_t *) b;
+
+  return (strcmp(first->table_name, second->table_name) == 0 &&
+          strcmp(first->column_name, second->column_name) == 0 &&
+          first->table_key == second->table_key);
+}
+
 void initialize_interp_context()
 {
-  implicit_taint_table.hash_bits = 7;
-  sctable_init(&implicit_taint_table);
   memset(&void_frame, 0, sizeof(stack_frame_t));
   memset(&prev_frame, 0, sizeof(stack_frame_t));
   memset(&cur_frame, 0, sizeof(stack_frame_t));
@@ -137,6 +155,28 @@ void initialize_interp_context()
 
   current_session.user_level = USER_LEVEL_BOTTOM;
   current_session.active = false;
+
+  implicit_taint_table.hash_bits = 7;
+  sctable_init(&implicit_taint_table);
+
+  evo_key_table.hash_bits = 6;
+  sctable_init(&evo_key_table);
+
+  /* hack, ought to load these from somewhere */
+  sctable_add(&evo_key_table, hash_string("wp_commentmeta"), "meta_id");
+  sctable_add(&evo_key_table, hash_string("wp_comments"), "comment_ID");
+  sctable_add(&evo_key_table, hash_string("wp_links"), "link_id");
+  sctable_add(&evo_key_table, hash_string("wp_options"), "option_id");
+  sctable_add(&evo_key_table, hash_string("wp_postmeta"), "meta_id");
+  sctable_add(&evo_key_table, hash_string("wp_posts"), "ID");
+  sctable_add(&evo_key_table, hash_string("wp_term_taxonomy"), "term_taxonomy_id");
+  sctable_add(&evo_key_table, hash_string("wp_terms"), "term_id");
+  sctable_add(&evo_key_table, hash_string("wp_usermeta"), "umeta_id");
+  sctable_add(&evo_key_table, hash_string("wp_users"), "ID");
+
+  evo_taint_table.hash_bits = 8;
+  evo_taint_table.comparator = evo_taint_comparator;
+  sctable_init(&evo_taint_table);
 }
 
 void initialize_interp_app_context(application_t *app)
@@ -1206,12 +1246,22 @@ void opcode_executing(const zend_op *op)
   */
 }
 
-void db_site_modification(const char *table_name, const char *column_name,
-                          unsigned long long table_key)
+void db_site_modification(const char *table_name, const char *column_name, uint64 table_key)
 {
   if (is_taint_analysis_enabled()) {
+    evo_taint_t lookup = { table_name, column_name, table_key };
+    uint64 hash = hash_string(table_name) ^ hash_string(column_name) ^ table_key; // crowd low bits
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+
+    // or unique via: `INSERT INTO table_tags (tag) VALUES ('tag_a'),('tab_b'),('tag_c') ON DUPLICATE KEY UPDATE tag=tag;`
+    if (!sctable_has_value(&evo_taint_table, hash, &lookup)) {
+      evo_taint_t *taint = PROCESS_NEW(evo_taint_t);
+      taint->table_key = table_key;
+      taint->table_name = strdup(table_name);
+      taint->column_name = strdup(column_name);
+      sctable_add(&evo_taint_table, hash, taint);
+    }
 
     plog(cur_frame.cfm.app, "<db-mod> %s.%s[%lld] at %04d(L%04d)%s\n",
          table_name, column_name, table_key,
@@ -1222,15 +1272,33 @@ void db_site_modification(const char *table_name, const char *column_name,
 void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
               const zval **values)
 {
-  if (is_taint_analysis_enabled()) { // && TAINT_ALL) {
-    uint i;
+  if (is_taint_analysis_enabled() && field_count > 0) { // && TAINT_ALL) {
     taint_variable_t *var;
-    bool found_name = false;
-    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
-    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
     site_modification_t *mod;
 
-    /* hack filter */
+    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
+    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+
+    uint table_name_hash = hash_string(table_names[0]); /* assuming single-table updates */
+    const char *key_column_name = sctable_lookup(&evo_key_table, table_name_hash);
+    int i, key_column_index = -1;
+    uint64 key, field_hash;
+
+    if (key_column_name == NULL)
+      return; /* not a taintable table */
+
+    for (i = 0; i < field_count; i++) {
+      if (strcmp(column_names[i], key_column_name) == 0) {
+        key = Z_LVAL_P(values[i]);
+        key_column_index = i;
+        break;
+      }
+    }
+
+    if (key_column_index < 0)
+      return; /* can't apply taint, dunno if these values are modified by admin */
+
+    /* hack filter * /
     if (strcmp(table_names[0], "wp_options") != 0)
       return;
 
@@ -1244,26 +1312,34 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
     }
     if (true || !found_name)
       return;
-    /* hack filter */
+    / * hack filter */
 
     for (i = 0; i < field_count; i++) {
-      mod = REQUEST_NEW(site_modification_t);
-      mod->type = SITE_MOD_DB;
-      mod->db_table = request_strdup(table_names[i]);
-      mod->db_column = request_strdup(column_names[i]);
+      if (i != key_column_index) {
+        evo_taint_t lookup = { table_names[0], column_names[i], key };
+        field_hash = table_name_hash ^ hash_string(column_names[i]) ^ key;
 
-      if (Z_TYPE_P(values[i]) == IS_STRING)
-        mod->db_value = request_strdup(Z_STRVAL_P(values[i]));
-      else
-        mod->db_value = NULL;
+        if (!sctable_has_value(&evo_taint_table, field_hash, &lookup))
+          continue;
 
-      var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
-                                  op, TAINT_TYPE_SITE_MOD, mod);
+        mod = REQUEST_NEW(site_modification_t); /* assuming request-static values are not possible */
+        mod->type = SITE_MOD_DB;
+        mod->db_table = request_strdup(table_names[i]);
+        mod->db_column = request_strdup(column_names[i]);
 
-      plog(cur_frame.cfm.app, "<taint> db-fetch at %04d(L%04d)%s\n",
-           cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
-      taint_var_add(cur_frame.cfm.app, values[i], var);
-      // plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
+        if (Z_TYPE_P(values[i]) == IS_STRING)
+          mod->db_value = request_strdup(Z_STRVAL_P(values[i]));
+        else
+          mod->db_value = NULL;
+
+        var = create_taint_variable(site_relative_path(cur_frame.cfm.app, op_array),
+                                    op, TAINT_TYPE_SITE_MOD, mod);
+
+        plog(cur_frame.cfm.app, "<taint> db-fetch at %04d(L%04d)%s\n",
+             cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+        taint_var_add(cur_frame.cfm.app, values[i], var);
+        // plog_db_mod_result(cur_frame.cfm.app, mod, op); // zif_ hasn't returned yet, so no result defined!
+      }
     }
   }
 }

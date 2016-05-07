@@ -25,7 +25,7 @@ typedef struct _sctable_t {
   scarray_t *entry_pool;
   uint entry_pool_index;
   scarray_t *entry_free_list;
-  bool (*comparator)(sctable_entry_t *first, sctable_entry_t *second);
+  bool (*comparator)(void *first, void *second);
 } sctable_t;
 
 /* caller must have previously set `t->hash_bits` */
@@ -38,6 +38,9 @@ sctable_activate_pool(sctable_t *t);
 void *
 sctable_lookup(sctable_t *t, KEY_TYPE key);
 
+bool
+sctable_has_value(sctable_t *t, KEY_TYPE key, void *value);
+
 void
 sctable_add(sctable_t *t, KEY_TYPE key, void *value);
 
@@ -46,6 +49,9 @@ sctable_add_or_replace(sctable_t *t, KEY_TYPE key, void *value);
 
 void *
 sctable_remove(sctable_t *t, KEY_TYPE key);
+
+void *
+sctable_remove_value(sctable_t *t, KEY_TYPE key, void *value);
 
 void
 sctable_clear(sctable_t *t);

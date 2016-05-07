@@ -147,6 +147,18 @@ sctable_lookup(sctable_t *t, KEY_TYPE key)
   return NULL;
 }
 
+bool
+sctable_has_value(sctable_t *t, KEY_TYPE key, void *value)
+{
+  sctable_entry_t *e;
+  uint hindex = HASH_FUNC(key, t);
+  for (e = t->data[hindex]; e; e = e->next) {
+    if (e->key == key && t->comparator(e->payload, value))
+      return true;
+  }
+  return false;
+}
+
 void
 sctable_add(sctable_t *t, KEY_TYPE key, void *value)
 {
@@ -176,6 +188,27 @@ sctable_remove(sctable_t *t, KEY_TYPE key)
   uint hindex = HASH_FUNC(key, t);
   for (e = t->data[hindex]; e; prev_e = e, e = e->next) {
     if (e->key == key) {
+      if (prev_e)
+        prev_e->next = e->next;
+      else
+        t->data[hindex] = e->next;
+      t->entries--;
+      payload = e->payload;
+      sctable_delete_entry(t, e);
+      break;
+    }
+  }
+  return payload;
+}
+
+void *
+sctable_remove_value(sctable_t *t, KEY_TYPE key, void *value)
+{
+  void *payload = NULL;
+  sctable_entry_t *e, *prev_e = NULL;
+  uint hindex = HASH_FUNC(key, t);
+  for (e = t->data[hindex]; e; prev_e = e, e = e->next) {
+    if (e->key == key && t->comparator(e->payload, value)) {
       if (prev_e)
         prev_e->next = e->next;
       else

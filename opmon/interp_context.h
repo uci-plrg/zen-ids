@@ -13,8 +13,7 @@ void push_interp_context(zend_op* op_array, uint branch_index, control_flow_meta
 void pop_interp_context();
 void opcode_executing(const zend_op *op);
 
-void db_site_modification(const char *table_name, const char *column_name,
-                          unsigned long long table_key);
+void db_site_modification(const char *table_name, const char *column_name, uint64 table_key);
 void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
               const zval **values);
 zend_bool db_query(const char *query);
