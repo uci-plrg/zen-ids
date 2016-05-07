@@ -1,5 +1,7 @@
 #include "php.h"
 #include <pthread.h>
+#include <openssl/md5.h>
+
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_hashtable.h"
@@ -25,7 +27,7 @@
 
 #define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
 
-#define PLOG_CFG false
+#define PLOG_CFG true
 
 typedef struct _implicit_taint_t {
   uint id;
@@ -125,8 +127,32 @@ static bool evo_taint_comparator(void *a, void *b)
           first->table_key == second->table_key);
 }
 
+typedef struct _evo_key_t {
+  const char *table_name;
+  const char *column_name;
+  bool is_md5;
+} evo_key_t;
+
+/* hack, ought to load these from somewhere */
+#define EVO_KEY_COUNT 11
+static evo_key_t evo_keys[] = {
+  { "wp_commentmeta", "meta_id", false },
+  { "wp_commentmeta", "meta_id", false },
+  { "wp_comments", "comment_ID", false },
+  { "wp_links", "link_id", false },
+  { "wp_options", "option_name", true },
+  { "wp_postmeta", "meta_id", false },
+  { "wp_posts", "ID", false },
+  { "wp_term_taxonomy", "term_taxonomy_id", false },
+  { "wp_terms", "term_id", false },
+  { "wp_usermeta", "umeta_id", false },
+  { "wp_users", "ID", false },
+};
+
 void initialize_interp_context()
 {
+  uint i;
+
   memset(&void_frame, 0, sizeof(stack_frame_t));
   memset(&prev_frame, 0, sizeof(stack_frame_t));
   memset(&cur_frame, 0, sizeof(stack_frame_t));
@@ -162,17 +188,8 @@ void initialize_interp_context()
   evo_key_table.hash_bits = 6;
   sctable_init(&evo_key_table);
 
-  /* hack, ought to load these from somewhere */
-  sctable_add(&evo_key_table, hash_string("wp_commentmeta"), "meta_id");
-  sctable_add(&evo_key_table, hash_string("wp_comments"), "comment_ID");
-  sctable_add(&evo_key_table, hash_string("wp_links"), "link_id");
-  sctable_add(&evo_key_table, hash_string("wp_options"), "option_id");
-  sctable_add(&evo_key_table, hash_string("wp_postmeta"), "meta_id");
-  sctable_add(&evo_key_table, hash_string("wp_posts"), "ID");
-  sctable_add(&evo_key_table, hash_string("wp_term_taxonomy"), "term_taxonomy_id");
-  sctable_add(&evo_key_table, hash_string("wp_terms"), "term_id");
-  sctable_add(&evo_key_table, hash_string("wp_usermeta"), "umeta_id");
-  sctable_add(&evo_key_table, hash_string("wp_users"), "ID");
+  for (i = 0; i < EVO_KEY_COUNT; i++)
+    sctable_add(&evo_key_table, hash_string(evo_keys[i].table_name), &evo_keys[i]);
 
   evo_taint_table.hash_bits = 8;
   evo_taint_table.comparator = evo_taint_comparator;
@@ -1269,6 +1286,21 @@ void db_site_modification(const char *table_name, const char *column_name, uint6
   }
 }
 
+static uint evo_key_md5(const byte *key_value, uint key_len)
+{
+  byte md5_raw[MD5_DIGEST_LENGTH], *md5_walk = md5_raw;
+  uint i, md5 = 0;
+
+  MD5(key_value, key_len, md5_raw);
+
+  for (i = 0; i < 4; i++, md5_walk++) { /* reverse endian */
+    md5 <<= 8;
+    md5 |= *md5_walk;
+  }
+
+  return md5;
+}
+
 void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
               const zval **values)
 {
@@ -1280,16 +1312,32 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
 
     uint table_name_hash = hash_string(table_names[0]); /* assuming single-table updates */
-    const char *key_column_name = sctable_lookup(&evo_key_table, table_name_hash);
+    evo_key_t *evo_key = sctable_lookup(&evo_key_table, table_name_hash);
     int i, key_column_index = -1;
-    uint64 key, field_hash;
+    zend_ulong key;
+    uint64 field_hash;
 
-    if (key_column_name == NULL)
+    if (evo_key == NULL)
       return; /* not a taintable table */
 
     for (i = 0; i < field_count; i++) {
-      if (strcmp(column_names[i], key_column_name) == 0) {
-        key = Z_LVAL_P(values[i]);
+      if (strcmp(column_names[i], evo_key->column_name) == 0) {
+        if (evo_key->is_md5) {
+          const char *key_name = Z_STRVAL_P(values[i]);
+          key = evo_key_md5((const byte *) key_name, strlen(key_name));
+        } else {
+          switch (Z_TYPE_P(values[i])) {
+            case IS_LONG:
+              key = Z_LVAL_P(values[i]);
+              break;
+            case IS_STRING:
+              ZEND_HANDLE_NUMERIC(Z_STR_P(values[i]), key);
+              break;
+            default:
+              ERROR("Cannot read DB taint key of Z_TYPE %d\n", Z_TYPE_P(values[i]));
+              return;
+          }
+        }
         key_column_index = i;
         break;
       }

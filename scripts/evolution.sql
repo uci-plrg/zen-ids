@@ -219,22 +219,26 @@ END $$
 CREATE TRIGGER evo_insert_wp_options AFTER INSERT ON wp_options
 FOR EACH ROW
 BEGIN
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_name', NEW.option_id, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_value', NEW.option_id, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'autoload', NEW.option_id, connection_id());
+  DECLARE option_hash BIGINT(20);
+  SET option_hash = CONV(CONVERT(MD5(NEW.option_name), BINARY(8)), 16, 10);
+  REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_name', option_hash, connection_id());
+  REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_value', option_hash, connection_id());
+  REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'autoload', option_hash, connection_id());
 END $$
 
 CREATE TRIGGER evo_update_wp_options AFTER UPDATE ON wp_options
 FOR EACH ROW
 BEGIN
+  DECLARE option_hash BIGINT(20);
+  SET option_hash = CONV(CONVERT(MD5(NEW.option_name), BINARY(8)), 16, 10);
   IF NEW.option_name != OLD.option_name THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_name', NEW.option_id, connection_id());
+    REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_hash', option_hash, connection_id());
   END IF;
   IF NEW.option_value != OLD.option_value THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_value', NEW.option_id, connection_id());
+    REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'option_value', option_hash, connection_id());
   END IF;
   IF NEW.autoload != OLD.autoload THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'autoload', NEW.option_id, connection_id());
+    REPLACE INTO opmon_evolution_staging VALUES ('wp_options', 'autoload', option_hash, connection_id());
   END IF;
 END $$
 

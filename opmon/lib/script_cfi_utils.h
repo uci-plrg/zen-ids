@@ -73,7 +73,7 @@ do { \
 typedef unsigned char bool;
 typedef unsigned long long uint64;
 typedef unsigned short ushort;
-typedef char byte;
+typedef unsigned char byte;
 typedef uint64 uint_ptr_t;
 
 typedef struct _execution_context_t {
