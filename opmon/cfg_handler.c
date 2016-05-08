@@ -566,7 +566,7 @@ void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint 
 /* 4 x 4 bytes: { from_routine_hash | user_level (6) from_index (26) |
  *                to_routine_hash | to_index }
  */
-void write_routine_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
+bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
                         uint from_index, uint to_routine_hash, uint to_index,
                         user_level_t user_level)
 {
@@ -583,7 +583,7 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
           to_routine_hash == next->to_routine_hash && to_index == next->to_index) {
         new_edge = next;
         if (new_edge->user_level <= user_level)
-          return; // nothing new about this edge
+          return false; // nothing new about this edge
         new_edge->user_level = user_level;
         break;
       }
@@ -623,9 +623,6 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     request_state.app = app;
   }
   if (is_new_in_process) {
-    if (from_routine_hash == 0x359e4465)
-      SPOT("hm?\n");
-
     fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
     fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->routine_edge);
     fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
@@ -658,6 +655,8 @@ void write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
     fwrite(&to_index, sizeof(uint), 1, cfg_files->request_edge);
   }
+
+  return true;
 }
 
 /* text line: "<routine_hash> <unit_path>|<routine_name>" */

@@ -105,7 +105,7 @@ cfg_t *cfg_new();
 void cfg_free(cfg_t *cfg);
 void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine);
 bool cfg_has_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_index,
-                          routine_cfg_t *to_routine, uint to_index);
+                          routine_cfg_t *to_routine, uint to_index, uint user_level);
 void cfg_add_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_index,
                           routine_cfg_t *to_routine, uint to_index,
                           user_level_t user_level);

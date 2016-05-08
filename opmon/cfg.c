@@ -112,7 +112,7 @@ void cfg_add_routine(cfg_t *cfg, routine_cfg_t *routine)
 }
 
 bool cfg_has_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_index,
-                          routine_cfg_t *to_routine, uint to_index)
+                          routine_cfg_t *to_routine, uint to_index, uint user_level)
 {
   uint64 key = HASH_ROUTINE_EDGE(from_routine, to_routine);
   cfg_routine_edge_entry_t *entry = sctable_lookup(&cfg->routine_edges, key);
@@ -121,7 +121,7 @@ bool cfg_has_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_ind
         entry->edge.from_index == from_index &&
         is_same_routine_cfg(entry->edge.to_routine, to_routine) &&
         entry->edge.to_index == to_index) {
-      return true;
+      return (user_level >= entry->edge.user_level);
     }
     entry = entry->next;
   }
