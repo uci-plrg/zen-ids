@@ -245,22 +245,28 @@ END $$
 CREATE TRIGGER evo_insert_wp_postmeta AFTER INSERT ON wp_postmeta
 FOR EACH ROW
 BEGIN
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'post_id', NEW.meta_id, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_key', NEW.meta_id, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_value', NEW.meta_id, connection_id());
+  DECLARE meta_hash BIGINT(20);
+  SET meta_hash = CONV(CONVERT(MD5(NEW.meta_key), BINARY(8)), 16, 10) ^
+                  CONV(CONVERT(MD5(NEW.post_id), BINARY(8)), 16, 10);
+  REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'post_id', meta_hash, connection_id());
+  REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_key', meta_hash, connection_id());
+  REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_value', meta_hash, connection_id());
 END $$
 
 CREATE TRIGGER evo_update_wp_postmeta AFTER UPDATE ON wp_postmeta
 FOR EACH ROW
 BEGIN
+  DECLARE meta_hash BIGINT(20);
+  SET meta_hash = CONV(CONVERT(MD5(NEW.meta_key), BINARY(8)), 16, 10) ^
+                  CONV(CONVERT(MD5(NEW.post_id), BINARY(8)), 16, 10);
   IF NEW.post_id != OLD.post_id THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'post_id', NEW.meta_id, connection_id());
+    REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'post_id', meta_hash, connection_id());
   END IF;
   IF NEW.meta_key != OLD.meta_key THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_key', NEW.meta_id, connection_id());
+    REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_key', meta_hash, connection_id());
   END IF;
   IF NEW.meta_value != OLD.meta_value THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_value', NEW.meta_id, connection_id());
+    REPLACE INTO opmon_evolution_staging VALUES ('wp_postmeta', 'meta_value', meta_hash, connection_id());
   END IF;
 END $$
 

@@ -663,31 +663,33 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_1),
-             OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+        plog_append(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+                    get_operand_index_name(op, TAINT_OPERAND_1), OP_INDEX(stack_frame, op),
+                    op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
-        plog(app, PLOG_TYPE_TAINT, "\n");
+        plog_append(app, PLOG_TYPE_TAINT, "\n");
       }
     }
     operand = get_zval(execute_data, &op->op2, op->op2_type);
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_2),
-             OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+        plog_append(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+                    get_operand_index_name(op, TAINT_OPERAND_2), OP_INDEX(stack_frame, op),
+                    op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
-        plog(app, PLOG_TYPE_TAINT, "\n");
+        plog_append(app, PLOG_TYPE_TAINT, "\n");
       }
     }
     operand = get_zval(execute_data, &op->result, op->result_type);
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
-             get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
-             op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+        plog_append(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+                    get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
+                    op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
-        plog(app, PLOG_TYPE_TAINT, "\n");
+        plog_append(app, PLOG_TYPE_TAINT, "\n");
       }
     }
   }

@@ -74,26 +74,29 @@ typedef struct _evo_taint_t {
   unsigned long long table_key;
 } evo_taint_t;
 
+#define EVO_MAX_KEY_COLUMN_COUNT 2
+
 typedef struct _evo_key_t {
   const char *table_name;
-  const char *column_name;
+  uint column_count;
+  const char *column_names[EVO_MAX_KEY_COLUMN_COUNT];
   bool is_md5;
 } evo_key_t;
 
 /* hack, ought to load these from somewhere */
 #define EVO_KEY_COUNT 11
 static evo_key_t evo_keys[] = {
-  { "wp_commentmeta", "meta_id", false },
-  { "wp_commentmeta", "meta_id", false },
-  { "wp_comments", "comment_ID", false },
-  { "wp_links", "link_id", false },
-  { "wp_options", "option_name", true },
-  { "wp_postmeta", "meta_id", false },
-  { "wp_posts", "ID", false },
-  { "wp_term_taxonomy", "term_taxonomy_id", false },
-  { "wp_terms", "term_id", false },
-  { "wp_usermeta", "umeta_id", false },
-  { "wp_users", "ID", false },
+  { "wp_commentmeta", 1, { "meta_id", NULL }, false },
+  { "wp_commentmeta", 1, { "meta_id", NULL }, false },
+  { "wp_comments", 1, { "comment_ID", NULL }, false },
+  { "wp_links", 1, { "link_id", NULL }, false },
+  { "wp_options", 1, { "option_name", NULL }, true },
+  { "wp_postmeta", 2, { "post_id", "meta_key" }, true },
+  { "wp_posts", 1, { "ID", NULL }, false },
+  { "wp_term_taxonomy", 1, { "term_taxonomy_id", NULL }, false },
+  { "wp_terms", 1, { "term_id", NULL }, false },
+  { "wp_usermeta", 1, { "umeta_id", NULL }, false },
+  { "wp_users", 1, { "ID", NULL }, false },
 };
 
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
@@ -1324,6 +1327,23 @@ static uint evo_key_md5(const byte *key_value, uint key_len)
   return md5;
 }
 
+static uint evo_key_int_md5(zend_ulong src)
+{
+  char string[0x20];
+
+  snprintf(string, 0x20, "%d", src);
+  return evo_key_md5((const byte *) string, strlen(string));
+}
+
+static bool is_key_index(int *indexes, uint index_count, int target)
+{
+  for (; index_count > 0; index_count--, indexes++) {
+    if (target == *indexes)
+      return true;
+  }
+  return false;
+}
+
 void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
               const zval **values)
 {
@@ -1336,57 +1356,54 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
 
     uint table_name_hash = hash_string(table_names[0]); /* assuming single-table updates */
     evo_key_t *evo_key = sctable_lookup(&evo_key_table, table_name_hash);
-    int i, key_column_index = -1;
-    zend_ulong key;
+    int i, j, key_column_indexes[EVO_MAX_KEY_COLUMN_COUNT];
+    zend_ulong key = 0;
     uint64 field_hash;
 
-    if (evo_key == NULL)
-      return; /* not a taintable table */
+    memset(key_column_indexes, -1, sizeof(key_column_indexes));
 
-    for (i = 0; i < field_count; i++) {
-      if (strcmp(column_names[i], evo_key->column_name) == 0) {
-        if (evo_key->is_md5) {
-          const char *key_name = Z_STRVAL_P(values[i]);
-          key = evo_key_md5((const byte *) key_name, strlen(key_name));
-        } else {
-          switch (Z_TYPE_P(values[i])) {
-            case IS_LONG:
-              key = Z_LVAL_P(values[i]);
-              break;
-            case IS_STRING:
-              ZEND_HANDLE_NUMERIC(Z_STR_P(values[i]), key);
-              break;
-            default:
-              ERROR("Cannot read DB taint key of Z_TYPE %d\n", Z_TYPE_P(values[i]));
-              return;
+    if (evo_key == NULL || field_count < (evo_key->column_count + 1))
+      return; /* not a taintable table, or no key, or only key */
+
+    for (j = 0; j < evo_key->column_count; j++) {
+      for (i = 0; i < field_count; i++) {
+        if (strcmp(column_names[i], evo_key->column_names[j]) == 0) {
+          if (evo_key->is_md5) {
+            switch (Z_TYPE_P(values[i])) {
+              case IS_LONG:
+                key ^= evo_key_int_md5(Z_LVAL_P(values[i]));
+                break;
+              case IS_STRING: {
+                const char *key_name = Z_STRVAL_P(values[i]);
+                key ^= evo_key_md5((const byte *) key_name, strlen(key_name));
+              } break;
+              default:
+                ERROR("Cannot read evo key of Z_TYPE %d\n", Z_TYPE_P(values[i]));
+                return;
+            }
+          } else {
+            switch (Z_TYPE_P(values[i])) {
+              case IS_LONG:
+                key = Z_LVAL_P(values[i]);
+                break;
+              case IS_STRING:
+                ZEND_HANDLE_NUMERIC(Z_STR_P(values[i]), key);
+                break;
+              default:
+                ERROR("Cannot read evo key of Z_TYPE %d\n", Z_TYPE_P(values[i]));
+                return;
+            }
           }
+          key_column_indexes[j] = i;
+          break;
         }
-        key_column_index = i;
-        break;
       }
+      if (key_column_indexes[j] < 0)
+        return; /* can't apply taint, b/c dunno if these values are modified by admin */
     }
 
-    if (key_column_index < 0)
-      return; /* can't apply taint, dunno if these values are modified by admin */
-
-    /* hack filter * /
-    if (strcmp(table_names[0], "wp_options") != 0)
-      return;
-
     for (i = 0; i < field_count; i++) {
-      if (strcmp(column_names[i], "option_name") == 0) {
-        if (strcmp(Z_STRVAL_P(values[i]), "permalink_structure") != 0 &&
-            strcmp(Z_STRVAL_P(values[i]), "rewrite_rules") != 0)
-          return;
-        found_name = true;
-      }
-    }
-    if (true || !found_name)
-      return;
-    / * hack filter */
-
-    for (i = 0; i < field_count; i++) {
-      if (i != key_column_index) {
+      if (!is_key_index(key_column_indexes, evo_key->column_count, i)) {
         evo_taint_t lookup = { table_names[0], column_names[i], key };
         field_hash = table_name_hash ^ hash_string(column_names[i]) ^ key;
 
@@ -1419,12 +1436,9 @@ zend_bool db_query(const char *query)
 {
   zend_bool is_admin = current_session.user_level > 2;
 
-  if (is_taint_analysis_enabled()) { // && is_admin) { // && TAINT_ALL) {
+  if (is_taint_analysis_enabled() && is_admin) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
-
-    if (strstr(query, "postmeta") != NULL)
-      plog_stacktrace(cur_frame.cfm.app, PLOG_TYPE_DB, cur_frame.execute_data);
 
     plog(cur_frame.cfm.app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query,
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
