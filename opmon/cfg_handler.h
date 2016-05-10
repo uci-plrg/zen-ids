@@ -75,6 +75,7 @@ void plog(application_t *app, plog_type_t type, const char *message, ...);
 /* without printing the tag */
 void plog_append(application_t *app, plog_type_t type, const char *message, ...);
 void plog_disassemble(application_t *app, zend_op_array *stack_frame);
+void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame);
 
 void flush_all_outputs(application_t *app);
 

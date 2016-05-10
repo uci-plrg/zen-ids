@@ -421,7 +421,8 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   } else {
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
   }
-  new_cur_frame.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table, hash_addr(execute_data));
+  new_cur_frame.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
+                                                                     hash_addr(execute_data));
 
   if (IS_SAME_FRAME(cur_frame, void_frame))
     cur_frame = *(stack_frame_t *) new_cur_frame.cfm.app->base_frame;
@@ -1418,9 +1419,12 @@ zend_bool db_query(const char *query)
 {
   zend_bool is_admin = current_session.user_level > 2;
 
-  if (is_taint_analysis_enabled() && is_admin) { // && TAINT_ALL) {
+  if (is_taint_analysis_enabled()) { // && is_admin) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
+
+    if (strstr(query, "postmeta") != NULL)
+      plog_stacktrace(cur_frame.cfm.app, PLOG_TYPE_DB, cur_frame.execute_data);
 
     plog(cur_frame.cfm.app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query,
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));

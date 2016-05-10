@@ -913,6 +913,43 @@ void plog_disassemble(application_t *app, zend_op_array *stack_frame)
     dump_opcode(app, stack_frame, op); // fprintf(plog, "\t%04d(L%04d) 0x%x %s%s()", stack_frame->function_name->val);
 }
 
+static inline void plog_user_frame(application_t *app, plog_type_t type, zend_execute_data *frame)
+{
+  const char *routine_name;
+
+  if (frame->func->op_array.function_name == NULL)
+    routine_name = "<script-body>";
+  else
+    routine_name = frame->func->op_array.function_name->val;
+
+  plog_append(app, type, "\t%04d(L%04d)%s:%s\n", frame->opline - frame->func->op_array.opcodes,
+              frame->opline->lineno, site_relative_path(app, &frame->func->op_array), routine_name);
+}
+
+static inline void plog_internal_frame(application_t *app, plog_type_t type, zend_execute_data *frame)
+{
+  plog_append(app, type, "\t%s\n", frame->func->op_array.function_name->val);
+}
+
+void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame)
+{
+  zend_execute_data *walk = start_frame;
+
+  plog(app, type, "Stacktrace:\n");
+
+  do {
+    if (walk->func == NULL) {
+      plog_append(app, type, "\t(empty)\n");
+    } else {
+      if (walk->func->op_array.type == ZEND_INTERNAL_FUNCTION)
+        plog_internal_frame(app, type, walk);
+      else
+        plog_user_frame(app, type, walk);
+    }
+    walk = walk->prev_execute_data;
+  } while (walk != NULL);
+}
+
 static inline bool is_plog_type_enabled(plog_type_t type)
 {
 #ifdef PLOG_TAINT
