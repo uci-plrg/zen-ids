@@ -615,7 +615,7 @@ bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
       fwrite(&from_index, sizeof(uint), 1, cfg_files->request_edge);
     }
 
-    plog(app, "@ 0x%lx\n", request_state.r->request_time);
+    fprintf(cfg_files->persistence, "@ 0x%lx\n", request_state.r->request_time);
 
     write_request_entry(cfg_files);
 
@@ -794,23 +794,8 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
   fprintf(out, " ");
 }
 
-void plog_call(application_t *app, const char *tag, const char *callee_name,
-               zend_op_array *op_array, const zend_op *call_op,
-               uint arg_count, const zend_op **args)
-{
-  uint i;
-  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
-
-  fprintf(plog, "%s at %s:%d\n", tag, op_array->filename->val, call_op->lineno);
-
-  fprintf(plog, "%s %s ", tag, callee_name);
-  for (i = 0; i < arg_count; i++)
-    print_operand(plog, "<arg>", op_array, &args[i]->op1, args[i]->op1_type);
-  print_operand(plog, "<ret>", op_array, &call_op->result, call_op->result_type);
-  fprintf(plog, "\n");
-}
-
-void print_taint(FILE *out, taint_variable_t *taint)
+#ifdef PLOG_TAINT
+static void print_taint(FILE *out, taint_variable_t *taint)
 {
   switch (taint->type) {
     case TAINT_TYPE_SITE_MOD: {
@@ -827,6 +812,7 @@ void print_taint(FILE *out, taint_variable_t *taint)
         default: ;
       }
     } break;
+# ifdef TAINT_IO
     case TAINT_TYPE_REQUEST_INPUT: {
       request_input_t *input = (request_input_t *) taint->taint;
       switch (input->type) {
@@ -855,7 +841,34 @@ void print_taint(FILE *out, taint_variable_t *taint)
       else
         print_var_value(out, input->value);
     } break;
+# endif
   }
+}
+#endif
+
+#ifdef TAINT_IO
+void plog_call(application_t *app, const char *tag, const char *callee_name,
+               zend_op_array *op_array, const zend_op *call_op,
+               uint arg_count, const zend_op **args)
+{
+  uint i;
+  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+
+  fprintf(plog, "%s at %s:%d\n", tag, op_array->filename->val, call_op->lineno);
+
+  fprintf(plog, "%s %s ", tag, callee_name);
+  for (i = 0; i < arg_count; i++)
+    print_operand(plog, "<arg>", op_array, &args[i]->op1, args[i]->op1_type);
+  print_operand(plog, "<ret>", op_array, &call_op->result, call_op->result_type);
+  fprintf(plog, "\n");
+}
+#endif
+
+#ifdef PLOG_TAINT
+void plog_taint(application_t *app, taint_variable_t *taint_var)
+{
+  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+  print_taint(plog, taint_var);
 }
 
 void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash)
@@ -888,21 +901,7 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
   */
     fprintf(plog, "\n");
 }
-
-void plog_taint(application_t *app, taint_variable_t *taint_var)
-{
-  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
-  print_taint(plog, taint_var);
-}
-
-void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op *db_mod_taint_op)
-{
-  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
-
-  fprintf(plog, "<site-mod> ");
-  print_operand_value(plog, &db_mod_taint_op->result);
-  fprintf(plog, "\n");
-}
+#endif
 
 void plog_disassemble(application_t *app, zend_op_array *stack_frame)
 {
@@ -914,16 +913,87 @@ void plog_disassemble(application_t *app, zend_op_array *stack_frame)
     dump_opcode(app, stack_frame, op); // fprintf(plog, "\t%04d(L%04d) 0x%x %s%s()", stack_frame->function_name->val);
 }
 
-void plog(application_t *app, const char *message, ...)
+static inline bool is_plog_type_enabled(plog_type_t type)
 {
-  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+#ifdef PLOG_TAINT
+  if (type == PLOG_TYPE_TAINT)
+    return true;
+#endif
+#ifdef PLOG_CFG
+  if (type == PLOG_TYPE_CFG)
+    return true;
+#endif
+#ifdef PLOG_DB
+  if (type == PLOG_TYPE_DB)
+    return true;
+#endif
+#ifdef PLOG_DB_MOD
+  if (type == PLOG_TYPE_DB_MOD)
+    return true;
+#endif
+#ifdef PLOG_WARN
+  if (type == PLOG_TYPE_WARN)
+    return true;
+#endif
+#ifdef PLOG_AD_HOC
+  if (type == PLOG_TYPE_AD_HOC)
+    return true;
+#endif
+  return false;
+}
 
-  va_list args;
-  va_start(args, message);
+static inline void plog_type_tag(FILE *plog, plog_type_t type)
+{
+  switch (type) {
+    case PLOG_TYPE_TAINT:
+      fprintf(plog, "<taint> ");
+      break;
+    case PLOG_TYPE_CFG:
+      fprintf(plog, "<cfg> ");
+      break;
+    case PLOG_TYPE_DB:
+      fprintf(plog, "<db> ");
+      break;
+    case PLOG_TYPE_DB_MOD:
+      fprintf(plog, "<db-mod> ");
+      break;
+    case PLOG_TYPE_WARN:
+      fprintf(plog, "<warning> ");
+      break;
+    case PLOG_TYPE_AD_HOC:
+      fprintf(plog, "<debug> ");
+      break;
+  }
+}
 
-  vfprintf(plog, message, args);
+void plog(application_t *app, plog_type_t type, const char *message, ...)
+{
+  if (is_plog_type_enabled(type)) {
+    FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
 
-  va_end(args);
+    plog_type_tag(plog, type);
+
+    va_list args;
+    va_start(args, message);
+
+    vfprintf(plog, message, args);
+
+    va_end(args);
+  }
+}
+
+void plog_append(application_t *app, plog_type_t type, const char *message, ...)
+{
+  if (is_plog_type_enabled(type)) {
+    FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
+
+    va_list args;
+    va_start(args, message);
+
+    vfprintf(plog, message, args);
+
+    va_end(args);
+  }
 }
 
 void flush_all_outputs(application_t *app)

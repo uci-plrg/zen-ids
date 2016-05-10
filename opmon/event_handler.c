@@ -42,11 +42,11 @@ static void init_worker()
   worker_startup();
 }
 
-static void request_boundary(bool start)
+static void request_boundary(bool is_first)
 {
-  cfg_request(start);
+  cfg_request(is_first);
 
-  if (!start) {
+  if (!is_first) {
     scfree_request();
     taint_clear();
     implicit_taint_clear();

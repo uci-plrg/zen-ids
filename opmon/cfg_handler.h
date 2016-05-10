@@ -6,6 +6,13 @@
 #include "cfg.h"
 #include "taint.h"
 
+// #define PLOG_TAINT 1
+#define PLOG_CFG 1
+#define PLOG_DB 1
+#define PLOG_DB_MOD 1
+#define PLOG_WARN 1
+#define PLOG_AD_HOC 1
+
 typedef struct _cfg_files_t {
   FILE *node;
   FILE *op_edge;
@@ -16,6 +23,15 @@ typedef struct _cfg_files_t {
   FILE *persistence;
   FILE *opcode_log;
 } cfg_files_t;
+
+typedef enum _plog_type_t {
+  PLOG_TYPE_TAINT,
+  PLOG_TYPE_CFG,
+  PLOG_TYPE_DB,
+  PLOG_TYPE_DB_MOD,
+  PLOG_TYPE_WARN,
+  PLOG_TYPE_AD_HOC,
+} plog_type_t;
 
 void init_cfg_handler();
 void destroy_cfg_handler();
@@ -42,14 +58,22 @@ void print_var_value(FILE *out, const zval *var);
 void print_operand_value(FILE *out, const znode_op *operand);
 void print_operand(FILE *out, const char *tag, zend_op_array *ops,
                    const znode_op *operand, const zend_uchar type);
+
+#ifdef TAINT_IO
 void plog_call(application_t *app, const char *tag, const char *callee_name,
                zend_op_array *op_array, const zend_op *call_op,
                uint arg_count, const zend_op **args);
-void print_taint(FILE *plog, taint_variable_t *taint);
+#endif
+
+#ifdef PLOG_TAINT
 void plog_taint(application_t *app, taint_variable_t *taint_var);
 void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash);
-void plog_db_mod_result(application_t *app, site_modification_t *db_mod, zend_op *db_mod_taint_op);
-void plog(application_t *app, const char *message, ...);
+#endif
+
+/* print the tag */
+void plog(application_t *app, plog_type_t type, const char *message, ...);
+/* without printing the tag */
+void plog_append(application_t *app, plog_type_t type, const char *message, ...);
 void plog_disassemble(application_t *app, zend_op_array *stack_frame);
 
 void flush_all_outputs(application_t *app);

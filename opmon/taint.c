@@ -179,19 +179,19 @@ bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
 
   if (clobber) {
     if (taint_var_remove(dst) != NULL) {
-      plog(app, "<taint> clobber %s (0x%llx) at %04d(L%04d)%s\n", dst_name, (uint64) dst,
+      plog(app, PLOG_TYPE_TAINT, "clobber %s (0x%llx) at %04d(L%04d)%s\n", dst_name, (uint64) dst,
            OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
     }
   }
 
   if (taint_var == NULL) {
     if ((op->opcode == ZEND_ASSIGN_DIM || op->opcode == ZEND_ASSIGN_OBJ) && TAINT_ALL) {
-      plog(app, "<taint> no taint on %s src (0x%llx)\n",
+      plog(app, PLOG_TYPE_TAINT, "no taint on %s src (0x%llx)\n",
            zend_get_opcode_name(op->opcode), (uint64) src);
     }
     return false;
   } else {
-    plog(app, "<taint> write %s(0x%llx)->%s(0x%llx) at %04d(L%04d)%s\n",
+    plog(app, PLOG_TYPE_TAINT, "write %s(0x%llx)->%s(0x%llx) at %04d(L%04d)%s\n",
          src_name, (uint64) src, dst_name, (uint64) dst, OP_INDEX(stack_frame, op), op->lineno,
          site_relative_path(app, stack_frame));
     taint_var_add(app, dst, taint_var);
@@ -466,14 +466,14 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
       if (object->properties != NULL && TEST(MAPPING_BY_REF, flags)) {
         dst = zend_hash_find(object->properties, key_string);
       } else if (object->ce->__get != NULL) {
-        plog(app, "<taint> Can't find property %s, but have a magic getter.\n", Z_STRVAL_P(key));
+        plog(app, PLOG_TYPE_TAINT, "Can't find property %s, but have a magic getter.\n", Z_STRVAL_P(key));
       }
     }
 
     if (dst != NULL)
       propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "?", dst, "A[i]");
     else
-      plog(app, "<taint> Can't find property %s\n", Z_STRVAL_P(key));
+      plog(app, PLOG_TYPE_TAINT, "Can't find property %s\n", Z_STRVAL_P(key));
   } else {
     ERROR("<taint> Error in %s: found an unknown object type %d at %04d(L%04d)%s\n",
           zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -590,10 +590,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_DIM:
-      if (TAINT_ALL) {
-        plog(app, "ZEND_ASSIGN_DIM: %04d(L%04d)%s\n", OP_INDEX(stack_frame, op), op->lineno,
-             site_relative_path(app, stack_frame));
-      }
       // if (!skip_arrays) /* fail here */
         // propagate_taint_into_array(app, execute_data, stack_frame, op, MAPPING_BY_REF);
       break;
@@ -611,10 +607,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       if (false) propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_OBJ:
-      if (TAINT_ALL) {
-        plog(app, "ZEND_ASSIGN_OBJ: %04d(L%04d)%s\n", OP_INDEX(stack_frame, op), op->lineno,
-             site_relative_path(app, stack_frame));
-      }
       // if (!skip_arrays) /* fail here */
       //  propagate_taint_into_object(app, execute_data, stack_frame, op, MAPPING_BY_REF | MAPPING_IS_OBJECT);
       break;
@@ -664,40 +656,42 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     } break;
   }
 
+#ifdef PLOG_TAINT
   {
     taint_variable_t *taint_var;
     const zval *operand = get_zval(execute_data, &op->op1, op->op1_type);
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, "<taint> on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_1),
+        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_1),
              OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
-        plog(app, "\n");
+        plog(app, PLOG_TYPE_TAINT, "\n");
       }
     }
     operand = get_zval(execute_data, &op->op2, op->op2_type);
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, "<taint> on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_2),
+        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ", get_operand_index_name(op, TAINT_OPERAND_2),
              OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
-        plog(app, "\n");
+        plog(app, PLOG_TYPE_TAINT, "\n");
       }
     }
     operand = get_zval(execute_data, &op->result, op->result_type);
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog(app, "<taint> on %s of %04d(L%04d)%s (0x%llx) | ",
+        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
              get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
              op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
-        plog(app, "\n");
+        plog(app, PLOG_TYPE_TAINT, "\n");
       }
     }
   }
+#endif
 }
 
 static const char *disassembly[] = { "wp_get_nav_menu_items" };
@@ -762,7 +756,7 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
 
     if ((op - call->arg_count) < (zend_op *) stack_frame->opcodes) {
       uint explicit_parameter_count = (uint) (op - (zend_op *) stack_frame->opcodes);
-      plog(app, "Warning: vararg call to %s:%s is not supported by taint yet.\n",
+      plog(app, PLOG_TYPE_WARN, "vararg call to %s:%s is not supported by taint yet.\n",
            stack_frame->filename->val, stack_frame->function_name->val,
            call->arg_count, explicit_parameter_count);
       call->arg_count = explicit_parameter_count;
@@ -774,7 +768,7 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
         if (receive->opcode == ZEND_RECV || receive->opcode == ZEND_RECV_INIT) {
           const zval *receive_val = get_operand_zval(execute_data, receive, TAINT_OPERAND_RESULT);
           taint_var_add(app, receive_val, call->taint_send[i]);
-          plog(app, "<taint> write arg receive (0x%llx) at %04d(L%04d)%s\n",
+          plog(app, PLOG_TYPE_TAINT, "write arg receive (0x%llx) at %04d(L%04d)%s\n",
                (uint64) receive_val, OP_INDEX(stack_frame, receive), receive->lineno,
                site_relative_path(app, stack_frame));
         } else {
@@ -800,7 +794,7 @@ void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
     const zval *call_result = get_operand_zval(execute_data, call_op, TAINT_OPERAND_RESULT);
     if (call_result != NULL) {
       taint_var_add(app, call_result, pending_return_taint);
-      plog(app, "<taint> write call result (0x%llx) at %04d(L%04d)%s\n",
+      plog(app, PLOG_TYPE_TAINT, "write call result (0x%llx) at %04d(L%04d)%s\n",
            (uint64) call_result, OP_INDEX(stack_frame, call_op), call_op->lineno,
            site_relative_path(app, stack_frame));
     }
@@ -903,7 +897,9 @@ void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *ta
   if (hash == 0ULL)
     return; // bug?
 
+#ifdef PLOG_TAINT
   plog_taint_var(app, taint, (uint64) taintee);
+#endif
 
   if (sctable_lookup(&taint_table, hash) == NULL)
     sctable_add(&taint_table, hash, taint);
