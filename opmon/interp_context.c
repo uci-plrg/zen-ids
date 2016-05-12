@@ -83,6 +83,11 @@ typedef struct _evo_key_t {
   bool is_md5;
 } evo_key_t;
 
+typedef enum _routine_edge_status_t {
+  ROUTINE_EDGE_VERIFIED       = 1,
+  ROUTINE_EDGE_NEW_IN_REQUEST = 2
+} routine_edge_status_t;
+
 /* hack, ought to load these from somewhere */
 #define EVO_KEY_COUNT 11
 static evo_key_t evo_keys[] = {
@@ -232,10 +237,11 @@ static void push_exception_frame()
   *exception_frame = cur_frame;
 }
 
-static bool generate_routine_edge(bool is_new_in_process, control_flow_metadata_t *from_cfm,
-                                  uint from_index, routine_cfg_t *to_cfg, uint to_index)
+static routine_edge_status_t
+generate_routine_edge(bool is_new_in_process, control_flow_metadata_t *from_cfm,
+                      uint from_index, routine_cfg_t *to_cfg, uint to_index)
 {
-  bool verified = false, is_new_in_request;
+  routine_edge_status_t status = 0;
 
   if (is_new_in_process) {
     cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index, to_cfg, to_index,
@@ -245,7 +251,7 @@ static bool generate_routine_edge(bool is_new_in_process, control_flow_metadata_
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_index, to_index,
                                     to_cfg->routine_hash, current_session.user_level)) {
-      verified = true;
+      status |= ROUTINE_EDGE_VERIFIED;
       PRINT("<MON> Verified routine edge [0x%x|%u -> 0x%x]\n",
             from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
     } else { // debug it
@@ -260,11 +266,12 @@ static bool generate_routine_edge(bool is_new_in_process, control_flow_metadata_
           opcode, from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
   }
 
-  is_new_in_request = write_routine_edge(is_new_in_process, from_cfm->app,
-                                         from_cfm->cfg->routine_hash, from_index,
-                                         to_cfg->routine_hash, to_index, current_session.user_level);
+  if (write_routine_edge(is_new_in_process, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+                         to_cfg->routine_hash, to_index, current_session.user_level)) {
+    status |= ROUTINE_EDGE_NEW_IN_REQUEST;
+  }
 
-  return !verified && is_new_in_request;
+  return status;
 }
 
 static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, uint to_index)
@@ -470,7 +477,11 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     zend_op *new_prev_op = &new_prev_frame.opcodes[new_prev_frame.op_index];
     compiled_edge_target_t compiled_target = get_compiled_edge_target(new_prev_op,
                                                                       new_prev_frame.op_index);
-    bool is_new_in_process, is_unverified_in_request;
+    bool is_new_in_process;
+    routine_edge_status_t edge_status;
+
+    if (new_cur_frame.cfm.cfg->routine_hash == 0x25466f54) // && cur_frame.op_index == 790)
+      SPOT("check here\n");
 
     is_new_in_process = !cfg_has_routine_edge(new_prev_frame.cfm.app->cfg,
                                               new_prev_frame.cfm.cfg,
@@ -487,20 +498,33 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
       }
     }
 
-    is_unverified_in_request = generate_routine_edge(is_new_in_process, &new_prev_frame.cfm,
-                                                     new_prev_frame.op_index, new_cur_frame.cfm.cfg,
-                                                     0/*routine entry*/);
+    edge_status = generate_routine_edge(is_new_in_process, &new_prev_frame.cfm,
+                                        new_prev_frame.op_index, new_cur_frame.cfm.cfg,
+                                        0/*routine entry*/);
 
-    if (is_unverified_in_request && cur_frame.implicit_taint == NULL &&
-        implicit_taint_call_chain_start_frame == NULL) {
+    if (!TEST(ROUTINE_EDGE_VERIFIED, edge_status) && current_session.user_level < 2) {
+      if (implicit_taint_call_chain_start_frame == NULL) {
+        if (cur_frame.implicit_taint == NULL) {
+          if (TEST(ROUTINE_EDGE_NEW_IN_REQUEST, edge_status)) {
+            plog(cur_frame.cfm.app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
+                 new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
+                 new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
+            plog_stacktrace(cur_frame.cfm.app, PLOG_TYPE_CFG, execute_data);
+          }
+        } else {
+          implicit_taint_call_chain_start_frame = new_prev_frame.execute_data;
 
-#ifdef PLOG_CFG
-      if (current_session.user_level < 2) {
-        plog(cur_frame.cfm.app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
+          plog(cur_frame.cfm.app, PLOG_TYPE_TAINT,
+               "call chain activated at %04d(L%04d) %s -> %s\n",
+               new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
+               new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
+        }
+      } else {
+        plog(cur_frame.cfm.app, PLOG_TYPE_TAINT,
+             "call chain allows %04d(L%04d) %s -> %s\n",
              new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
              new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
       }
-#endif
 
       PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
             getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
@@ -1004,8 +1028,8 @@ void opcode_executing(const zend_op *op)
   switch (op->opcode) {
     case ZEND_DO_FCALL:
       fcall_executing(execute_data, op_array, (zend_op *) op);
-      if (cur_frame.implicit_taint != NULL && implicit_taint_call_chain_start_frame == NULL)
-        implicit_taint_call_chain_start_frame = execute_data;
+      //if (cur_frame.implicit_taint != NULL && implicit_taint_call_chain_start_frame == NULL)
+      //  implicit_taint_call_chain_start_frame = execute_data;
       break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
@@ -1432,7 +1456,7 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
 }
 
 /* returns true if admin is logged in */
-zend_bool db_query(const char *query)
+void db_query(const char *query)
 {
   zend_bool is_admin = current_session.user_level > 2;
 
@@ -1443,10 +1467,12 @@ zend_bool db_query(const char *query)
     plog(cur_frame.cfm.app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query,
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   }
-
-  return is_admin;
 }
 
+zend_bool is_admin()
+{
+  return current_session.user_level > 2;
+}
 
 zend_bool internal_dataflow(const zval *src, const char *src_name,
                             const zval *dst, const char *dst_name,

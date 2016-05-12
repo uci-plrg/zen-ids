@@ -1,51 +1,5 @@
 
 
--- Evolution Table
-
-DROP TABLE IF EXISTS opmon_evolution;
-DROP TABLE IF EXISTS opmon_evolution_staging;
-
-CREATE TABLE opmon_evolution (
-  id BIGINT(20) KEY AUTO_INCREMENT,
-  table_name VARCHAR(24),
-  column_name VARCHAR(24),
-  table_key BIGINT(20),
-  UNIQUE KEY (table_name, column_name, table_key)
-);
-
-CREATE TABLE opmon_evolution_staging (
-  table_name VARCHAR(24),
-  column_name VARCHAR(24),
-  table_key BIGINT(20),
-  connection_id INT,
-  PRIMARY KEY (table_name, column_name, table_key, connection_id)
-);
-
-
--- Evolution Procedures
-
-DROP PROCEDURE IF EXISTS opmon_evolution_commit;
-DROP PROCEDURE IF EXISTS opmon_evolution_discard;
-
-DELIMITER $$
-
-CREATE PROCEDURE opmon_evolution_commit()
-BEGIN
-  REPLACE INTO opmon_evolution (table_name, column_name, table_key) (
-    SELECT table_name, column_name, table_key
-    FROM opmon_evolution_staging
-    WHERE connection_id = connection_id());
-  CALL opmon_evolution_discard();
-END $$
-
-CREATE PROCEDURE opmon_evolution_discard()
-BEGIN
-  DELETE FROM opmon_evolution_staging WHERE connection_id = connection_id();
-END $$
-
-DELIMITER ;
-
-
 -- Evolution Triggers
 
 DROP TRIGGER IF EXISTS evo_update_wp_commentmeta;
@@ -445,46 +399,50 @@ END $$
 CREATE TRIGGER evo_insert_wp_users AFTER INSERT ON wp_users
 FOR EACH ROW
 BEGIN
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_login', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_pass', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_nicename', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_email', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_url', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_registered', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_activation_key', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_status', NEW.ID, connection_id());
-  REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'display_name', NEW.ID, connection_id());
+  IF @is_admin = TRUE THEN
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_login', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_pass', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_nicename', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_email', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_url', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_registered', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_activation_key', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_status', NEW.ID);
+    INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'display_name', NEW.ID);
+  END IF;
 END $$
 
 CREATE TRIGGER evo_update_wp_users AFTER UPDATE ON wp_users
 FOR EACH ROW
 BEGIN
-  IF NEW.user_login != OLD.user_login THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_login', NEW.ID, connection_id());
-  END IF;
-  IF NEW.user_pass != OLD.user_pass THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_pass', NEW.ID, connection_id());
-  END IF;
-  IF NEW.user_nicename != OLD.user_nicename THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_nicename', NEW.ID, connection_id());
-  END IF;
-  IF NEW.user_email != OLD.user_email THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_email', NEW.ID, connection_id());
-  END IF;
-  IF NEW.user_url != OLD.user_url THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_url', NEW.ID, connection_id());
-  END IF;
-  IF NEW.user_registered != OLD.user_registered THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_registered', NEW.ID, connection_id());
-  END IF;
-  IF NEW.user_activation_key != OLD.user_activation_key THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_activation_key', NEW.ID, connection_id());
-  END IF;
-  IF NEW.user_status != OLD.user_status THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'user_status', NEW.ID, connection_id());
-  END IF;
-  IF NEW.display_name != OLD.display_name THEN
-    REPLACE INTO opmon_evolution_staging VALUES ('wp_users', 'display_name', NEW.ID, connection_id());
+  IF @is_admin = TRUE THEN
+    IF NEW.user_login != OLD.user_login THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_login', NEW.ID);
+    END IF;
+    IF NEW.user_pass != OLD.user_pass THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_pass', NEW.ID);
+    END IF;
+    IF NEW.user_nicename != OLD.user_nicename THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_nicename', NEW.ID);
+    END IF;
+    IF NEW.user_email != OLD.user_email THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_email', NEW.ID);
+    END IF;
+    IF NEW.user_url != OLD.user_url THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_url', NEW.ID);
+    END IF;
+    IF NEW.user_registered != OLD.user_registered THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_registered', NEW.ID);
+    END IF;
+    IF NEW.user_activation_key != OLD.user_activation_key THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_activation_key', NEW.ID);
+    END IF;
+    IF NEW.user_status != OLD.user_status THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'user_status', NEW.ID);
+    END IF;
+    IF NEW.display_name != OLD.display_name THEN
+      INSERT IGNORE INTO opmon_evolution (table_name, column_name, table_key) VALUES ('wp_users', 'display_name', NEW.ID);
+    END IF;
   END IF;
 END $$
 

@@ -16,7 +16,8 @@ void opcode_executing(const zend_op *op);
 void db_site_modification(const char *table_name, const char *column_name, uint64 table_key);
 void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
               const zval **values);
-zend_bool db_query(const char *query);
+void db_query(const char *query);
+zend_bool is_admin();
 zend_bool internal_dataflow(const zval *src, const char *src_name,
                             const zval *dst, const char *dst_name,
                             zend_bool is_internal_transfer);
