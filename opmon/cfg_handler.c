@@ -274,7 +274,7 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
   OPEN_CFG_FILE("routine-edge.run", routine_edge);
   OPEN_CFG_FILE("routine-catalog.tab", routine_catalog);
   OPEN_CFG_FILE("persistence.log", persistence);
-  if (is_opcode_dump_enabled())
+  if (IS_OPCODE_DUMP_ENABLED())
     OPEN_CFG_FILE("opcodes.log", opcode_log);
   if (!is_standalone_app) {
     OPEN_CFG_FILE("request.tab", request);

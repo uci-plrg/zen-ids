@@ -16,8 +16,6 @@
 #include "compile_context.h"
 #include "interp_context.h"
 
-// could just check if the triggers are installed
-# define OPMON_EVOLUTION 1
 // # define OPMON_LOG_SELECT 1
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
@@ -34,8 +32,8 @@
 #define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
 
 #define MAX_BIGINT_CHARS 32
-#define EVO_STATE_QUERY "SELECT id, table_name, column_name, table_key " \
-                        "FROM opmon_evolution "                          \
+#define EVO_STATE_QUERY "SELECT request_id, table_name, column_name, table_key " \
+                        "FROM opmon_evolution "                                  \
                         "WHERE request_id > %d"
 #define EVO_STATE_QUERY_MAX_LENGTH (sizeof(EVO_STATE_QUERY) + MAX_BIGINT_CHARS)
 #define EVO_STATE_QUERY_FIELD_COUNT 4
@@ -43,8 +41,6 @@
 /* N.B.: the evo triggers are using last_insert_id() as set by this query! */
 #define EVO_NEXT_REQUEST_ID "UPDATE opmon_request_sequence " \
                             "SET request_id = last_insert_id(request_id + 1)"
-#define EVO_SET_ADMIN   "SET @is_admin = TRUE"
-#define EVO_UNSET_ADMIN "SET @is_admin = FALSE"
 
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
@@ -136,8 +132,6 @@ typedef struct _evo_query_t {
 static MYSQL *db_connection = NULL;
 
 static const evo_query_t evo_next_request_id = EVO_QUERY(EVO_NEXT_REQUEST_ID);
-static const evo_query_t evo_set_admin = EVO_QUERY(EVO_SET_ADMIN);
-static const evo_query_t evo_unset_admin = EVO_QUERY(EVO_UNSET_ADMIN);
 
 static const evo_query_t command_insert = EVO_QUERY("insert");
 static const evo_query_t command_update = EVO_QUERY("update");
@@ -243,24 +237,26 @@ void initialize_interp_context()
   current_session.user_level = USER_LEVEL_BOTTOM;
   current_session.active = false;
 
-  implicit_taint_table.hash_bits = 7;
-  sctable_init(&implicit_taint_table);
+  if (IS_CFI_EVO()) {
+    implicit_taint_table.hash_bits = 7;
+    sctable_init(&implicit_taint_table);
 
-  evo_key_table.hash_bits = 6;
-  sctable_init(&evo_key_table);
+    evo_key_table.hash_bits = 6;
+    sctable_init(&evo_key_table);
 
-  for (i = 0; i < EVO_KEY_COUNT; i++)
-    sctable_add(&evo_key_table, hash_string(evo_keys[i].table_name), &evo_keys[i]);
+    for (i = 0; i < EVO_KEY_COUNT; i++)
+      sctable_add(&evo_key_table, hash_string(evo_keys[i].table_name), &evo_keys[i]);
 
-  evo_taint_table.hash_bits = 8;
-  evo_taint_table.comparator = evo_taint_comparator;
-  sctable_init(&evo_taint_table);
+    evo_taint_table.hash_bits = 8;
+    evo_taint_table.comparator = evo_taint_comparator;
+    sctable_init(&evo_taint_table);
 
-  db_connection = mysql_init(NULL);
-  if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
-    ERROR("Failed to connect to the database!\n");
-  else
-    SPOT("Connected to the database!\n");
+    db_connection = mysql_init(NULL);
+    if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
+      ERROR("Failed to connect to the database!\n");
+    else
+      SPOT("Connected to the database!\n");
+  }
 }
 
 void initialize_interp_app_context(application_t *app)
@@ -284,37 +280,26 @@ void destroy_interp_app_context(application_t *app)
 {
   routine_cfg_free(((stack_frame_t *) app->base_frame)->cfm.cfg);
   PROCESS_FREE(app->base_frame);
-  mysql_close(db_connection);
+
+  if (IS_CFI_EVO())
+    mysql_close(db_connection);
 }
 
 void interp_request_boundary(bool is_first)
 {
-  if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0) {
-    ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
-  } else {
-    MYSQL_RES *result = mysql_store_result(db_connection);
+  if (IS_CFI_EVO()) {
+    if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
+      ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
+    else
+      request_id = mysql_insert_id(db_connection);
 
-    if (result == NULL) {
-      ERROR("Error querying evolution state.\n");
-    } else {
-      MYSQL_ROW row = mysql_fetch_row(result);
-      if (row == NULL || row[0] == NULL || strlen(row[0]) == 0) {
-        ERROR("Error querying evolution state.\n");
-      } else {
-        request_id = strtoull(row[0], NULL, 10);
+    evo_state_synch();
 
-        SPOT("Starting request #%lld\n", request_id);
-      }
-      mysql_free_result(result);
+    if (!is_first) {
+      sctable_clear(&implicit_taint_table);
+      implicit_taint_id = 0;
+      implicit_taint_call_chain_start_frame = NULL;
     }
-  }
-
-  evo_state_synch();
-
-  if (!is_first) {
-    sctable_clear(&implicit_taint_table);
-    implicit_taint_id = 0;
-    implicit_taint_call_chain_start_frame = NULL;
   }
 }
 
@@ -518,8 +503,11 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
   } else {
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
   }
-  new_cur_frame.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
-                                                                     hash_addr(execute_data));
+
+  if (IS_CFI_EVO()) {
+    new_cur_frame.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
+                                                                       hash_addr(execute_data));
+  }
 
   if (IS_SAME_FRAME(cur_frame, void_frame))
     cur_frame = *(stack_frame_t *) new_cur_frame.cfm.app->base_frame;
@@ -902,7 +890,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
 
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
     cur_frame.last_builtin_name = callee_name; // use after free!
-  } else if (is_taint_analysis_enabled()) {
+  } else if (IS_CFI_EVO()) {
 
     stack_event.state = STACK_STATE_CALL;
     stack_event.last_opcode = op->opcode;
@@ -1061,7 +1049,7 @@ void opcode_executing(const zend_op *op)
       ERROR("Failed to identify the last executed op within a stack frame!\n");
   }
 
-  if (is_taint_analysis_enabled()) {
+  if (IS_CFI_EVO()) {
     if (stack_pointer_moved && last_executed_op != NULL && last_executed_op->opcode == ZEND_DO_FCALL) {
       taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
 
@@ -1091,7 +1079,7 @@ void opcode_executing(const zend_op *op)
   }
 
 #ifdef TAINT_IO
-  if (is_taint_analysis_enabled()) {
+  if (IS_CFI_EVO()) {
     request_input_type_t input_type = get_request_input_type(op); // TODO: combine in following switch
     if (input_type != REQUEST_INPUT_TYPE_NONE && TAINT_ALL) {
       const zval *value = get_zval(execute_data, &op->result, op->result_type);
@@ -1269,125 +1257,126 @@ void opcode_executing(const zend_op *op)
     }
   }
 
-  if (pending_implicit_taint.end_op != NULL) {
-    if (!opcode_verified) {
-      implicit_taint_t *implicit = REQUEST_NEW(implicit_taint_t);
+  if (IS_CFI_EVO()) {
+    if (pending_implicit_taint.end_op != NULL) {
+      if (!opcode_verified) {
+        implicit_taint_t *implicit = REQUEST_NEW(implicit_taint_t);
 
-      *implicit = pending_implicit_taint;
-      if (op == pending_implicit_taint.end_op)
-        implicit->end_op = find_spanning_block_tail(op, op_array);
-      implicit->id = implicit_taint_id++;
-      sctable_add(&implicit_taint_table, hash_addr(execute_data), implicit);
-      implicit->last_applied_op_index = -1;
-      cur_frame.implicit_taint = implicit;
+        *implicit = pending_implicit_taint;
+        if (op == pending_implicit_taint.end_op)
+          implicit->end_op = find_spanning_block_tail(op, op_array);
+        implicit->id = implicit_taint_id++;
+        sctable_add(&implicit_taint_table, hash_addr(execute_data), implicit);
+        implicit->last_applied_op_index = -1;
+        cur_frame.implicit_taint = implicit;
 
-      plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "activating I%d from %04d(L%04d)-%04d(L%04d)%s\n",
-           cur_frame.implicit_taint->id,
-           OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, implicit->end_op),
-           implicit->end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+        plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "activating I%d from %04d(L%04d)-%04d(L%04d)%s\n",
+             cur_frame.implicit_taint->id,
+             OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, implicit->end_op),
+             implicit->end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
 
-      opcode_verified = true;
-    }
+        opcode_verified = true;
+      }
 
-    pending_implicit_taint.end_op = NULL;
-  } else if (cur_frame.implicit_taint != NULL) {
-    if (op < cur_frame.implicit_taint->end_op) {
-      const zval *lValue;
+      pending_implicit_taint.end_op = NULL;
+    } else if (cur_frame.implicit_taint != NULL) {
+      if (op < cur_frame.implicit_taint->end_op) {
+        const zval *lValue;
 
-      switch (op->opcode) {
-        case ZEND_ASSIGN_REF:
-          lValue = get_zval(execute_data, &op->result, op->result_type);
-          plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
-               zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
-               OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
-          taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
-        case ZEND_ASSIGN: /* FT */
-        case ZEND_SEND_VAL:
-        case ZEND_SEND_VAL_EX:
-        case ZEND_SEND_VAR:
-        case ZEND_SEND_VAR_NO_REF:
-        case ZEND_SEND_REF:
-        case ZEND_SEND_VAR_EX:
-        case ZEND_SEND_UNPACK:
-        case ZEND_SEND_ARRAY:
-        case ZEND_SEND_USER:
+        switch (op->opcode) {
+          case ZEND_ASSIGN_REF:
+            lValue = get_zval(execute_data, &op->result, op->result_type);
+            plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
+                 zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
+                 OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+            taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
+          case ZEND_ASSIGN: /* FT */
+          case ZEND_SEND_VAL:
+          case ZEND_SEND_VAL_EX:
+          case ZEND_SEND_VAR:
+          case ZEND_SEND_VAR_NO_REF:
+          case ZEND_SEND_REF:
+          case ZEND_SEND_VAR_EX:
+          case ZEND_SEND_UNPACK:
+          case ZEND_SEND_ARRAY:
+          case ZEND_SEND_USER:
+          /*
+          also returns?
+          */
+            lValue = get_zval(execute_data, &op->op1, op->op1_type);
+            plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
+                 zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
+                 OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+            taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
+            cur_frame.implicit_taint->last_applied_op_index = cur_frame.op_index;
+        }
+
         /*
-        also returns?
+        plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "+implicit on %04d(L%04d)%s until %04d(L%04d)\n",
+             OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array),
+             OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
+        plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
         */
-          lValue = get_zval(execute_data, &op->op1, op->op1_type);
-          plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
-               zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
-               OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
-          taint_var_add(cur_frame.cfm.app, lValue, cur_frame.implicit_taint->taint);
-          cur_frame.implicit_taint->last_applied_op_index = cur_frame.op_index;
-      }
+        opcode_verified = true;
 
-      /*
-      plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "+implicit on %04d(L%04d)%s until %04d(L%04d)\n",
-           OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array),
-           OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
-      plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
-      */
-      opcode_verified = true;
-
-      if (is_return(op->opcode))
+        if (is_return(op->opcode))
+          remove_implicit_taint();
+      } else {
+        if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
+            last_executed_op->opcode == ZEND_JMP &&
+            last_executed_op < cur_frame.implicit_taint->end_op) {
+          opcode_verified = true; /* extend to bottom of branch diamond */
+        }
         remove_implicit_taint();
-    } else {
-      if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
-          last_executed_op->opcode == ZEND_JMP &&
-          last_executed_op < cur_frame.implicit_taint->end_op) {
-        opcode_verified = true; /* extend to bottom of branch diamond */
-      }
-      remove_implicit_taint();
-    }
-  }
-
-  if (cur_frame.implicit_taint == NULL) {
-    const zend_op *jump_op = op;
-
-    while (true) {
-      switch (jump_op->opcode) {
-        case ZEND_JMPZ:
-        case ZEND_JMPZNZ:
-          if (jump_op->op2.jmp_addr > jump_op) {
-            jump_target = jump_op->op2.jmp_addr;
-            if (jump_predicate == NULL)
-              jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
-          }
-          break;
-        case ZEND_JMPZ_EX:
-        case ZEND_JMPNZ_EX:
-          if (jump_op->op2.jmp_addr > jump_op) {
-            jump_op = jump_op->op2.jmp_addr;
-            if (jump_predicate == NULL)
-              jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
-            continue;
-            //jump_target = op->op2.jmp_addr;
-            //jump_predicate = get_zval(execute_data, &op->result, op->result_type);
-          }
-          break;
-      }
-      break;
-    }
-
-    if (jump_target != NULL) {
-      taint_variable_t *taint = taint_var_get(jump_predicate);
-      if (taint != NULL) {
-        pending_implicit_taint.end_op = jump_target;
-        pending_implicit_taint.taint = taint;
-        pending_implicit_taint.last_applied_op_index = -1;
       }
     }
-  }
+
+    if (cur_frame.implicit_taint == NULL) {
+      const zend_op *jump_op = op;
+
+      while (true) {
+        switch (jump_op->opcode) {
+          case ZEND_JMPZ:
+          case ZEND_JMPZNZ:
+            if (jump_op->op2.jmp_addr > jump_op) {
+              jump_target = jump_op->op2.jmp_addr;
+              if (jump_predicate == NULL)
+                jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
+            }
+            break;
+          case ZEND_JMPZ_EX:
+          case ZEND_JMPNZ_EX:
+            if (jump_op->op2.jmp_addr > jump_op) {
+              jump_op = jump_op->op2.jmp_addr;
+              if (jump_predicate == NULL)
+                jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
+              continue;
+              //jump_target = op->op2.jmp_addr;
+              //jump_predicate = get_zval(execute_data, &op->result, op->result_type);
+            }
+            break;
+        }
+        break;
+      }
+
+      if (jump_target != NULL) {
+        taint_variable_t *taint = taint_var_get(jump_predicate);
+        if (taint != NULL) {
+          pending_implicit_taint.end_op = jump_target;
+          pending_implicit_taint.taint = taint;
+          pending_implicit_taint.last_applied_op_index = -1;
+        }
+      }
+    }
 
 #ifdef PLOG_CFG
-  if (!opcode_verified && current_session.user_level < 2) {
-    plog(cur_frame.cfm.app, PLOG_TYPE_CFG, "opcode unverified %s %04d(L%04d)%s\n",
-         zend_get_opcode_name(op->opcode), OP_INDEX(op_array, op), op->lineno,
-         site_relative_path(cur_frame.cfm.app, op_array));
-  }
+    if (!opcode_verified && current_session.user_level < 2) {
+      plog(cur_frame.cfm.app, PLOG_TYPE_CFG, "opcode unverified %s %04d(L%04d)%s\n",
+           zend_get_opcode_name(op->opcode), OP_INDEX(op_array, op), op->lineno,
+           site_relative_path(cur_frame.cfm.app, op_array));
+    }
 #endif
-
+  }
   /*
   if (is_lambda_call_init(op)) {
     if ((op->op2_type == IS_CV || op->op2_type == IS_VAR) &&
@@ -1402,48 +1391,46 @@ void opcode_executing(const zend_op *op)
 
 static void db_site_modification(const char *table_name, const char *column_name, uint64 table_key)
 {
-  if (is_taint_analysis_enabled()) {
-    evo_taint_t lookup = { table_name, column_name, table_key };
-    uint64 hash = hash_string(table_name) ^ hash_string(column_name) ^ table_key; // crowd low bits
+  evo_taint_t lookup = { table_name, column_name, table_key };
+  uint64 hash = hash_string(table_name) ^ hash_string(column_name) ^ table_key; // crowd low bits
 
-    // or unique via: `INSERT INTO table_tags (tag) VALUES ('tag_a'),('tab_b'),('tag_c') ON DUPLICATE KEY UPDATE tag=tag;`
-    if (!sctable_has_value(&evo_taint_table, hash, &lookup)) {
-      evo_taint_t *taint = PROCESS_NEW(evo_taint_t);
-      taint->table_key = table_key;
-      taint->table_name = strdup(table_name);
-      taint->column_name = strdup(column_name);
-      sctable_add(&evo_taint_table, hash, taint);
-    }
-
-    if (cur_frame.cfm.app != NULL)
-      plog(cur_frame.cfm.app, PLOG_TYPE_DB_MOD, "%s.%s[%lld]\n", table_name, column_name, table_key);
+  // or unique via: `INSERT INTO table_tags (tag) VALUES ('tag_a'),('tab_b'),('tag_c') ON DUPLICATE KEY UPDATE tag=tag;`
+  if (!sctable_has_value(&evo_taint_table, hash, &lookup)) {
+    evo_taint_t *taint = PROCESS_NEW(evo_taint_t);
+    taint->table_key = table_key;
+    taint->table_name = strdup(table_name);
+    taint->column_name = strdup(column_name);
+    sctable_add(&evo_taint_table, hash, taint);
   }
+
+  if (cur_frame.cfm.app != NULL)
+    plog(cur_frame.cfm.app, PLOG_TYPE_DB_MOD, "%s.%s[%lld]\n", table_name, column_name, table_key);
 }
 
 static void evo_state_synch()
 {
-  if (is_taint_analysis_enabled()) {
+  if (IS_CFI_EVO()) {
     char evo_state_query[EVO_STATE_QUERY_MAX_LENGTH];
     MYSQL_RES *result;
     MYSQL_ROW row;
-    unsigned long long id;
+    uint64 request_id;
 
     snprintf(evo_state_query, EVO_STATE_QUERY_MAX_LENGTH, EVO_STATE_QUERY, evo_last_synch_request_id);
     if (mysql_real_query(db_connection, evo_state_query, strlen(evo_state_query)) != 0) {
       if (mysql_field_count(db_connection))
-        ERROR("Error querying evolution state.\n");
+        ERROR("Failed to query the evolution state: %s.\n", mysql_sqlstate(db_connection));
     } else {
       result = mysql_store_result(db_connection);
       if (result == NULL) {
         if (mysql_field_count(db_connection))
-          ERROR("Error querying evolution state.\n");
+          ERROR("Failed to store the evolution state query result: %s.\n", mysql_sqlstate(db_connection));
       } else {
         while ((row = mysql_fetch_row(result)) != NULL) {
           if (row[0] == NULL || strlen(row[0]) == 0)
             break;
-          id = strtoull(row[0], NULL, 10);
-          if (id > evo_last_synch_request_id)
-            evo_last_synch_request_id = id;
+          request_id = strtoull(row[0], NULL, 10);
+          if (request_id > evo_last_synch_request_id)
+            evo_last_synch_request_id = request_id;
           db_site_modification(row[1], row[2], strtoull(row[3], NULL, 10));
         }
         mysql_free_result(result);
@@ -1487,7 +1474,7 @@ static bool is_key_index(int *indexes, uint index_count, int target)
 void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
               const zval **values)
 {
-  if (is_taint_analysis_enabled() && field_count > 0 && current_session.user_level < 2) {
+  if (IS_CFI_EVO() && field_count > 0 && current_session.user_level < 2) {
     taint_variable_t *var;
     site_modification_t *mod;
 
@@ -1581,12 +1568,13 @@ static inline bool is_db_write(const char *query) {
   return false;
 }
 
-/* returns true if admin is logged in */
-void db_query(void *app_db_connection_opaque, const char *query)
+/* returns true if admin is logged in and the query appears to be a DB write */
+monitor_query_flags_t db_query(const char *query)
 {
+  monitor_query_flags_t flags = 0;
   bool is_admin = current_session.user_level > 2;
 
-  if (is_taint_analysis_enabled() && is_admin) { // && TAINT_ALL) {
+  if (IS_CFI_EVO() && is_admin) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
 
@@ -1594,20 +1582,13 @@ void db_query(void *app_db_connection_opaque, const char *query)
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   }
 
-  if (false && is_db_write(query)) {
-    MYSQL *app_db_connection = (MYSQL *) app_db_connection_opaque;
-    const evo_query_t *set_admin = (is_admin ? &evo_set_admin : &evo_unset_admin);
-
-    if (mysql_real_query(app_db_connection, set_admin->query, set_admin->len) != 0)
-      ERROR("Failed to set evo admin state: %s.\n", mysql_sqlstate(app_db_connection));
-    else
-      SPOT("Set evo admin state to %d\n", is_admin);
-  }
-}
-
-zend_bool is_admin()
-{
-  return current_session.user_level > 2;
+  if (IS_CFI_EVO()) {
+    if (is_admin)
+      flags |= MONITOR_QUERY_FLAG_IS_ADMIN;
+  } /* else always skip the triggers */
+  if (is_db_write(query))
+    flags |= MONITOR_QUERY_FLAG_IS_WRITE;
+  return flags;
 }
 
 zend_bool internal_dataflow(const zval *src, const char *src_name,
@@ -1616,7 +1597,7 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
 {
   zend_bool has_taint = false;
 
-  if (cur_frame.execute_data == NULL)
+  if (!IS_CFI_EVO() || cur_frame.execute_data == NULL)
     return has_taint;
 
   /*

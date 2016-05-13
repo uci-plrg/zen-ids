@@ -128,22 +128,33 @@ bool cfg_has_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_ind
   return false;
 }
 
+// maybe change these two functions to cfg_add_or_update_routine_edge()?
+
 void cfg_add_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_index,
                           routine_cfg_t *to_routine, uint to_index,
                           user_level_t user_level)
 {
   uint64 key = HASH_ROUTINE_EDGE(from_routine, to_routine);
   cfg_routine_edge_entry_t *key_entry = sctable_lookup(&cfg->routine_edges, key);
-  cfg_routine_edge_entry_t *cfg_entry = PROCESS_NEW(cfg_routine_edge_entry_t);
-  memset(cfg_entry, 0, sizeof(cfg_routine_edge_entry_t));
-  cfg_entry->next = key_entry;
-  sctable_add_or_replace(&cfg->routine_edges, key, cfg_entry);
 
-  cfg_entry->edge.from_index = from_index;
-  cfg_entry->edge.to_index = to_index;
-  cfg_entry->edge.from_routine = from_routine;
-  cfg_entry->edge.to_routine = to_routine;
-  cfg_entry->edge.user_level = user_level;
+  if (key_entry != NULL && is_same_routine_cfg(key_entry->edge.from_routine, from_routine) &&
+      key_entry->edge.from_index == from_index &&
+      is_same_routine_cfg(key_entry->edge.to_routine, to_routine) &&
+      key_entry->edge.to_index == to_index) { /* on collision it might be down the chain--just add in that case */
+    if (user_level < key_entry->edge.user_level)
+      key_entry->edge.user_level = user_level;
+  } else {
+    cfg_routine_edge_entry_t *cfg_entry = PROCESS_NEW(cfg_routine_edge_entry_t);
+    memset(cfg_entry, 0, sizeof(cfg_routine_edge_entry_t));
+    cfg_entry->next = key_entry;
+    sctable_add_or_replace(&cfg->routine_edges, key, cfg_entry);
+
+    cfg_entry->edge.from_index = from_index;
+    cfg_entry->edge.to_index = to_index;
+    cfg_entry->edge.from_routine = from_routine;
+    cfg_entry->edge.to_routine = to_routine;
+    cfg_entry->edge.user_level = user_level;
+  }
 }
 
 const char *site_relative_path(application_t *app, zend_op_array *stack_frame)

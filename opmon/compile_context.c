@@ -273,7 +273,7 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.callee_hash);
   }
 
-  if (is_opcode_dump_enabled()) {
+  if (IS_OPCODE_DUMP_ENABLED()) {
     if (is_script_body)
       dump_script_header(cfm.app, routine_name, fqn->function.callee_hash);
     else
@@ -292,7 +292,7 @@ void function_compiled(zend_op_array *op_array)
     return; // verify equal?
   }
 
-  if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled())
+  if (is_static_analysis() || is_dataflow_analysis() || IS_OPCODE_DUMP_ENABLED())
     reset_fcall_stack();
   if (is_dataflow_analysis()) {
     add_dataflow_routine(fqn->unit.application, fqn->function.caller_hash, op_array,
@@ -308,7 +308,7 @@ void function_compiled(zend_op_array *op_array)
     PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
           op->opcode, i, routine_name, fqn->function.callee_hash);
 
-    if (is_opcode_dump_enabled()) {
+    if (IS_OPCODE_DUMP_ENABLED()) {
       fcall_init_t *fcall;
 
       switch (op->opcode) {
@@ -388,7 +388,7 @@ void function_compiled(zend_op_array *op_array)
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
 
-    if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled()) {
+    if (is_static_analysis() || is_dataflow_analysis() || IS_OPCODE_DUMP_ENABLED()) {
       uint to_routine_hash;
       const char *classname;
       bool ignore_call = false;
@@ -495,7 +495,7 @@ void function_compiled(zend_op_array *op_array)
             // This is matching user-defined functions...? Needs to be builtins only.
             if (func != NULL && Z_TYPE_P(func) == IS_PTR &&
                 func->value.func->type == ZEND_INTERNAL_FUNCTION) {
-              ignore_call |= !is_opcode_dump_enabled();
+              ignore_call |= !IS_OPCODE_DUMP_ENABLED();
               sprintf(routine_name, "builtin:%s", Z_STRVAL_P(op->op2.zv));
               push_fcall_init(cfm.app, i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);
               break; // ignore builtins for now (unless dumping ops)
