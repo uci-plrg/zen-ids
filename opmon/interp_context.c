@@ -2,6 +2,8 @@
 #include <pthread.h>
 #include <openssl/md5.h>
 
+#include <mysql.h>
+
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_utils.h"
 #include "lib/script_cfi_hashtable.h"
@@ -13,6 +15,10 @@
 #include "cfg_handler.h"
 #include "compile_context.h"
 #include "interp_context.h"
+
+// could just check if the triggers are installed
+# define OPMON_EVOLUTION 1
+// # define OPMON_LOG_SELECT 1
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
@@ -26,6 +32,21 @@
    VM_FRAME_KIND((ex)->frame_info) == VM_FRAME_TOP_FUNCTION)
 
 #define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
+
+#define MAX_BIGINT_CHARS 32
+#define EVO_STATE_QUERY "SELECT id, table_name, column_name, table_key " \
+                        "FROM opmon_evolution "                          \
+                        "WHERE request_id > %d"
+#define EVO_STATE_QUERY_MAX_LENGTH (sizeof(EVO_STATE_QUERY) + MAX_BIGINT_CHARS)
+#define EVO_STATE_QUERY_FIELD_COUNT 4
+
+/* N.B.: the evo triggers are using last_insert_id() as set by this query! */
+#define EVO_NEXT_REQUEST_ID "UPDATE opmon_request_sequence " \
+                            "SET request_id = last_insert_id(request_id + 1)"
+#define EVO_SET_ADMIN   "SET @is_admin = TRUE"
+#define EVO_UNSET_ADMIN "SET @is_admin = FALSE"
+
+#define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
 typedef struct _implicit_taint_t {
   uint id;
@@ -74,6 +95,9 @@ typedef struct _evo_taint_t {
   unsigned long long table_key;
 } evo_taint_t;
 
+typedef struct _evo_taint_queue_t {
+} evo_taint_queue_t;
+
 #define EVO_MAX_KEY_COLUMN_COUNT 2
 
 typedef struct _evo_key_t {
@@ -104,6 +128,34 @@ static evo_key_t evo_keys[] = {
   { "wp_users", 1, { "ID", NULL }, false },
 };
 
+typedef struct _evo_query_t {
+  const char *query;
+  size_t len;
+} evo_query_t;
+
+static MYSQL *db_connection = NULL;
+
+static const evo_query_t evo_next_request_id = EVO_QUERY(EVO_NEXT_REQUEST_ID);
+static const evo_query_t evo_set_admin = EVO_QUERY(EVO_SET_ADMIN);
+static const evo_query_t evo_unset_admin = EVO_QUERY(EVO_UNSET_ADMIN);
+
+static const evo_query_t command_insert = EVO_QUERY("insert");
+static const evo_query_t command_update = EVO_QUERY("update");
+static const evo_query_t command_replace = EVO_QUERY("replace");
+static const evo_query_t command_call = EVO_QUERY("call");
+static const evo_query_t command_last = EVO_QUERY("");
+
+static const evo_query_t *db_write_commands[] = {
+  &command_insert,
+  &command_update,
+  &command_replace,
+  &command_call,
+  &command_last
+};
+#define DB_WRITE_COMMAND_COUNT ((sizeof(db_write_commands) / sizeof(evo_query_t *)) - 1)
+
+static uint64 evo_last_synch_request_id = 0ULL;
+
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
 static exception_frame_t *exception_frame;
 
@@ -117,6 +169,8 @@ static stack_frame_t cur_frame;
 static stack_event_t stack_event;
 
 static user_session_t current_session;
+
+static uint64 request_id = 0;
 
 static uint op_execution_count = 0;
 
@@ -136,6 +190,8 @@ static sctable_t evo_key_table;
 static sctable_t evo_taint_table;
 
 #define CONTEXT_ENTRY 0xffffffffU
+
+static void evo_state_synch();
 
 static uint get_first_executable_index(zend_op *opcodes)
 {
@@ -199,6 +255,12 @@ void initialize_interp_context()
   evo_taint_table.hash_bits = 8;
   evo_taint_table.comparator = evo_taint_comparator;
   sctable_init(&evo_taint_table);
+
+  db_connection = mysql_init(NULL);
+  if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
+    ERROR("Failed to connect to the database!\n");
+  else
+    SPOT("Connected to the database!\n");
 }
 
 void initialize_interp_app_context(application_t *app)
@@ -222,13 +284,38 @@ void destroy_interp_app_context(application_t *app)
 {
   routine_cfg_free(((stack_frame_t *) app->base_frame)->cfm.cfg);
   PROCESS_FREE(app->base_frame);
+  mysql_close(db_connection);
 }
 
-void implicit_taint_clear()
+void interp_request_boundary(bool is_first)
 {
-  sctable_clear(&implicit_taint_table);
-  implicit_taint_id = 0;
-  implicit_taint_call_chain_start_frame = NULL;
+  if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0) {
+    ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
+  } else {
+    MYSQL_RES *result = mysql_store_result(db_connection);
+
+    if (result == NULL) {
+      ERROR("Error querying evolution state.\n");
+    } else {
+      MYSQL_ROW row = mysql_fetch_row(result);
+      if (row == NULL || row[0] == NULL || strlen(row[0]) == 0) {
+        ERROR("Error querying evolution state.\n");
+      } else {
+        request_id = strtoull(row[0], NULL, 10);
+
+        SPOT("Starting request #%lld\n", request_id);
+      }
+      mysql_free_result(result);
+    }
+  }
+
+  evo_state_synch();
+
+  if (!is_first) {
+    sctable_clear(&implicit_taint_table);
+    implicit_taint_id = 0;
+    implicit_taint_call_chain_start_frame = NULL;
+  }
 }
 
 static void push_exception_frame()
@@ -1313,13 +1400,11 @@ void opcode_executing(const zend_op *op)
   */
 }
 
-void db_site_modification(const char *table_name, const char *column_name, uint64 table_key)
+static void db_site_modification(const char *table_name, const char *column_name, uint64 table_key)
 {
   if (is_taint_analysis_enabled()) {
     evo_taint_t lookup = { table_name, column_name, table_key };
     uint64 hash = hash_string(table_name) ^ hash_string(column_name) ^ table_key; // crowd low bits
-    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
-    zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
 
     // or unique via: `INSERT INTO table_tags (tag) VALUES ('tag_a'),('tab_b'),('tag_c') ON DUPLICATE KEY UPDATE tag=tag;`
     if (!sctable_has_value(&evo_taint_table, hash, &lookup)) {
@@ -1330,9 +1415,40 @@ void db_site_modification(const char *table_name, const char *column_name, uint6
       sctable_add(&evo_taint_table, hash, taint);
     }
 
-    plog(cur_frame.cfm.app, PLOG_TYPE_DB_MOD, "%s.%s[%lld] at %04d(L%04d)%s\n",
-         table_name, column_name, table_key,
-         cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+    if (cur_frame.cfm.app != NULL)
+      plog(cur_frame.cfm.app, PLOG_TYPE_DB_MOD, "%s.%s[%lld]\n", table_name, column_name, table_key);
+  }
+}
+
+static void evo_state_synch()
+{
+  if (is_taint_analysis_enabled()) {
+    char evo_state_query[EVO_STATE_QUERY_MAX_LENGTH];
+    MYSQL_RES *result;
+    MYSQL_ROW row;
+    unsigned long long id;
+
+    snprintf(evo_state_query, EVO_STATE_QUERY_MAX_LENGTH, EVO_STATE_QUERY, evo_last_synch_request_id);
+    if (mysql_real_query(db_connection, evo_state_query, strlen(evo_state_query)) != 0) {
+      if (mysql_field_count(db_connection))
+        ERROR("Error querying evolution state.\n");
+    } else {
+      result = mysql_store_result(db_connection);
+      if (result == NULL) {
+        if (mysql_field_count(db_connection))
+          ERROR("Error querying evolution state.\n");
+      } else {
+        while ((row = mysql_fetch_row(result)) != NULL) {
+          if (row[0] == NULL || strlen(row[0]) == 0)
+            break;
+          id = strtoull(row[0], NULL, 10);
+          if (id > evo_last_synch_request_id)
+            evo_last_synch_request_id = id;
+          db_site_modification(row[1], row[2], strtoull(row[3], NULL, 10));
+        }
+        mysql_free_result(result);
+      }
+    }
   }
 }
 
@@ -1455,10 +1571,20 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
   }
 }
 
+static inline bool is_db_write(const char *query) {
+  const evo_query_t *command = db_write_commands[0], *last = db_write_commands[DB_WRITE_COMMAND_COUNT];
+
+  for (; command < last; command++) {
+    if (strncasecmp(query, command->query, command->len) == 0)
+      return true;
+  }
+  return false;
+}
+
 /* returns true if admin is logged in */
-void db_query(const char *query)
+void db_query(void *app_db_connection_opaque, const char *query)
 {
-  zend_bool is_admin = current_session.user_level > 2;
+  bool is_admin = current_session.user_level > 2;
 
   if (is_taint_analysis_enabled() && is_admin) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
@@ -1466,6 +1592,16 @@ void db_query(const char *query)
 
     plog(cur_frame.cfm.app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query,
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+  }
+
+  if (false && is_db_write(query)) {
+    MYSQL *app_db_connection = (MYSQL *) app_db_connection_opaque;
+    const evo_query_t *set_admin = (is_admin ? &evo_set_admin : &evo_unset_admin);
+
+    if (mysql_real_query(app_db_connection, set_admin->query, set_admin->len) != 0)
+      ERROR("Failed to set evo admin state: %s.\n", mysql_sqlstate(app_db_connection));
+    else
+      SPOT("Set evo admin state to %d\n", is_admin);
   }
 }
 

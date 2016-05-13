@@ -496,9 +496,9 @@ void cfg_destroy_application(application_t *app)
   destroy_interp_app_context(app);
 }
 
-void cfg_request(bool start)
+void cfg_request_boundary(bool is_first)
 {
-  request_state.is_in_request = start;
+  request_state.is_in_request = is_first;
 
   if (request_state.is_in_request) {
     php_server_context_t *context = (php_server_context_t *) SG(server_context);

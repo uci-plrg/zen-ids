@@ -44,12 +44,12 @@ static void init_worker()
 
 static void request_boundary(bool is_first)
 {
-  cfg_request(is_first);
+  cfg_request_boundary(is_first);
+  interp_request_boundary(is_first);
 
   if (!is_first) {
     scfree_request();
     taint_clear();
-    implicit_taint_clear();
   }
 }
 
@@ -122,10 +122,8 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->dataflow.notify_dataflow = internal_dataflow;
   monitor->notify_zval_free = taint_var_free;
   monitor->notify_http_request = request_boundary;
-  monitor->notify_database_site_modification = db_site_modification;
   monitor->notify_database_fetch = db_fetch;
   monitor->notify_database_query = db_query;
-  monitor->current_user_is_admin = is_admin;
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;
   monitor->opmon_dataflow = start_dataflow_analysis;

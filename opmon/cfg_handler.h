@@ -6,7 +6,7 @@
 #include "cfg.h"
 #include "taint.h"
 
-//#define PLOG_TAINT 1
+#define PLOG_TAINT 1
 #define PLOG_CFG 1
 #define PLOG_DB 1
 #define PLOG_DB_MOD 1
@@ -42,7 +42,7 @@ void server_startup();
 
 void cfg_initialize_application(application_t *app);
 void cfg_destroy_application(application_t *app);
-void cfg_request(bool start);
+void cfg_request_boundary(bool is_first);
 void cfg_form(const char *form_data, int length);
 
 void write_node(application_t *app, uint routine_hash, cfg_opcode_t *opcode, uint index);

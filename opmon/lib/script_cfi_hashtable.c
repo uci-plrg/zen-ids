@@ -115,6 +115,7 @@ sctable_init(sctable_t *t)
   t->data = (sctable_entry_t **)
     TABLE_ALLOC(t->capacity * sizeof(sctable_entry_t *));
   memset(t->data, 0, t->capacity * sizeof(sctable_entry_t *));
+  t->entry_pool = NULL;
 }
 
 void
