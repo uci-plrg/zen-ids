@@ -96,21 +96,20 @@ typedef struct _evo_taint_queue_t {
 
 typedef enum _pending_cfg_patch_type_t {
   PENDING_ROUTINE_EDGE,
-  PENDING_OPCODE_EDGE_ADD,
-  PENDING_OPCODE_EDGE_WRITE,
+  PENDING_OPCODE_EDGE,
   PENDING_NODE_USER_LEVEL,
 } pending_cfg_patch_type_t;
 
 typedef struct _pending_cfg_patch_t {
   pending_cfg_patch_type_t type;
   union {
-    cfg_t *cfg;                         /* PENDING_ROUTINE_EDGE_ADD */
-    application_t *app;                 /* PENDING_ROUTINE_EDGE_WRITE, PENDING_OPCODE_EDGE_WRITE */
+    cfg_t *cfg;                         /* PENDING_ROUTINE_EDGE */
+    application_t *app;                 /* PENDING_ROUTINE_EDGE, PENDING_OPCODE_EDGE */
   };
   union {
     cfg_opcode_t *cfg_opcode;           /* PENDING_NODE_USER_LEVEL */
-    routine_cfg_t *from_routine;        /* PENDING_ROUTINE_EDGE_ADD, PENDING_ROUTINE_EDGE_WRITE */
-    routine_cfg_t *routine;             /* PENDING_OPCODE_EDGE_ADD, PENDING_OPCODE_EDGE_WRITE */
+    routine_cfg_t *from_routine;        /* PENDING_ROUTINE_EDGE */
+    routine_cfg_t *routine;             /* PENDING_OPCODE_EDGE */
   };
   routine_cfg_t *to_routine;
   uint from_index;
@@ -370,7 +369,7 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
     if (implicit_taint_call_chain_start_frame == NULL) {
       if (cur_frame.implicit_taint != NULL) {
         implicit_taint_call_chain_start_frame = from_frame->execute_data;
-        add = true; /* evo: pending add */
+        add = true;
 
         plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain activated at %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
@@ -1041,7 +1040,7 @@ void opcode_executing(const zend_op *op)
   const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
   const zval *jump_predicate = NULL;
   bool stack_pointer_moved, is_loopback, caught_exception = false;
-  bool opcode_verified = false, add_opcode_edge = false, change_opcode_user_level = false;
+  bool opcode_verified = false, opcode_edge_needs_update = false, taint_lowers_op_user_level = false;
   uint op_user_level = USER_LEVEL_TOP;
   cfg_opcode_t *expected_opcode = NULL;
 
@@ -1263,7 +1262,6 @@ void opcode_executing(const zend_op *op)
     } else if (!caught_exception) {
       uint i;
       bool edge_found = false, edge_changed = false;
-      zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
 
       for (i = 0; i < cur_frame.cfm.cfg->opcode_edges.size; i++) {
         cfg_opcode_edge_t *edge = routine_cfg_get_opcode_edge(cur_frame.cfm.cfg, i);
@@ -1278,25 +1276,8 @@ void opcode_executing(const zend_op *op)
           }
         }
       }
-      add_opcode_edge = !edge_found || edge_changed;
-      if (add_opcode_edge) {
-        compiled_edge_target_t compiled_target;
-        compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
-        if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
-          WARN("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
-               compiled_target.type, op->opcode);
-        }
-
-        if (!edge_found) { /* opcode edge is never verified online, but affects user levels in the dataset */
-          pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
-          patch->type = PENDING_OPCODE_EDGE_ADD;
-          patch->routine = cur_frame.cfm.cfg;
-          patch->from_index = prev_frame.op_index;
-          patch->to_index = cur_frame.op_index;
-          patch->user_level = current_session.user_level;
-          scarray_append(&pending_cfg_patches, patch);
-        }
-      } else { // slightly weak
+      opcode_edge_needs_update = !edge_found || edge_changed;
+      if (!opcode_edge_needs_update) {
         PRINT("@ Verified opcode edge %u -> %u\n", prev_frame.op_index, cur_frame.op_index);
         /* not marking `opcode_verified` because taint is required on every pass */
       }
@@ -1321,7 +1302,7 @@ void opcode_executing(const zend_op *op)
              OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, implicit->end_op),
              implicit->end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
 
-        change_opcode_user_level = true;
+        taint_lowers_op_user_level = true;
       }
 
       pending_implicit_taint.end_op = NULL;
@@ -1363,7 +1344,7 @@ void opcode_executing(const zend_op *op)
              OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
         plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
         */
-        change_opcode_user_level = true;
+        taint_lowers_op_user_level = true;
 
         if (is_return(op->opcode))
           remove_implicit_taint();
@@ -1371,7 +1352,7 @@ void opcode_executing(const zend_op *op)
         if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
             last_executed_op->opcode == ZEND_JMP &&
             last_executed_op < cur_frame.implicit_taint->end_op) {
-          change_opcode_user_level = true; /* extend to bottom of branch diamond */
+          taint_lowers_op_user_level = true; /* extend to bottom of branch diamond */
         }
         remove_implicit_taint();
       }
@@ -1424,18 +1405,27 @@ void opcode_executing(const zend_op *op)
 #endif
   }
 
-  if (IS_CFI_TRAINING() || (change_opcode_user_level && add_opcode_edge)) {
+  if (IS_CFI_TRAINING() || (opcode_edge_needs_update && taint_lowers_op_user_level)) {
+    compiled_edge_target_t compiled_target;
+    zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
+
     pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
-    patch->type = PENDING_OPCODE_EDGE_WRITE;
+    patch->type = PENDING_OPCODE_EDGE;
     patch->app = cur_frame.cfm.app;
     patch->routine = cur_frame.cfm.cfg;
     patch->from_index = prev_frame.op_index;
     patch->to_index = cur_frame.op_index;
     patch->user_level = current_session.user_level;
     scarray_append(&pending_cfg_patches, patch);
+
+    compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
+    if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
+      ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
+           compiled_target.type, op->opcode);
+    }
   }
 
-  if (change_opcode_user_level) {
+  if (taint_lowers_op_user_level) {
     pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
     patch->type = PENDING_NODE_USER_LEVEL;
     patch->cfg_opcode = expected_opcode;
@@ -1518,11 +1508,9 @@ static void evo_commit_pending_patches()
         write_routine_edge(patch->app, patch->from_routine->routine_hash, patch->from_index,
                            patch->to_routine->routine_hash, patch->to_index, patch->user_level);
         break;
-      case PENDING_OPCODE_EDGE_ADD:
+      case PENDING_OPCODE_EDGE:
         routine_cfg_add_opcode_edge(patch->from_routine, patch->from_index, patch->to_index,
                                     patch->user_level);
-        break;
-      case PENDING_OPCODE_EDGE_WRITE:
         write_op_edge(patch->app, patch->from_routine->routine_hash, patch->from_index,
                       patch->to_index, patch->user_level);
         break;
