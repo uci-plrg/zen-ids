@@ -94,6 +94,30 @@ typedef struct _evo_taint_t {
 typedef struct _evo_taint_queue_t {
 } evo_taint_queue_t;
 
+typedef enum _pending_cfg_patch_type_t {
+  PENDING_ROUTINE_EDGE,
+  PENDING_OPCODE_EDGE_ADD,
+  PENDING_OPCODE_EDGE_WRITE,
+  PENDING_NODE_USER_LEVEL,
+} pending_cfg_patch_type_t;
+
+typedef struct _pending_cfg_patch_t {
+  pending_cfg_patch_type_t type;
+  union {
+    cfg_t *cfg;                         /* PENDING_ROUTINE_EDGE_ADD */
+    application_t *app;                 /* PENDING_ROUTINE_EDGE_WRITE, PENDING_OPCODE_EDGE_WRITE */
+  };
+  union {
+    cfg_opcode_t *cfg_opcode;           /* PENDING_NODE_USER_LEVEL */
+    routine_cfg_t *from_routine;        /* PENDING_ROUTINE_EDGE_ADD, PENDING_ROUTINE_EDGE_WRITE */
+    routine_cfg_t *routine;             /* PENDING_OPCODE_EDGE_ADD, PENDING_OPCODE_EDGE_WRITE */
+  };
+  routine_cfg_t *to_routine;
+  uint from_index;
+  uint to_index;
+  user_level_t user_level;
+} pending_cfg_patch_t;
+
 #define EVO_MAX_KEY_COLUMN_COUNT 2
 
 typedef struct _evo_key_t {
@@ -175,10 +199,13 @@ static zend_op entry_op;
 static zend_execute_data *trace_start_frame = NULL;
 static bool trace_all_opcodes = false;
 
+static bool request_blocked = false;
+
 static sctable_t implicit_taint_table; // todo: allocate entries per request and clear via erase()
 static implicit_taint_t pending_implicit_taint = { 0, NULL, NULL, -1 };
 static uint implicit_taint_id = 0;
 static zend_execute_data *implicit_taint_call_chain_start_frame = NULL;
+static scarray_t pending_cfg_patches;
 
 static sctable_t evo_key_table;
 static sctable_t evo_taint_table;
@@ -186,6 +213,7 @@ static sctable_t evo_taint_table;
 #define CONTEXT_ENTRY 0xffffffffU
 
 static void evo_state_synch();
+static void evo_commit_pending_patches();
 
 static uint get_first_executable_index(zend_op *opcodes)
 {
@@ -221,7 +249,7 @@ void initialize_interp_context()
   void_frame.cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
   cur_frame = prev_frame = void_frame;
   routine_cfg_assign_opcode(cur_frame.cfm.cfg, ENTRY_POINT_OPCODE,
-                            ENTRY_POINT_EXTENDED_VALUE, 0, 0);
+                            ENTRY_POINT_EXTENDED_VALUE, 0, 0, USER_LEVEL_TOP);
 
   memset(exception_stack, 0, 2 * sizeof(exception_frame_t));
   exception_frame = exception_stack + 1;
@@ -251,6 +279,8 @@ void initialize_interp_context()
     evo_taint_table.comparator = evo_taint_comparator;
     sctable_init(&evo_taint_table);
 
+    scarray_init(&pending_cfg_patches);
+
     db_connection = mysql_init(NULL);
     if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
       ERROR("Failed to connect to the database!\n");
@@ -269,7 +299,7 @@ void initialize_interp_app_context(application_t *app)
   base_frame->cfm.app = app;
   app->base_frame = (void *) base_frame;
   routine_cfg_assign_opcode(base_frame->cfm.cfg, ENTRY_POINT_OPCODE,
-                            ENTRY_POINT_EXTENDED_VALUE, 0, 0);
+                            ENTRY_POINT_EXTENDED_VALUE, 0, 0, USER_LEVEL_TOP);
 
   base_frame->cfm.dataset = dataset_routine_lookup(app, ENTRY_POINT_HASH);
   if (base_frame->cfm.dataset == NULL)
@@ -285,20 +315,26 @@ void destroy_interp_app_context(application_t *app)
     mysql_close(db_connection);
 }
 
-void interp_request_boundary(bool is_first)
+void interp_request_boundary(bool is_request_start)
 {
   if (IS_CFI_EVO()) {
-    if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
-      ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
-    else
-      request_id = mysql_insert_id(db_connection);
+    if (is_request_start) {
+      if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
+        ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
+      else
+        request_id = mysql_insert_id(db_connection);
+      evo_state_synch();
+    }
 
-    evo_state_synch();
-
-    if (!is_first) {
+    if (!is_request_start) {
       sctable_clear(&implicit_taint_table);
       implicit_taint_id = 0;
       implicit_taint_call_chain_start_frame = NULL;
+
+      if (!request_blocked)
+        evo_commit_pending_patches();
+      pending_cfg_patches.size = 0;
+      request_blocked = false;
     }
   }
 }
@@ -314,7 +350,7 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
 {
   control_flow_metadata_t *from_cfm = &from_frame->cfm;
   zend_op *from_op = &from_frame->opcodes[from_frame->op_index];
-  bool verified = false, added = false;
+  bool verified = false, add = false;
 
   if (current_session.user_level >= 2)
     return;
@@ -334,30 +370,37 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
     if (implicit_taint_call_chain_start_frame == NULL) {
       if (cur_frame.implicit_taint != NULL) {
         implicit_taint_call_chain_start_frame = from_frame->execute_data;
-        added = true;
-        cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
-                             to_frame->cfm.cfg, to_index, current_session.user_level);
+        add = true; /* evo: pending add */
 
         plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain activated at %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       }
     } else {
-      added = true;
-      cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
-                           to_frame->cfm.cfg, to_index, current_session.user_level);
+      add = true;
 
       plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain allows %04d(L%04d) %s -> %s\n",
            from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
     }
   }
 
-  if (write_routine_edge(added, from_cfm->app, from_cfm->cfg->routine_hash, from_frame->op_index,
+  if (write_request_edge(add, from_cfm->app, from_cfm->cfg->routine_hash, from_frame->op_index,
                          to_frame->cfm.cfg->routine_hash, to_index, current_session.user_level)) {
     if (!verified) {
-      if (added) {
-        plog(from_cfm->app, PLOG_TYPE_CFG, "add taint-verified: %04d(L%04d) %s -> %s\n",
+      if (add) {
+        pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
+        patch->type = PENDING_ROUTINE_EDGE;
+        patch->app = from_cfm->app;
+        patch->from_routine = from_cfm->cfg;
+        patch->to_routine = to_frame->cfm.cfg;
+        patch->from_index = from_frame->op_index;
+        patch->to_index = to_index;
+        patch->user_level = current_session.user_level;
+        scarray_append(&pending_cfg_patches, patch);
+
+        plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       } else {
+        request_blocked = true;
         if (to_index == 0) {
           plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
@@ -383,7 +426,9 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
                          current_session.user_level);
   }
 
-  write_routine_edge(add_routine_edge, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+  write_request_edge(add_routine_edge, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+                     to_cfg->routine_hash, to_index, current_session.user_level);
+  write_routine_edge(from_cfm->app, from_cfm->cfg->routine_hash, from_index,
                      to_cfg->routine_hash, to_index, current_session.user_level);
 }
 
@@ -391,6 +436,7 @@ static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, 
 {
   bool write_edge = true;
 
+  /*
   if (cfm->dataset != NULL) {
     if (dataset_verify_opcode_edge(cfm->dataset, from_index, to_index)) {
       write_edge = false;
@@ -398,6 +444,7 @@ static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, 
             cfm->cfg->routine_hash, from_index, to_index);
     }
   }
+  */
 
   if (write_edge) {
     WARN("<MON> New opcode edge [0x%x %u -> %u ul#%d]\n",
@@ -994,8 +1041,9 @@ void opcode_executing(const zend_op *op)
   const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
   const zval *jump_predicate = NULL;
   bool stack_pointer_moved, is_loopback, caught_exception = false;
-  bool opcode_verified = false, new_opcode_edge_pending;
+  bool opcode_verified = false, add_opcode_edge = false, change_opcode_user_level = false;
   uint op_user_level = USER_LEVEL_TOP;
+  cfg_opcode_t *expected_opcode = NULL;
 
   update_user_session();
 
@@ -1149,7 +1197,7 @@ void opcode_executing(const zend_op *op)
       if (exception_frame->execute_data == cur_frame.execute_data) {
         if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, exception_frame->throw_index,
                                          cur_frame.op_index)) {
-          generate_opcode_edge(&cur_frame.cfm, exception_frame->throw_index,
+          generate_opcode_edge(&cur_frame.cfm, exception_frame->throw_index, /* evo: ??? */
                                cur_frame.op_index);
         } else {
           PRINT("(skipping existing exception edge)\n");
@@ -1174,17 +1222,12 @@ void opcode_executing(const zend_op *op)
     ERROR("No cfg for opcodes at "PX"|"PX"\n", p2int(execute_data),
           p2int(execute_data->func->op_array.opcodes));
   } else {
-    cfg_opcode_t *expected_opcode;
-
     if (cur_frame.op_index >= cur_frame.cfm.cfg->opcodes.size) {
       ERROR("attempt to execute foobar op %u in opcodes "PX"|"PX" of routine 0x%x\n",
             cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
             cur_frame.cfm.cfg->routine_hash);
       return;
     }
-
-    if (cur_frame.cfm.dataset != NULL)
-      op_user_level = dataset_routine_get_node_user_level(cur_frame.cfm.dataset, cur_frame.op_index);
 
     PRINT("@ Executing %s at index %u of 0x%x (user level %d)\n",
           zend_get_opcode_name(cur_frame.opcode), cur_frame.op_index,
@@ -1199,6 +1242,11 @@ void opcode_executing(const zend_op *op)
             zend_get_opcode_name(cur_frame.opcode), p2int(execute_data),
             p2int(op_array->opcodes), cur_frame.cfm.cfg->routine_hash);
       op_user_level = USER_LEVEL_TOP;
+    } else {
+      if (cur_frame.cfm.dataset != NULL)
+        op_user_level = dataset_routine_get_node_user_level(cur_frame.cfm.dataset, cur_frame.op_index);
+      if (expected_opcode->user_level < op_user_level)
+        op_user_level = expected_opcode->user_level;
     }
 
     // slightly weak for returns: not checking continuation pc
@@ -1230,8 +1278,8 @@ void opcode_executing(const zend_op *op)
           }
         }
       }
-      new_opcode_edge_pending = !edge_found || edge_changed;
-      if (new_opcode_edge_pending) {
+      add_opcode_edge = !edge_found || edge_changed;
+      if (add_opcode_edge) {
         compiled_edge_target_t compiled_target;
         compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
         if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
@@ -1239,9 +1287,14 @@ void opcode_executing(const zend_op *op)
                compiled_target.type, op->opcode);
         }
 
-        if (!edge_found) {
-          routine_cfg_add_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index, cur_frame.op_index,
-                                      current_session.user_level);
+        if (!edge_found) { /* opcode edge is never verified online, but affects user levels in the dataset */
+          pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
+          patch->type = PENDING_OPCODE_EDGE_ADD;
+          patch->routine = cur_frame.cfm.cfg;
+          patch->from_index = prev_frame.op_index;
+          patch->to_index = cur_frame.op_index;
+          patch->user_level = current_session.user_level;
+          scarray_append(&pending_cfg_patches, patch);
         }
       } else { // slightly weak
         PRINT("@ Verified opcode edge %u -> %u\n", prev_frame.op_index, cur_frame.op_index);
@@ -1268,7 +1321,7 @@ void opcode_executing(const zend_op *op)
              OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, implicit->end_op),
              implicit->end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
 
-        opcode_verified = true;
+        change_opcode_user_level = true;
       }
 
       pending_implicit_taint.end_op = NULL;
@@ -1310,7 +1363,7 @@ void opcode_executing(const zend_op *op)
              OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
         plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
         */
-        opcode_verified = true;
+        change_opcode_user_level = true;
 
         if (is_return(op->opcode))
           remove_implicit_taint();
@@ -1318,7 +1371,7 @@ void opcode_executing(const zend_op *op)
         if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
             last_executed_op->opcode == ZEND_JMP &&
             last_executed_op < cur_frame.implicit_taint->end_op) {
-          opcode_verified = true; /* extend to bottom of branch diamond */
+          change_opcode_user_level = true; /* extend to bottom of branch diamond */
         }
         remove_implicit_taint();
       }
@@ -1371,8 +1424,24 @@ void opcode_executing(const zend_op *op)
 #endif
   }
 
-  if (IS_CFI_TRAINING() || (opcode_verified && new_opcode_edge_pending))
-    generate_opcode_edge(&cur_frame.cfm, prev_frame.op_index, cur_frame.op_index);
+  if (IS_CFI_TRAINING() || (change_opcode_user_level && add_opcode_edge)) {
+    pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
+    patch->type = PENDING_OPCODE_EDGE_WRITE;
+    patch->app = cur_frame.cfm.app;
+    patch->routine = cur_frame.cfm.cfg;
+    patch->from_index = prev_frame.op_index;
+    patch->to_index = cur_frame.op_index;
+    patch->user_level = current_session.user_level;
+    scarray_append(&pending_cfg_patches, patch);
+  }
+
+  if (change_opcode_user_level) {
+    pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
+    patch->type = PENDING_NODE_USER_LEVEL;
+    patch->cfg_opcode = expected_opcode;
+    patch->user_level = current_session.user_level;
+    scarray_append(&pending_cfg_patches, patch);
+  }
 
   /*
   if (is_lambda_call_init(op)) {
@@ -1434,6 +1503,35 @@ static void evo_state_synch()
       }
     }
   }
+}
+
+static void evo_commit_pending_patches()
+{
+  pending_cfg_patch_t *patch;
+
+  scarray_iterator_t *i = scarray_iterator_start(&pending_cfg_patches);
+  while ((patch = (pending_cfg_patch_t *) scarray_iterator_next(i)) != NULL) {
+    switch (patch->type) {
+      case PENDING_ROUTINE_EDGE:
+        cfg_add_routine_edge(patch->app->cfg, patch->from_routine, patch->from_index, patch->to_routine,
+                             patch->to_index, patch->user_level);
+        write_routine_edge(patch->app, patch->from_routine->routine_hash, patch->from_index,
+                           patch->to_routine->routine_hash, patch->to_index, patch->user_level);
+        break;
+      case PENDING_OPCODE_EDGE_ADD:
+        routine_cfg_add_opcode_edge(patch->from_routine, patch->from_index, patch->to_index,
+                                    patch->user_level);
+        break;
+      case PENDING_OPCODE_EDGE_WRITE:
+        write_op_edge(patch->app, patch->from_routine->routine_hash, patch->from_index,
+                      patch->to_index, patch->user_level);
+        break;
+      case PENDING_NODE_USER_LEVEL:
+        patch->cfg_opcode->user_level = patch->user_level;
+        break;
+    }
+  }
+  scarray_iterator_end(i);
 }
 
 static uint evo_key_md5(const byte *key_value, uint key_len)

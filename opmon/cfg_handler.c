@@ -496,9 +496,9 @@ void cfg_destroy_application(application_t *app)
   destroy_interp_app_context(app);
 }
 
-void cfg_request_boundary(bool is_first)
+void cfg_request_boundary(bool is_request_start)
 {
-  request_state.is_in_request = is_first;
+  request_state.is_in_request = is_request_start;
 
   if (request_state.is_in_request) {
     php_server_context_t *context = (php_server_context_t *) SG(server_context);
@@ -566,7 +566,7 @@ void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint 
 /* 4 x 4 bytes: { from_routine_hash | user_level (6) from_index (26) |
  *                to_routine_hash | to_index }
  */
-bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
+bool write_request_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
                         uint from_index, uint to_routine_hash, uint to_index,
                         user_level_t user_level)
 {
@@ -622,12 +622,6 @@ bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
     request_state.is_new_request = false;
     request_state.app = app;
   }
-  if (is_new_in_process) {
-    fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
-    fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->routine_edge);
-    fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
-    fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
-  }
   if (!is_standalone_app) {
     if (!request_state.is_in_request)
       ERROR("Routine edge occurred outside of a request!\n");
@@ -657,6 +651,18 @@ bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
   }
 
   return true;
+}
+
+void write_routine_edge(application_t *app, uint from_routine_hash, uint from_index,
+                        uint to_routine_hash, uint to_index, user_level_t user_level)
+{
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+  uint packed_from_index = from_index | (user_level << USER_LEVEL_SHIFT);
+
+  fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
 }
 
 /* text line: "<routine_hash> <unit_path>|<routine_name>" */

@@ -38,12 +38,12 @@ static void init_worker()
   worker_startup();
 }
 
-static void request_boundary(bool is_first)
+static void request_boundary(bool is_request_start)
 {
-  cfg_request_boundary(is_first);
-  interp_request_boundary(is_first);
+  cfg_request_boundary(is_request_start);
+  interp_request_boundary(is_request_start);
 
-  if (!is_first) {
+  if (!is_request_start) {
     scfree_request();
     taint_clear();
   }

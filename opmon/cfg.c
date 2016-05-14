@@ -42,7 +42,7 @@ void routine_cfg_free(routine_cfg_t *cfg) // mem-todo
 }
 
 void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_ulong extended_value,
-                               ushort line_number, uint index)
+                               ushort line_number, uint index, user_level_t user_level)
 {
   cfg_opcode_t *cfg_opcode;
 
@@ -56,6 +56,7 @@ void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_ulong
   cfg_opcode->opcode = opcode;
   cfg_opcode->extended_value = extended_value;
   cfg_opcode->line_number = line_number;
+  cfg_opcode->user_level = user_level;
 }
 
 bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)

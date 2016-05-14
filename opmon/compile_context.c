@@ -444,7 +444,9 @@ void function_compiled(zend_op_array *op_array)
 
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
 
-                write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
+                write_request_edge(true, cfm.app, fqn->function.callee_hash, i,
+                                   to_routine_hash, 0, USER_LEVEL_TOP);
+                write_routine_edge(cfm.app, fqn->function.callee_hash, i,
                                    to_routine_hash, 0, USER_LEVEL_TOP);
               } break;
               case ZEND_EVAL: {
@@ -472,7 +474,9 @@ void function_compiled(zend_op_array *op_array)
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER) {
             PRINT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
             if (is_static_analysis()) {
-              write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
+              write_request_edge(true, cfm.app, fqn->function.callee_hash, i,
+                                 fcall->routine_hash, 0, USER_LEVEL_TOP);
+              write_routine_edge(cfm.app, fqn->function.callee_hash, i,
                                  fcall->routine_hash, 0, USER_LEVEL_TOP);
             }
           } else if (fcall->routine_hash == 0 && fcall->opcode > 0) {
@@ -557,7 +561,7 @@ void function_compiled(zend_op_array *op_array)
       }
     }
 
-    routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, op->lineno, i);
+    routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, op->lineno, i, USER_LEVEL_TOP);
     target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
       if (target.index >= op_array->last) {
