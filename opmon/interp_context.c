@@ -310,7 +310,7 @@ static void push_exception_frame()
 }
 
 static void
-evaluate_routine_edge(stack_frame_t *from_frame, control_flow_metadata_t *to_cfm, uint to_index)
+evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint to_index)
 {
   control_flow_metadata_t *from_cfm = &from_frame->cfm;
   zend_op *from_op = &from_frame->opcodes[from_frame->op_index];
@@ -321,12 +321,13 @@ evaluate_routine_edge(stack_frame_t *from_frame, control_flow_metadata_t *to_cfm
 
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_frame->op_index, to_index,
-                                    to_cfm->cfg->routine_hash, current_session.user_level)) {
-      verified = true;
-    } else if (cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
-                                    to_cfm->cfg, cur_frame.op_index, current_session.user_level)) {
+                                    to_frame->cfm.cfg->routine_hash, current_session.user_level)) {
       verified = true;
     }
+  }
+  if (!verified && cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
+                                        to_frame->cfm.cfg, to_index, current_session.user_level)) {
+    verified = true;
   }
 
   if (!verified && to_index == 0 /* is forward call, not exception unwind */) {
@@ -335,36 +336,36 @@ evaluate_routine_edge(stack_frame_t *from_frame, control_flow_metadata_t *to_cfm
         implicit_taint_call_chain_start_frame = from_frame->execute_data;
         added = true;
         cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
-                             to_cfm->cfg, to_index, current_session.user_level);
+                             to_frame->cfm.cfg, to_index, current_session.user_level);
 
         plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain activated at %04d(L%04d) %s -> %s\n",
-             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       }
     } else {
       added = true;
       cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
-                           to_cfm->cfg, to_index, current_session.user_level);
+                           to_frame->cfm.cfg, to_index, current_session.user_level);
 
       plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain allows %04d(L%04d) %s -> %s\n",
-           from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+           from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
     }
   }
 
-  if (write_routine_edge(verified, from_cfm->app, from_cfm->cfg->routine_hash, from_frame->op_index,
-                         to_cfm->cfg->routine_hash, to_index, current_session.user_level)) {
+  if (write_routine_edge(added, from_cfm->app, from_cfm->cfg->routine_hash, from_frame->op_index,
+                         to_frame->cfm.cfg->routine_hash, to_index, current_session.user_level)) {
     if (!verified) {
       if (added) {
         plog(from_cfm->app, PLOG_TYPE_CFG, "add taint-verified: %04d(L%04d) %s -> %s\n",
-             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       } else {
         if (to_index == 0) {
           plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
-               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
         } else {
           plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
-               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
         }
-        plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, cur_frame.execute_data);
+        plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, to_frame->execute_data);
       }
     }
   }
@@ -590,8 +591,7 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
           p2int(op_array->opcodes), p2int(cur_frame.cfm.cfg));
   } else if (new_cur_frame.cfm.cfg != NULL) {
     if (IS_CFI_EVO()) {
-      evaluate_routine_edge(&new_prev_frame, &new_cur_frame.cfm, 0/*routine entry*/);
-
+      evaluate_routine_edge(&new_prev_frame, &new_cur_frame, 0/*routine entry*/);
     } else {
       generate_routine_edge(&new_prev_frame.cfm, new_prev_frame.op_index,
                             new_cur_frame.cfm.cfg, 0/*routine entry*/);
@@ -993,7 +993,8 @@ void opcode_executing(const zend_op *op)
   zend_op_array *op_array = &execute_data->func->op_array;
   const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
   const zval *jump_predicate = NULL;
-  bool stack_pointer_moved, caught_exception = false, opcode_verified = false, is_loopback;
+  bool stack_pointer_moved, is_loopback, caught_exception = false;
+  bool opcode_verified = false, new_opcode_edge_pending;
   uint op_user_level = USER_LEVEL_TOP;
 
   update_user_session();
@@ -1155,7 +1156,7 @@ void opcode_executing(const zend_op *op)
         }
       } else {
         if (IS_CFI_EVO()) {
-          evaluate_routine_edge(exception_frame, &cur_frame.cfm, cur_frame.op_index);
+          evaluate_routine_edge(exception_frame, &cur_frame, cur_frame.op_index);
         } else {
           generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,
                                 cur_frame.cfm.cfg, cur_frame.op_index);
@@ -1229,10 +1230,8 @@ void opcode_executing(const zend_op *op)
           }
         }
       }
-      if (edge_found && !edge_changed) {
-        PRINT("@ Verified opcode edge %u -> %u\n", prev_frame.op_index, cur_frame.op_index);
-        /* not marking `opcode_verified` because taint is required on every pass */
-      } else { // slightly weak
+      new_opcode_edge_pending = !edge_found || edge_changed;
+      if (new_opcode_edge_pending) {
         compiled_edge_target_t compiled_target;
         compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
         if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
@@ -1244,7 +1243,9 @@ void opcode_executing(const zend_op *op)
           routine_cfg_add_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index, cur_frame.op_index,
                                       current_session.user_level);
         }
-        generate_opcode_edge(&cur_frame.cfm, prev_frame.op_index, cur_frame.op_index);
+      } else { // slightly weak
+        PRINT("@ Verified opcode edge %u -> %u\n", prev_frame.op_index, cur_frame.op_index);
+        /* not marking `opcode_verified` because taint is required on every pass */
       }
     }
   }
@@ -1369,6 +1370,10 @@ void opcode_executing(const zend_op *op)
     }
 #endif
   }
+
+  if (IS_CFI_TRAINING() || (opcode_verified && new_opcode_edge_pending))
+    generate_opcode_edge(&cur_frame.cfm, prev_frame.op_index, cur_frame.op_index);
+
   /*
   if (is_lambda_call_init(op)) {
     if ((op->op2_type == IS_CV || op->op2_type == IS_VAR) &&
@@ -1591,18 +1596,6 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
 
   if (!IS_CFI_EVO() || cur_frame.execute_data == NULL)
     return has_taint;
-
-  /*
-  if (cur_frame.opcodes[cur_frame.op_index].lineno == 2076 &&
-      strstr(cur_frame.execute_data->func->op_array.filename->val, "rewrite.php") != NULL) {
-    trace_all_opcodes = true;
-    plog(cur_frame.cfm.app, PLOG_TYPE_AD_HOC, "before get_option('permalink_structure')\n");
-  } else if (cur_frame.opcodes[cur_frame.op_index].lineno == 2077 &&
-      strstr(cur_frame.execute_data->func->op_array.filename->val, "rewrite.php") != NULL) {
-    trace_all_opcodes = false;
-    plog(cur_frame.cfm.app, PLOG_TYPE_AD_HOC, "after get_option('permalink_structure')\n");
-  }
-  */
 
   if (cur_frame.implicit_taint != NULL && !is_internal_transfer &&
       cur_frame.implicit_taint->last_applied_op_index != cur_frame.op_index) {
