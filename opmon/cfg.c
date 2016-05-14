@@ -74,7 +74,7 @@ bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_in
 void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index,
                                  user_level_t user_level)
 {
-  cfg_opcode_edge_t *cfg_edge = PROCESS_NEW(cfg_opcode_edge_t);
+  cfg_opcode_edge_t *cfg_edge = PROCESS_NEW(cfg_opcode_edge_t); // todo: allocate in a block per op_array->last
   memset(cfg_edge, 0, sizeof(cfg_opcode_edge_t));
   scarray_append(&cfg->opcode_edges, cfg_edge);
 

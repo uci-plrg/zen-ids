@@ -31,6 +31,7 @@ if test "$PHP_OPCODE_MONITOR" != "no"; then
 		 taint.c \
                  lib/script_cfi_utils.c \
                  lib/script_cfi_array.c \
+                 lib/script_cfi_queue.c \
                  lib/script_cfi_hashtable.c"
   PHP_NEW_EXTENSION(opmon, $opmon_sources, $ext_shared)
   PHP_SUBST(OPMON_SHARED_LIBADD)

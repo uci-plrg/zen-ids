@@ -6,6 +6,7 @@
 
 #include "php_opcode_monitor.h"
 #include "lib/script_cfi_utils.h"
+#include "lib/script_cfi_queue.h"
 #include "lib/script_cfi_hashtable.h"
 #include "event_handler.h"
 #include "metadata_handler.h"
@@ -37,6 +38,8 @@
                         "WHERE request_id > %d"
 #define EVO_STATE_QUERY_MAX_LENGTH (sizeof(EVO_STATE_QUERY) + MAX_BIGINT_CHARS)
 #define EVO_STATE_QUERY_FIELD_COUNT 4
+
+#define EVO_TAINT_EXPIRATION 1000
 
 /* N.B.: the evo triggers are using last_insert_id() as set by this query! */
 #define EVO_NEXT_REQUEST_ID "UPDATE opmon_request_sequence " \
@@ -86,13 +89,13 @@ typedef struct _stack_event_t {
 } stack_event_t;
 
 typedef struct _evo_taint_t {
+  uint request_id;
   const char *table_name;
   const char *column_name;
   unsigned long long table_key;
+  struct _evo_taint_t *prev;
+  struct _evo_taint_t *next;
 } evo_taint_t;
-
-typedef struct _evo_taint_queue_t {
-} evo_taint_queue_t;
 
 typedef enum _pending_cfg_patch_type_t {
   PENDING_ROUTINE_EDGE,
@@ -103,13 +106,13 @@ typedef enum _pending_cfg_patch_type_t {
 typedef struct _pending_cfg_patch_t {
   pending_cfg_patch_type_t type;
   union {
-    cfg_t *cfg;                         /* PENDING_ROUTINE_EDGE */
-    application_t *app;                 /* PENDING_ROUTINE_EDGE, PENDING_OPCODE_EDGE */
+    cfg_t *cfg;                   /* PENDING_ROUTINE_EDGE */
+    application_t *app;           /* PENDING_ROUTINE_EDGE, PENDING_OPCODE_EDGE */
   };
   union {
-    cfg_opcode_t *cfg_opcode;           /* PENDING_NODE_USER_LEVEL */
-    routine_cfg_t *from_routine;        /* PENDING_ROUTINE_EDGE */
-    routine_cfg_t *routine;             /* PENDING_OPCODE_EDGE */
+    cfg_opcode_t *cfg_opcode;     /* PENDING_NODE_USER_LEVEL */
+    routine_cfg_t *from_routine;  /* PENDING_ROUTINE_EDGE */
+    routine_cfg_t *routine;       /* PENDING_OPCODE_EDGE */
   };
   routine_cfg_t *to_routine;
   uint from_index;
@@ -171,7 +174,7 @@ static const evo_query_t *db_write_commands[] = {
 };
 #define DB_WRITE_COMMAND_COUNT ((sizeof(db_write_commands) / sizeof(evo_query_t *)) - 1)
 
-static uint64 evo_last_synch_request_id = 0ULL;
+static uint64 evo_last_synch_request_id = 0ULL; /* trimmed to taint expiration window on load */
 
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
 static exception_frame_t *exception_frame;
@@ -187,7 +190,7 @@ static stack_event_t stack_event;
 
 static user_session_t current_session;
 
-static uint64 request_id = 0;
+static uint64 current_request_id = 0;
 
 static uint op_execution_count = 0;
 
@@ -208,6 +211,7 @@ static scarray_t pending_cfg_patches;
 
 static sctable_t evo_key_table;
 static sctable_t evo_taint_table;
+static scqueue_t evo_taint_queue;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
@@ -277,6 +281,7 @@ void initialize_interp_context()
     evo_taint_table.hash_bits = 8;
     evo_taint_table.comparator = evo_taint_comparator;
     sctable_init(&evo_taint_table);
+    SCQUEUE_INIT(&evo_taint_queue, evo_taint_t, prev, next);
 
     scarray_init(&pending_cfg_patches);
 
@@ -321,7 +326,7 @@ void interp_request_boundary(bool is_request_start)
       if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
         ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
       else
-        request_id = mysql_insert_id(db_connection);
+        current_request_id = mysql_insert_id(db_connection);
       evo_state_synch();
     }
 
@@ -365,20 +370,24 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
     verified = true;
   }
 
-  if (!verified && to_index == 0 /* is forward call, not exception unwind */) {
-    if (implicit_taint_call_chain_start_frame == NULL) {
-      if (cur_frame.implicit_taint != NULL) {
-        implicit_taint_call_chain_start_frame = from_frame->execute_data;
+  if (!verified) {
+    if (to_index == 0) {
+      if (implicit_taint_call_chain_start_frame == NULL) {
+        if (cur_frame.implicit_taint != NULL) {
+          implicit_taint_call_chain_start_frame = from_frame->execute_data;
+          add = true;
+
+          plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain activated at %04d(L%04d) %s -> %s\n",
+               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+        }
+      } else {
         add = true;
 
-        plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain activated at %04d(L%04d) %s -> %s\n",
+        plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain allows %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       }
     } else {
-      add = true;
-
-      plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain allows %04d(L%04d) %s -> %s\n",
-           from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+      ERROR("Dataset evolution does not support Exception edges.\n");
     }
   }
 
@@ -1194,12 +1203,16 @@ void opcode_executing(const zend_op *op)
       stack_event.state = STACK_STATE_NONE;
 
       if (exception_frame->execute_data == cur_frame.execute_data) {
-        if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, exception_frame->throw_index,
-                                         cur_frame.op_index)) {
-          generate_opcode_edge(&cur_frame.cfm, exception_frame->throw_index, /* evo: ??? */
-                               cur_frame.op_index);
+        if (IS_CFI_EVO()) {
+          ERROR("Dataset evolution does not support Exception edges.\n");
         } else {
-          PRINT("(skipping existing exception edge)\n");
+          if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, exception_frame->throw_index,
+                                           cur_frame.op_index)) {
+            generate_opcode_edge(&cur_frame.cfm, exception_frame->throw_index,
+                                 cur_frame.op_index);
+          } else {
+            PRINT("(skipping existing exception edge)\n");
+          }
         }
       } else {
         if (IS_CFI_EVO()) {
@@ -1418,10 +1431,12 @@ void opcode_executing(const zend_op *op)
     patch->user_level = current_session.user_level;
     scarray_append(&pending_cfg_patches, patch);
 
-    compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
-    if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
-      ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
-           compiled_target.type, op->opcode);
+    if (false) { // todo: also allow conditional branches to have op edges
+      compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
+      if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
+        ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
+             compiled_target.type, op->opcode);
+      }
     }
   }
 
@@ -1445,18 +1460,41 @@ void opcode_executing(const zend_op *op)
   */
 }
 
-static void db_site_modification(const char *table_name, const char *column_name, uint64 table_key)
+static void evo_expire_taint()
 {
-  evo_taint_t lookup = { table_name, column_name, table_key };
+  evo_taint_t *tail;
+  uint64 hash;
+
+  while (evo_taint_queue.tail != NULL) {
+    tail = (evo_taint_t *) evo_taint_queue.tail;
+    if ((current_request_id - tail->request_id) < EVO_TAINT_EXPIRATION)
+      break;
+
+    hash = hash_string(tail->table_name) ^ hash_string(tail->column_name) ^ tail->table_key;
+    sctable_remove_value(&evo_taint_table, hash, tail);
+    scqueue_dequeue(&evo_taint_queue);
+    PROCESS_FREE((char *) tail->table_name);
+    PROCESS_FREE((char *) tail->column_name);
+    PROCESS_FREE(tail);
+  }
+}
+
+static void db_site_modification(uint request_id, const char *table_name,
+                                 const char *column_name, uint64 table_key)
+{
+  evo_taint_t lookup = { 0, table_name, column_name, table_key, NULL };
   uint64 hash = hash_string(table_name) ^ hash_string(column_name) ^ table_key; // crowd low bits
 
   // or unique via: `INSERT INTO table_tags (tag) VALUES ('tag_a'),('tab_b'),('tag_c') ON DUPLICATE KEY UPDATE tag=tag;`
   if (!sctable_has_value(&evo_taint_table, hash, &lookup)) {
     evo_taint_t *taint = PROCESS_NEW(evo_taint_t);
+    taint->request_id = request_id;
     taint->table_key = table_key;
     taint->table_name = strdup(table_name);
     taint->column_name = strdup(column_name);
     sctable_add(&evo_taint_table, hash, taint);
+
+    scqueue_enqueue(&evo_taint_queue, taint);
   }
 
   if (cur_frame.cfm.app != NULL)
@@ -1465,32 +1503,35 @@ static void db_site_modification(const char *table_name, const char *column_name
 
 static void evo_state_synch()
 {
-  if (IS_CFI_EVO()) {
-    char evo_state_query[EVO_STATE_QUERY_MAX_LENGTH];
-    MYSQL_RES *result;
-    MYSQL_ROW row;
-    uint64 request_id;
+  char evo_state_query[EVO_STATE_QUERY_MAX_LENGTH];
+  MYSQL_RES *result;
+  MYSQL_ROW row;
+  uint request_id;
 
-    snprintf(evo_state_query, EVO_STATE_QUERY_MAX_LENGTH, EVO_STATE_QUERY, evo_last_synch_request_id);
-    if (mysql_real_query(db_connection, evo_state_query, strlen(evo_state_query)) != 0) {
+  evo_expire_taint();
+
+  if ((current_request_id - evo_last_synch_request_id) > EVO_TAINT_EXPIRATION)
+    evo_last_synch_request_id = (current_request_id - EVO_TAINT_EXPIRATION);
+
+  snprintf(evo_state_query, EVO_STATE_QUERY_MAX_LENGTH, EVO_STATE_QUERY, evo_last_synch_request_id);
+  if (mysql_real_query(db_connection, evo_state_query, strlen(evo_state_query)) != 0) {
+    if (mysql_field_count(db_connection))
+      ERROR("Failed to query the evolution state: %s.\n", mysql_sqlstate(db_connection));
+  } else {
+    result = mysql_store_result(db_connection);
+    if (result == NULL) {
       if (mysql_field_count(db_connection))
-        ERROR("Failed to query the evolution state: %s.\n", mysql_sqlstate(db_connection));
+        ERROR("Failed to store the evolution state query result: %s.\n", mysql_sqlstate(db_connection));
     } else {
-      result = mysql_store_result(db_connection);
-      if (result == NULL) {
-        if (mysql_field_count(db_connection))
-          ERROR("Failed to store the evolution state query result: %s.\n", mysql_sqlstate(db_connection));
-      } else {
-        while ((row = mysql_fetch_row(result)) != NULL) {
-          if (row[0] == NULL || strlen(row[0]) == 0)
-            break;
-          request_id = strtoull(row[0], NULL, 10);
-          if (request_id > evo_last_synch_request_id)
-            evo_last_synch_request_id = request_id;
-          db_site_modification(row[1], row[2], strtoull(row[3], NULL, 10));
-        }
-        mysql_free_result(result);
+      while ((row = mysql_fetch_row(result)) != NULL) {
+        if (row[0] == NULL || strlen(row[0]) == 0)
+          break;
+        request_id = strtoul(row[0], NULL, 10);
+        if (request_id > evo_last_synch_request_id)
+          evo_last_synch_request_id = request_id;
+        db_site_modification(request_id, row[1], row[2], strtoull(row[3], NULL, 10));
       }
+      mysql_free_result(result);
     }
   }
 }
@@ -1614,7 +1655,7 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
 
     for (i = 0; i < field_count; i++) {
       if (!is_key_index(key_column_indexes, evo_key->column_count, i)) {
-        evo_taint_t lookup = { table_names[0], column_names[i], key };
+        evo_taint_t lookup = { 0, table_names[0], column_names[i], key, NULL };
         field_hash = table_name_hash ^ hash_string(column_names[i]) ^ key;
 
         if (!sctable_has_value(&evo_taint_table, field_hash, &lookup))
