@@ -273,13 +273,6 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.callee_hash);
   }
 
-  if (IS_OPCODE_DUMP_ENABLED()) {
-    if (is_script_body)
-      dump_script_header(cfm.app, routine_name, fqn->function.callee_hash);
-    else
-      dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.callee_hash);
-  }
-
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
   PRINT("Installing hashcodes for %s (0x%x) under hash 0x%llx\n", routine_name,
        fqn->function.caller_hash, hash_addr(op_array->opcodes));
@@ -290,6 +283,13 @@ void function_compiled(zend_op_array *op_array)
           p2int(op_array->opcodes));
     fflush(stderr);
     return; // verify equal?
+  }
+
+  if (IS_OPCODE_DUMP_ENABLED()) {
+    if (is_script_body)
+      dump_script_header(cfm.app, routine_name, fqn->function.callee_hash);
+    else
+      dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.callee_hash);
   }
 
   if (is_static_analysis() || is_dataflow_analysis() || IS_OPCODE_DUMP_ENABLED())

@@ -309,41 +309,81 @@ static void push_exception_frame()
   *exception_frame = cur_frame;
 }
 
-static routine_edge_status_t
-generate_routine_edge(bool is_new_in_process, control_flow_metadata_t *from_cfm,
-                      uint from_index, routine_cfg_t *to_cfg, uint to_index)
+static void
+evaluate_routine_edge(stack_frame_t *from_frame, control_flow_metadata_t *to_cfm, uint to_index)
 {
-  routine_edge_status_t status = 0;
+  control_flow_metadata_t *from_cfm = &from_frame->cfm;
+  zend_op *from_op = &from_frame->opcodes[from_frame->op_index];
+  bool verified = false, added = false;
 
-  if (is_new_in_process) {
+  if (current_session.user_level >= 2)
+    return;
+
+  if (from_cfm->dataset != NULL) {
+    if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_frame->op_index, to_index,
+                                    to_cfm->cfg->routine_hash, current_session.user_level)) {
+      verified = true;
+    } else if (cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
+                                    to_cfm->cfg, cur_frame.op_index, current_session.user_level)) {
+      verified = true;
+    }
+  }
+
+  if (!verified && to_index == 0 /* is forward call, not exception unwind */) {
+    if (implicit_taint_call_chain_start_frame == NULL) {
+      if (cur_frame.implicit_taint != NULL) {
+        implicit_taint_call_chain_start_frame = from_frame->execute_data;
+        added = true;
+        cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
+                             to_cfm->cfg, to_index, current_session.user_level);
+
+        plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain activated at %04d(L%04d) %s -> %s\n",
+             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+      }
+    } else {
+      added = true;
+      cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
+                           to_cfm->cfg, to_index, current_session.user_level);
+
+      plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain allows %04d(L%04d) %s -> %s\n",
+           from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+    }
+  }
+
+  if (write_routine_edge(verified, from_cfm->app, from_cfm->cfg->routine_hash, from_frame->op_index,
+                         to_cfm->cfg->routine_hash, to_index, current_session.user_level)) {
+    if (!verified) {
+      if (added) {
+        plog(from_cfm->app, PLOG_TYPE_CFG, "add taint-verified: %04d(L%04d) %s -> %s\n",
+             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+      } else {
+        if (to_index == 0) {
+          plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
+               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+        } else {
+          plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
+               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+        }
+        plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, cur_frame.execute_data);
+      }
+    }
+  }
+}
+
+static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_index,
+                                  routine_cfg_t *to_cfg, uint to_index)
+{
+  bool add_routine_edge = !cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index,
+                                                to_cfg, cur_frame.op_index,
+                                                current_session.user_level);
+
+  if (add_routine_edge) {
     cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index, to_cfg, to_index,
                          current_session.user_level);
   }
 
-  if (from_cfm->dataset != NULL) {
-    if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_index, to_index,
-                                    to_cfg->routine_hash, current_session.user_level)) {
-      status |= ROUTINE_EDGE_VERIFIED;
-      PRINT("<MON> Verified routine edge [0x%x|%u -> 0x%x]\n",
-            from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
-    } else { // debug it
-      dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_index, to_index,
-                                  to_cfg->routine_hash, current_session.user_level);
-    }
-  }
-
-  if (is_new_in_process) {
-    zend_uchar opcode = routine_cfg_get_opcode(from_cfm->cfg, from_index)->opcode;
-    WARN("<MON> New routine edge from op 0x%x [0x%x %u -> 0x%x]\n",
-          opcode, from_cfm->cfg->routine_hash, from_index, to_cfg->routine_hash);
-  }
-
-  if (write_routine_edge(is_new_in_process, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
-                         to_cfg->routine_hash, to_index, current_session.user_level)) {
-    status |= ROUTINE_EDGE_NEW_IN_REQUEST;
-  }
-
-  return status;
+  write_routine_edge(add_routine_edge, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+                     to_cfg->routine_hash, to_index, current_session.user_level);
 }
 
 static void generate_opcode_edge(control_flow_metadata_t *cfm, uint from_index, uint to_index)
@@ -548,58 +588,13 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
     PRINT("<0x%x> Routine return from %s to %s with opcodes at "PX"|"PX" and cfg "PX".\n",
           getpid(), cur_frame.cfm.routine_name, new_cur_frame.cfm.routine_name, p2int(execute_data),
           p2int(op_array->opcodes), p2int(cur_frame.cfm.cfg));
-  } else if (new_cur_frame.cfm.cfg != NULL) { // TODO: skip `EX(call)->func->type == ZEND_INTERNAL_FUNCTION`?
-    zend_op *new_prev_op = &new_prev_frame.opcodes[new_prev_frame.op_index];
-    compiled_edge_target_t compiled_target = get_compiled_edge_target(new_prev_op,
-                                                                      new_prev_frame.op_index);
-    bool is_new_in_process;
-    routine_edge_status_t edge_status;
+  } else if (new_cur_frame.cfm.cfg != NULL) {
+    if (IS_CFI_EVO()) {
+      evaluate_routine_edge(&new_prev_frame, &new_cur_frame.cfm, 0/*routine entry*/);
 
-    if (new_cur_frame.cfm.cfg->routine_hash == 0x25466f54) // && cur_frame.op_index == 790)
-      SPOT("check here\n");
-
-    is_new_in_process = !cfg_has_routine_edge(new_prev_frame.cfm.app->cfg,
-                                              new_prev_frame.cfm.cfg,
-                                              new_prev_frame.op_index,
-                                              new_cur_frame.cfm.cfg, 0, current_session.user_level);
-    if (is_new_in_process) {
-      if (compiled_target.type != COMPILED_EDGE_CALL && new_prev_op->opcode != ZEND_NEW) {
-        WARN("Generating call edge for compiled target type %d (opcode 0x%x)\n",
-             compiled_target.type, new_prev_op->opcode);
-      }
-      if (IS_SAME_FRAME(new_prev_frame, *(stack_frame_t *) new_cur_frame.cfm.app->base_frame)) {
-        PRINT("Entry edge to %s (0x%x)\n", new_cur_frame.cfm.routine_name,
-              new_cur_frame.cfm.cfg->routine_hash);
-      }
-    }
-
-    edge_status = generate_routine_edge(is_new_in_process, &new_prev_frame.cfm,
-                                        new_prev_frame.op_index, new_cur_frame.cfm.cfg,
-                                        0/*routine entry*/);
-
-    if (!TEST(ROUTINE_EDGE_VERIFIED, edge_status) && current_session.user_level < 2) {
-      if (implicit_taint_call_chain_start_frame == NULL) {
-        if (cur_frame.implicit_taint == NULL) {
-          if (TEST(ROUTINE_EDGE_NEW_IN_REQUEST, edge_status)) {
-            plog(cur_frame.cfm.app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
-                 new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
-                 new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
-            plog_stacktrace(cur_frame.cfm.app, PLOG_TYPE_CFG, execute_data);
-          }
-        } else {
-          implicit_taint_call_chain_start_frame = new_prev_frame.execute_data;
-
-          plog(cur_frame.cfm.app, PLOG_TYPE_TAINT,
-               "call chain activated at %04d(L%04d) %s -> %s\n",
-               new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
-               new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
-        }
-      } else {
-        plog(cur_frame.cfm.app, PLOG_TYPE_TAINT,
-             "call chain allows %04d(L%04d) %s -> %s\n",
-             new_prev_op - new_prev_frame.opcodes, new_prev_op->lineno,
-             new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name);
-      }
+    } else {
+      generate_routine_edge(&new_prev_frame.cfm, new_prev_frame.op_index,
+                            new_cur_frame.cfm.cfg, 0/*routine entry*/);
 
       PRINT("<0x%x> Routine call from %s to %s with opcodes at "PX"|"PX" and cfg "PX"\n",
             getpid(), new_prev_frame.cfm.routine_name, new_cur_frame.cfm.routine_name,
@@ -1159,15 +1154,12 @@ void opcode_executing(const zend_op *op)
           PRINT("(skipping existing exception edge)\n");
         }
       } else {
-        bool is_new_in_process = !cfg_has_routine_edge(exception_frame->cfm.app->cfg,
-                                                       exception_frame->cfm.cfg,
-                                                       exception_frame->throw_index,
-                                                       cur_frame.cfm.cfg, cur_frame.op_index,
-                                                       current_session.user_level);
-        generate_routine_edge(is_new_in_process, &exception_frame->cfm,
-                              exception_frame->throw_index, cur_frame.cfm.cfg, cur_frame.op_index);
-        if (!is_new_in_process)
-          PRINT("(skipping existing exception edge)\n");
+        if (IS_CFI_EVO()) {
+          evaluate_routine_edge(exception_frame, &cur_frame.cfm, cur_frame.op_index);
+        } else {
+          generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,
+                                cur_frame.cfm.cfg, cur_frame.op_index);
+        }
       }
       DECREMENT_STACK(exception_stack, exception_frame);
       caught_exception = true;
