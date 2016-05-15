@@ -442,17 +442,16 @@ static void generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_i
                                   routine_cfg_t *to_cfg, uint to_index)
 {
   bool add_routine_edge = !cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index,
-                                                to_cfg, cur_frame.op_index,
-                                                current_session.user_level);
+                                                to_cfg, to_index, current_session.user_level);
 
   if (add_routine_edge) {
     cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index, to_cfg, to_index,
                          current_session.user_level);
+    write_routine_edge(from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+                       to_cfg->routine_hash, to_index, current_session.user_level);
   }
 
   write_request_edge(add_routine_edge, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
-                     to_cfg->routine_hash, to_index, current_session.user_level);
-  write_routine_edge(from_cfm->app, from_cfm->cfg->routine_hash, from_index,
                      to_cfg->routine_hash, to_index, current_session.user_level);
 }
 
