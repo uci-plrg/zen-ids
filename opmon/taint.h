@@ -97,6 +97,10 @@ bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
                           const zval *src, const char *src_name,
                           const zval *dst, const char *dst_name);
 
+bool propagate_zval_taint_quiet(application_t *app, bool clobber,
+                                const zval *src, const char *src_name,
+                                const zval *dst, const char *dst_name);
+
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, const zend_op *op);
 

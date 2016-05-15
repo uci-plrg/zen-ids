@@ -39,7 +39,7 @@
 #define EVO_STATE_QUERY_MAX_LENGTH (sizeof(EVO_STATE_QUERY) + MAX_BIGINT_CHARS)
 #define EVO_STATE_QUERY_FIELD_COUNT 4
 
-#define EVO_TAINT_EXPIRATION 1000
+#define EVO_TAINT_EXPIRATION 500
 
 /* N.B.: the evo triggers are using last_insert_id() as set by this query! */
 #define EVO_NEXT_REQUEST_ID "UPDATE opmon_request_sequence " \
@@ -1804,22 +1804,35 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
   if (!IS_CFI_EVO() || cur_frame.execute_data == NULL)
     return has_taint;
 
-  if (cur_frame.implicit_taint != NULL && !is_internal_transfer &&
-      cur_frame.implicit_taint->last_applied_op_index != cur_frame.op_index) {
-    zend_op_array *stack_frame = &cur_frame.execute_data->func->op_array;
-    zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
-
-    plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s(I%d)->%s(0x%llx) at %04d(L%04d)%s\n",
-         src_name, cur_frame.implicit_taint->id, dst_name, (uint64) dst, cur_frame.op_index,
-         op->lineno, site_relative_path(cur_frame.cfm.app, stack_frame));
-    taint_var_add(cur_frame.cfm.app, dst, cur_frame.implicit_taint->taint);
-    cur_frame.implicit_taint->last_applied_op_index = cur_frame.op_index;
-    has_taint = true;
+  if (stack_event.state == STACK_STATE_RETURNING) {
+    /* N.B.: must be in a builtin function: cannot ref cur_frame.execute_data! */
+    if (cur_frame.implicit_taint != NULL && !is_internal_transfer) {
+      plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s(I%d)->%s(0x%llx) at a builtin\n",
+           src_name, cur_frame.implicit_taint->id, dst_name, (uint64) dst);
+      taint_var_add(cur_frame.cfm.app, dst, cur_frame.implicit_taint->taint);
+      cur_frame.implicit_taint->last_applied_op_index = 0; /* not at any op */
+      has_taint = true;
+    } else {
+      has_taint = propagate_zval_taint_quiet(cur_frame.cfm.app, true, src, src_name, dst, dst_name);
+    }
   } else {
-    has_taint = propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
-                                     &cur_frame.execute_data->func->op_array,
-                                     &cur_frame.opcodes[cur_frame.op_index], true,
-                                     src, src_name, dst, dst_name);
+    if (cur_frame.implicit_taint != NULL && !is_internal_transfer &&
+        cur_frame.implicit_taint->last_applied_op_index != cur_frame.op_index) {
+      zend_op_array *stack_frame = &cur_frame.execute_data->func->op_array;
+      zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
+
+      plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s(I%d)->%s(0x%llx) at %04d(L%04d)%s\n",
+           src_name, cur_frame.implicit_taint->id, dst_name, (uint64) dst, cur_frame.op_index,
+           op->lineno, site_relative_path(cur_frame.cfm.app, stack_frame));
+      taint_var_add(cur_frame.cfm.app, dst, cur_frame.implicit_taint->taint);
+      cur_frame.implicit_taint->last_applied_op_index = cur_frame.op_index;
+      has_taint = true;
+    } else {
+      has_taint = propagate_zval_taint(cur_frame.cfm.app, cur_frame.execute_data,
+                                       &cur_frame.execute_data->func->op_array,
+                                       &cur_frame.opcodes[cur_frame.op_index], true,
+                                       src, src_name, dst, dst_name);
+    }
   }
 
   if (has_taint && is_internal_transfer)
