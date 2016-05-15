@@ -20,6 +20,7 @@ typedef struct _site_modification_t {
   };
   const char *db_column;
   const char *db_value;
+  void *source;
 } site_modification_t;
 
 typedef enum _request_input_type_t {

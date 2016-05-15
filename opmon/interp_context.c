@@ -88,23 +88,17 @@ typedef struct _stack_event_t {
   const char *return_target_name;
 } stack_event_t;
 
-typedef struct _evo_taint_t {
-  uint request_id;
-  const char *table_name;
-  const char *column_name;
-  unsigned long long table_key;
-  struct _evo_taint_t *prev;
-  struct _evo_taint_t *next;
-} evo_taint_t;
-
 typedef enum _pending_cfg_patch_type_t {
   PENDING_ROUTINE_EDGE,
   PENDING_OPCODE_EDGE,
   PENDING_NODE_USER_LEVEL,
 } pending_cfg_patch_type_t;
 
+typedef struct _evo_taint_t evo_taint_t;
+
 typedef struct _pending_cfg_patch_t {
   pending_cfg_patch_type_t type;
+  evo_taint_t *taint_source;
   union {
     cfg_t *cfg;                   /* PENDING_ROUTINE_EDGE */
     application_t *app;           /* PENDING_ROUTINE_EDGE, PENDING_OPCODE_EDGE */
@@ -118,7 +112,21 @@ typedef struct _pending_cfg_patch_t {
   uint from_index;
   uint to_index;
   user_level_t user_level;
+  struct _pending_cfg_patch_t *next_pending;
 } pending_cfg_patch_t;
+
+struct _evo_taint_t {
+  uint request_id;
+  const char *table_name;
+  const char *column_name;
+  unsigned long long table_key;
+  struct _evo_taint_t *prev;
+  struct _evo_taint_t *next;
+  pending_cfg_patch_t *patch_list;
+};
+
+#define GET_TAINT_VAR_EVO_SOURCE(var) \
+  ((evo_taint_t *) ((site_modification_t *) (var)->taint)->source)
 
 #define EVO_MAX_KEY_COLUMN_COUNT 2
 
@@ -203,10 +211,15 @@ static bool trace_all_opcodes = false;
 
 static bool request_blocked = false;
 
+typedef struct _taint_call_chain_t {
+  zend_execute_data *start_frame;
+  implicit_taint_t *taint_source;
+} taint_call_chain_t;
+
 static sctable_t implicit_taint_table; // todo: allocate entries per request and clear via erase()
 static implicit_taint_t pending_implicit_taint = { 0, NULL, NULL, -1 };
 static uint implicit_taint_id = 0;
-static zend_execute_data *implicit_taint_call_chain_start_frame = NULL;
+static taint_call_chain_t implicit_taint_call_chain = { 0 };
 static scarray_t pending_cfg_patches;
 
 static sctable_t evo_key_table;
@@ -216,7 +229,7 @@ static scqueue_t evo_taint_queue;
 #define CONTEXT_ENTRY 0xffffffffU
 
 static void evo_state_synch();
-static void evo_commit_pending_patches();
+static void evo_commit_request_patches();
 
 static uint get_first_executable_index(zend_op *opcodes)
 {
@@ -333,11 +346,11 @@ void interp_request_boundary(bool is_request_start)
     if (!is_request_start) {
       sctable_clear(&implicit_taint_table);
       implicit_taint_id = 0;
-      implicit_taint_call_chain_start_frame = NULL;
+      implicit_taint_call_chain.start_frame = NULL;
 
       if (!request_blocked)
-        evo_commit_pending_patches();
-      pending_cfg_patches.size = 0;
+        evo_commit_request_patches();
+      pending_cfg_patches.size = 0; /* evo: need to free them if request blocked */
       request_blocked = false;
     }
   }
@@ -372,9 +385,10 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
 
   if (!verified) {
     if (to_index == 0) {
-      if (implicit_taint_call_chain_start_frame == NULL) {
+      if (implicit_taint_call_chain.start_frame == NULL) {
         if (cur_frame.implicit_taint != NULL) {
-          implicit_taint_call_chain_start_frame = from_frame->execute_data;
+          implicit_taint_call_chain.start_frame = from_frame->execute_data;
+          implicit_taint_call_chain.taint_source = cur_frame.implicit_taint;
           add = true;
 
           plog(from_cfm->app, PLOG_TYPE_TAINT, "call chain activated at %04d(L%04d) %s -> %s\n",
@@ -395,14 +409,16 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
                          to_frame->cfm.cfg->routine_hash, to_index, current_session.user_level)) {
     if (!verified) {
       if (add) {
-        pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
+        pending_cfg_patch_t *patch = PROCESS_NEW(pending_cfg_patch_t);
         patch->type = PENDING_ROUTINE_EDGE;
+        patch->taint_source = GET_TAINT_VAR_EVO_SOURCE(implicit_taint_call_chain.taint_source->taint);
         patch->app = from_cfm->app;
         patch->from_routine = from_cfm->cfg;
         patch->to_routine = to_frame->cfm.cfg;
         patch->from_index = from_frame->op_index;
         patch->to_index = to_index;
         patch->user_level = current_session.user_level;
+        patch->next_pending = NULL;
         scarray_append(&pending_cfg_patches, patch);
 
         plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
@@ -1049,7 +1065,8 @@ void opcode_executing(const zend_op *op)
   const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
   const zval *jump_predicate = NULL;
   bool stack_pointer_moved, is_loopback, caught_exception = false;
-  bool opcode_verified = false, opcode_edge_needs_update = false, taint_lowers_op_user_level = false;
+  bool opcode_verified = false, opcode_edge_needs_update = false;
+  taint_variable_t *taint_lowers_op_user_level = NULL;
   uint op_user_level = USER_LEVEL_TOP;
   cfg_opcode_t *expected_opcode = NULL;
 
@@ -1105,8 +1122,8 @@ void opcode_executing(const zend_op *op)
     if (stack_pointer_moved && last_executed_op != NULL && last_executed_op->opcode == ZEND_DO_FCALL) {
       taint_propagate_return(cur_frame.cfm.app, execute_data, op_array, last_executed_op);
 
-      if (execute_data == implicit_taint_call_chain_start_frame)
-        implicit_taint_call_chain_start_frame = NULL;
+      if (execute_data == implicit_taint_call_chain.start_frame)
+        implicit_taint_call_chain.start_frame = NULL;
     }
 
     if (!is_loopback && (cur_frame_previous_op == NULL || IS_FIRST_AFTER_ARGS(op)))
@@ -1155,8 +1172,8 @@ void opcode_executing(const zend_op *op)
   switch (op->opcode) {
     case ZEND_DO_FCALL:
       fcall_executing(execute_data, op_array, (zend_op *) op);
-      //if (cur_frame.implicit_taint != NULL && implicit_taint_call_chain_start_frame == NULL)
-      //  implicit_taint_call_chain_start_frame = execute_data;
+      //if (cur_frame.implicit_taint != NULL && implicit_taint_call_chain.start_frame == NULL)
+      //  implicit_taint_call_chain.start_frame = execute_data;
       break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
@@ -1258,7 +1275,7 @@ void opcode_executing(const zend_op *op)
       if (cur_frame.cfm.dataset != NULL)
         op_user_level = dataset_routine_get_node_user_level(cur_frame.cfm.dataset, cur_frame.op_index);
       if (expected_opcode->user_level < op_user_level)
-        op_user_level = expected_opcode->user_level;
+        op_user_level = expected_opcode->user_level; // don't verify the op on this basis until the corresponding taint expires!
     }
 
     // slightly weak for returns: not checking continuation pc
@@ -1315,7 +1332,7 @@ void opcode_executing(const zend_op *op)
              OP_INDEX(op_array, op), op->lineno, OP_INDEX(op_array, implicit->end_op),
              implicit->end_op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
 
-        taint_lowers_op_user_level = true;
+        taint_lowers_op_user_level = pending_implicit_taint.taint;
       }
 
       pending_implicit_taint.end_op = NULL;
@@ -1357,7 +1374,7 @@ void opcode_executing(const zend_op *op)
              OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
         plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
         */
-        taint_lowers_op_user_level = true;
+        taint_lowers_op_user_level = cur_frame.implicit_taint->taint;
 
         if (is_return(op->opcode))
           remove_implicit_taint();
@@ -1365,7 +1382,7 @@ void opcode_executing(const zend_op *op)
         if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
             last_executed_op->opcode == ZEND_JMP &&
             last_executed_op < cur_frame.implicit_taint->end_op) {
-          taint_lowers_op_user_level = true; /* extend to bottom of branch diamond */
+          taint_lowers_op_user_level = cur_frame.implicit_taint->taint; /* extend to bottom of branch diamond */
         }
         remove_implicit_taint();
       }
@@ -1418,34 +1435,47 @@ void opcode_executing(const zend_op *op)
 #endif
   }
 
-  if (IS_CFI_TRAINING() || (opcode_edge_needs_update && taint_lowers_op_user_level)) {
-    compiled_edge_target_t compiled_target;
-    zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
+  if (IS_CFI_TRAINING()) {
+    if (opcode_edge_needs_update) {
+      routine_cfg_add_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index, cur_frame.op_index,
+                                  current_session.user_level);
+      write_op_edge(cur_frame.cfm.app, cur_frame.cfm.cfg->routine_hash, prev_frame.op_index,
+                    cur_frame.op_index, current_session.user_level);
+    }
+  } else {
+    if (opcode_edge_needs_update && taint_lowers_op_user_level != NULL) {
+      compiled_edge_target_t compiled_target;
+      zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
 
-    pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
-    patch->type = PENDING_OPCODE_EDGE;
-    patch->app = cur_frame.cfm.app;
-    patch->routine = cur_frame.cfm.cfg;
-    patch->from_index = prev_frame.op_index;
-    patch->to_index = cur_frame.op_index;
-    patch->user_level = current_session.user_level;
-    scarray_append(&pending_cfg_patches, patch);
+      pending_cfg_patch_t *patch = PROCESS_NEW(pending_cfg_patch_t);
+      patch->type = PENDING_OPCODE_EDGE;
+      patch->taint_source = GET_TAINT_VAR_EVO_SOURCE(taint_lowers_op_user_level);
+      patch->app = cur_frame.cfm.app;
+      patch->routine = cur_frame.cfm.cfg;
+      patch->from_index = prev_frame.op_index;
+      patch->to_index = cur_frame.op_index;
+      patch->user_level = current_session.user_level;
+      patch->next_pending = NULL;
+      scarray_append(&pending_cfg_patches, patch);
 
-    if (false) { // todo: also allow conditional branches to have op edges
-      compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
-      if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
-        ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
-             compiled_target.type, op->opcode);
+      if (false) { // todo: also allow conditional branches to have op edges
+        compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
+        if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
+          ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
+               compiled_target.type, op->opcode);
+        }
       }
     }
-  }
 
-  if (taint_lowers_op_user_level) {
-    pending_cfg_patch_t *patch = REQUEST_NEW(pending_cfg_patch_t);
-    patch->type = PENDING_NODE_USER_LEVEL;
-    patch->cfg_opcode = expected_opcode;
-    patch->user_level = current_session.user_level;
-    scarray_append(&pending_cfg_patches, patch);
+    if (taint_lowers_op_user_level != NULL) {
+      pending_cfg_patch_t *patch = PROCESS_NEW(pending_cfg_patch_t);
+      patch->type = PENDING_NODE_USER_LEVEL;
+      patch->taint_source = GET_TAINT_VAR_EVO_SOURCE(taint_lowers_op_user_level);
+      patch->cfg_opcode = expected_opcode;
+      patch->user_level = current_session.user_level;
+      patch->next_pending = NULL;
+      scarray_append(&pending_cfg_patches, patch);
+    }
   }
 
   /*
@@ -1460,6 +1490,29 @@ void opcode_executing(const zend_op *op)
   */
 }
 
+static void evo_commit_expiring_taint_patches(evo_taint_t *taint)
+{
+  pending_cfg_patch_t *patch, *next;
+
+  for (patch = taint->patch_list; patch != NULL; patch = next) {
+    next = patch->next_pending;
+    switch (patch->type) {
+      case PENDING_ROUTINE_EDGE:
+        cfg_add_routine_edge(patch->app->cfg, patch->from_routine, patch->from_index,
+                             patch->to_routine, patch->to_index, patch->user_level);
+        break;
+      case PENDING_OPCODE_EDGE:
+        routine_cfg_add_opcode_edge(patch->routine, patch->from_index, patch->to_index,
+                                    patch->user_level);
+        break;
+      case PENDING_NODE_USER_LEVEL:
+        patch->cfg_opcode->user_level = patch->user_level;
+        break;
+    }
+    PROCESS_FREE(patch);
+  }
+}
+
 static void evo_expire_taint()
 {
   evo_taint_t *tail;
@@ -1467,10 +1520,14 @@ static void evo_expire_taint()
 
   while (evo_taint_queue.tail != NULL) {
     tail = (evo_taint_t *) evo_taint_queue.tail;
+    if (tail->request_id > current_request_id)
+      break; /* enable a bogus scenario for testing purposes */
     if ((current_request_id - tail->request_id) < EVO_TAINT_EXPIRATION)
       break;
 
-    hash = hash_string(tail->table_name) ^ hash_string(tail->column_name) ^ tail->table_key;
+    evo_commit_expiring_taint_patches(tail);
+
+    hash = hash_string(tail->table_name) ^ hash_string(tail->column_name) ^ tail->table_key; /* evo: shared code! */
     sctable_remove_value(&evo_taint_table, hash, tail);
     scqueue_dequeue(&evo_taint_queue);
     PROCESS_FREE((char *) tail->table_name);
@@ -1485,17 +1542,17 @@ static void db_site_modification(uint request_id, const char *table_name,
   evo_taint_t lookup = { 0, table_name, column_name, table_key, NULL };
   uint64 hash = hash_string(table_name) ^ hash_string(column_name) ^ table_key; // crowd low bits
 
-  // or unique via: `INSERT INTO table_tags (tag) VALUES ('tag_a'),('tab_b'),('tag_c') ON DUPLICATE KEY UPDATE tag=tag;`
   if (!sctable_has_value(&evo_taint_table, hash, &lookup)) {
     evo_taint_t *taint = PROCESS_NEW(evo_taint_t);
     taint->request_id = request_id;
     taint->table_key = table_key;
     taint->table_name = strdup(table_name);
     taint->column_name = strdup(column_name);
+    taint->patch_list = NULL;
     sctable_add(&evo_taint_table, hash, taint);
 
     scqueue_enqueue(&evo_taint_queue, taint);
-  }
+  } /* else evo: reset the request_id and remove/enqueue */
 
   if (cur_frame.cfm.app != NULL)
     plog(cur_frame.cfm.app, PLOG_TYPE_DB_MOD, "%s.%s[%lld]\n", table_name, column_name, table_key);
@@ -1510,8 +1567,12 @@ static void evo_state_synch()
 
   evo_expire_taint();
 
-  if ((current_request_id - evo_last_synch_request_id) > EVO_TAINT_EXPIRATION)
-    evo_last_synch_request_id = (current_request_id - EVO_TAINT_EXPIRATION);
+  if ((current_request_id - evo_last_synch_request_id) > EVO_TAINT_EXPIRATION) {
+    if (current_request_id < EVO_TAINT_EXPIRATION)
+      evo_last_synch_request_id = 0;
+    else
+      evo_last_synch_request_id = (current_request_id - EVO_TAINT_EXPIRATION);
+  }
 
   snprintf(evo_state_query, EVO_STATE_QUERY_MAX_LENGTH, EVO_STATE_QUERY, evo_last_synch_request_id);
   if (mysql_real_query(db_connection, evo_state_query, strlen(evo_state_query)) != 0) {
@@ -1536,7 +1597,7 @@ static void evo_state_synch()
   }
 }
 
-static void evo_commit_pending_patches()
+static void evo_commit_request_patches()
 {
   pending_cfg_patch_t *patch;
 
@@ -1544,21 +1605,18 @@ static void evo_commit_pending_patches()
   while ((patch = (pending_cfg_patch_t *) scarray_iterator_next(i)) != NULL) {
     switch (patch->type) {
       case PENDING_ROUTINE_EDGE:
-        cfg_add_routine_edge(patch->app->cfg, patch->from_routine, patch->from_index, patch->to_routine,
-                             patch->to_index, patch->user_level);
         write_routine_edge(patch->app, patch->from_routine->routine_hash, patch->from_index,
                            patch->to_routine->routine_hash, patch->to_index, patch->user_level);
         break;
       case PENDING_OPCODE_EDGE:
-        routine_cfg_add_opcode_edge(patch->from_routine, patch->from_index, patch->to_index,
-                                    patch->user_level);
-        write_op_edge(patch->app, patch->from_routine->routine_hash, patch->from_index,
+        write_op_edge(patch->app, patch->routine->routine_hash, patch->from_index,
                       patch->to_index, patch->user_level);
         break;
-      case PENDING_NODE_USER_LEVEL:
-        patch->cfg_opcode->user_level = patch->user_level;
-        break;
+      default: ;
     }
+    /* enqueue for final commit at taint expiration */
+    patch->next_pending = patch->taint_source->patch_list;
+    patch->taint_source->patch_list = patch;
   }
   scarray_iterator_end(i);
 }
@@ -1655,16 +1713,19 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
 
     for (i = 0; i < field_count; i++) {
       if (!is_key_index(key_column_indexes, evo_key->column_count, i)) {
-        evo_taint_t lookup = { 0, table_names[0], column_names[i], key, NULL };
+        evo_taint_t *found, lookup = { 0, table_names[0], column_names[i], key, NULL };
         field_hash = table_name_hash ^ hash_string(column_names[i]) ^ key;
 
-        if (!sctable_has_value(&evo_taint_table, field_hash, &lookup))
+        found = (evo_taint_t *) sctable_lookup_value(&evo_taint_table, field_hash, &lookup);
+        if (found == NULL)
           continue;
 
-        mod = REQUEST_NEW(site_modification_t); /* assuming request-static values are not possible */
+        /* per-request alloc assumes request-static values in app space are not possible */
+        mod = REQUEST_NEW(site_modification_t);
         mod->type = SITE_MOD_DB;
         mod->db_table = request_strdup(table_names[i]);
         mod->db_column = request_strdup(column_names[i]);
+        mod->source = found;
 
         if (Z_TYPE_P(values[i]) == IS_STRING)
           mod->db_value = request_strdup(Z_STRVAL_P(values[i]));

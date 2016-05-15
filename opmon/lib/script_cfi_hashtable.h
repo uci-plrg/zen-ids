@@ -38,6 +38,9 @@ sctable_activate_pool(sctable_t *t);
 void *
 sctable_lookup(sctable_t *t, KEY_TYPE key);
 
+void *
+sctable_lookup_value(sctable_t *t, KEY_TYPE key, void *value);
+
 bool
 sctable_has_value(sctable_t *t, KEY_TYPE key, void *value);
 
