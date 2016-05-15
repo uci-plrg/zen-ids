@@ -696,9 +696,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
 #endif
 }
 
-static const char *disassembly[] = { "wp_get_nav_menu_items" };
-static uint disassembly_count = 1;
-
 void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
                         const zend_op **args, uint arg_count)
 {
@@ -718,15 +715,6 @@ void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
     ERROR("<taint> Error! Found dangling call.\n");
     memset(call, 0, sizeof(taint_call_t));
     call->arg_count = arg_count;
-  }
-
-  // plog(app, "<taint> prepare call to %s(0x%llx)\n", callee_name, hash);
-
-  for (i = 0; i < disassembly_count; i++) {
-    if (disassembly[i] != NULL && strcmp(callee_name, disassembly[i]) == 0) {
-      plog_disassemble(app, stack_frame);
-      disassembly[i] = NULL;
-    }
   }
 
   for (i = 0; i < arg_count; i++) {

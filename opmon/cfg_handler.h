@@ -6,7 +6,7 @@
 #include "cfg.h"
 #include "taint.h"
 
-#define PLOG_TAINT 1
+// #define PLOG_TAINT 1
 #define PLOG_CFG 1
 #define PLOG_DB 1
 #define PLOG_DB_MOD 1
@@ -76,7 +76,6 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
 void plog(application_t *app, plog_type_t type, const char *message, ...);
 /* without printing the tag */
 void plog_append(application_t *app, plog_type_t type, const char *message, ...);
-void plog_disassemble(application_t *app, zend_op_array *stack_frame);
 void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame);
 
 void flush_all_outputs(application_t *app);

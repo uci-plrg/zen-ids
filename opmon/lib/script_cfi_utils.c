@@ -234,10 +234,14 @@ void tokenize_file(void)
 
 void *scalloc(size_t size, scalloc_lifespan_t lifespan)
 {
-  void *p = malloc(size);
+  void *p;
 
-  if (lifespan == ALLOC_REQUEST)
+  if (lifespan == ALLOC_REQUEST) {
+    p = malloc(size);
     scarray_append(&request_allocations, p);
+  } else {
+    p = malloc(size);
+  }
 
   return p;
 }
@@ -251,12 +255,8 @@ void scfree_request()
 {
   uint i;
 
-  SPOT("About to free %d allocations from the request\n", request_allocations.size);
-
   for (i = 0; i < request_allocations.size; i++)
     free(request_allocations.data[i]);
-
-  SPOT("Done freeing %d allocations from the request\n", request_allocations.size);
 
   request_allocations.size = 0;
 }

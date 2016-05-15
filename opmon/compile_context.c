@@ -64,7 +64,7 @@ static inline void push_fcall_init(application_t *app, uint index, zend_uchar op
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
   fcall_frame->routine_hash = routine_hash;
-  fcall_frame->routine_name = strdup(routine_name);
+  fcall_frame->routine_name = request_strdup(routine_name); // mem: per request?
   fcall_frame->opcode = opcode;
 
   push_dataflow_fcall_init(app, routine_hash, routine_name);
@@ -130,7 +130,7 @@ void function_compiled(zend_op_array *op_array)
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
-  function_fqn_t *fqn = PROCESS_NEW(function_fqn_t);
+  function_fqn_t *fqn = REQUEST_NEW(function_fqn_t);
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename;
@@ -168,7 +168,7 @@ void function_compiled(zend_op_array *op_array)
     }
   } else {
     PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
-    PROCESS_FREE(fqn);
+    // PROCESS_FREE(fqn);
     return;
   }
 
@@ -191,7 +191,7 @@ void function_compiled(zend_op_array *op_array)
     }
     fqn->unit.application = locate_application(filename);
     site_filename = filename + strlen(fqn->unit.application->root);
-    buffer = malloc(strlen(site_filename) + 1);
+    buffer = REQUEST_ALLOC(strlen(site_filename) + 1);
     strcpy(buffer, site_filename);
     fqn->unit.path = buffer;
     buffer = NULL;
@@ -213,7 +213,7 @@ void function_compiled(zend_op_array *op_array)
   if (strlen(routine_caller_name) == 0)
     strcat(routine_caller_name, routine_name);
 
-  buffer = malloc(strlen(routine_name) + 1);
+  buffer = REQUEST_ALLOC(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
   cfm.app = fqn->unit.application;
@@ -276,7 +276,7 @@ void function_compiled(zend_op_array *op_array)
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
   PRINT("Installing hashcodes for %s (0x%x) under hash 0x%llx\n", routine_name,
        fqn->function.caller_hash, hash_addr(op_array->opcodes));
-  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn);
+  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn); // mem: clear this at request boundary
 
   if (is_already_compiled) {
     PRINT("(skipping existing routine 0x%x at "PX")\n", fqn->function.callee_hash,
@@ -421,7 +421,7 @@ void function_compiled(zend_op_array *op_array)
                   }
                   strcat(to_unit_path, internal_to_path); // `internal_to_path` is just the to filename
                 }
-                PROCESS_FREE((char *) internal_to_path);
+                // PROCESS_FREE((char *) internal_to_path); // mem: per-request?
 
                 internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
                 if (internal_to_path == NULL) {
@@ -452,7 +452,7 @@ void function_compiled(zend_op_array *op_array)
               case ZEND_EVAL: {
                 char *eval_body = resolve_eval_body(op);
                 PRINT("Opcode %d calls eval(%s)\n", i, eval_body);
-                PROCESS_FREE(eval_body);
+                // PROCESS_FREE(eval_body); // mem: per-request?
               } break;
             }
           }
@@ -485,7 +485,7 @@ void function_compiled(zend_op_array *op_array)
                  op->lineno, fqn->function.callee_hash, cfm.dataset == NULL ? "missing" : "found",
                  cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.app, cfm.dataset, i));
           }
-          PROCESS_FREE((char *) fcall->routine_name);
+          // PROCESS_FREE((char *) fcall->routine_name);
         } break;
         case ZEND_INIT_FCALL:
         case ZEND_INIT_FCALL_BY_NAME:

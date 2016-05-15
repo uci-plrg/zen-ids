@@ -341,9 +341,7 @@ void interp_request_boundary(bool is_request_start)
       else
         current_request_id = mysql_insert_id(db_connection);
       evo_state_synch();
-    }
-
-    if (!is_request_start) {
+    } else {
       sctable_clear(&implicit_taint_table);
       implicit_taint_id = 0;
       implicit_taint_call_chain.start_frame = NULL;
@@ -369,8 +367,11 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
   zend_op *from_op = &from_frame->opcodes[from_frame->op_index];
   bool verified = false, add = false;
 
-  if (current_session.user_level >= 2)
+  if (current_session.user_level >= 2) {
+    write_request_edge(false, from_cfm->app, from_cfm->cfg->routine_hash, from_frame->op_index,
+                       to_frame->cfm.cfg->routine_hash, to_index, current_session.user_level);
     return;
+  }
 
   if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_frame->op_index, to_index,
@@ -524,7 +525,7 @@ static void lookup_cfm_by_name(zend_execute_data *execute_data, zend_op_array *o
   monitored_cfm = get_cfm_by_name(routine_name);
 
   if (monitored_cfm == NULL) {
-    char *routine_name_buffer = malloc(strlen(routine_name)+10);
+    char *routine_name_buffer = REQUEST_ALLOC(strlen(routine_name)+10);
     sprintf(routine_name_buffer, "<missing>%s", routine_name);
     cfm->routine_name = (const char *)routine_name_buffer;
     cfm->cfg = NULL;
@@ -1068,6 +1069,7 @@ void opcode_executing(const zend_op *op)
   taint_variable_t *taint_lowers_op_user_level = NULL;
   uint op_user_level = USER_LEVEL_TOP;
   cfg_opcode_t *expected_opcode = NULL;
+  cfg_opcode_edge_t *opcode_edge = NULL;
 
   update_user_session();
 
@@ -1289,23 +1291,11 @@ void opcode_executing(const zend_op *op)
       }
       opcode_verified = true;
     } else if (!caught_exception) {
-      uint i;
-      bool edge_found = false, edge_changed = false;
+      opcode_edge = routine_cfg_lookup_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index,
+                                                   cur_frame.op_index);
 
-      for (i = 0; i < cur_frame.cfm.cfg->opcode_edges.size; i++) {
-        cfg_opcode_edge_t *edge = routine_cfg_get_opcode_edge(cur_frame.cfm.cfg, i);
-        if (edge->from_index == prev_frame.op_index) { // TODO: check user level
-          if (edge->to_index == cur_frame.op_index) {
-            if (current_session.user_level < edge->user_level) {
-              edge->user_level = current_session.user_level;
-              edge_changed = true;
-            }
-            edge_found = true;
-            break;
-          }
-        }
-      }
-      opcode_edge_needs_update = !edge_found || edge_changed;
+      opcode_edge_needs_update = ((opcode_edge == NULL) ||
+                                  (current_session.user_level < opcode_edge->user_level));
       if (!opcode_edge_needs_update) {
         PRINT("@ Verified opcode edge %u -> %u\n", prev_frame.op_index, cur_frame.op_index);
         /* not marking `opcode_verified` because taint is required on every pass */
@@ -1436,8 +1426,12 @@ void opcode_executing(const zend_op *op)
 
   if (IS_CFI_TRAINING()) {
     if (opcode_edge_needs_update) {
-      routine_cfg_add_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index, cur_frame.op_index,
-                                  current_session.user_level);
+      if (opcode_edge == NULL) {
+        routine_cfg_add_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index, cur_frame.op_index,
+                                    current_session.user_level);
+      } else {
+        opcode_edge->user_level = current_session.user_level;
+      }
       write_op_edge(cur_frame.cfm.app, cur_frame.cfm.cfg->routine_hash, prev_frame.op_index,
                     cur_frame.op_index, current_session.user_level);
     }
@@ -1489,33 +1483,53 @@ void opcode_executing(const zend_op *op)
   */
 }
 
-static void evo_commit_expiring_taint_patches(evo_taint_t *taint)
+static uint evo_commit_expiring_taint_patches(evo_taint_t *taint)
 {
+  uint patch_count = 0;
   pending_cfg_patch_t *patch, *next;
+  cfg_opcode_edge_t *opcode_edge;
 
-  for (patch = taint->patch_list; patch != NULL; patch = next) {
+  for (patch = taint->patch_list; patch != NULL; patch = next, patch_count++) {
     next = patch->next_pending;
     switch (patch->type) {
       case PENDING_ROUTINE_EDGE:
-        cfg_add_routine_edge(patch->app->cfg, patch->from_routine, patch->from_index,
-                             patch->to_routine, patch->to_index, patch->user_level);
+        plog(cur_frame.cfm.app, PLOG_TYPE_CFG, "add (commit) taint-verified: %04d 0x%x -> 0x%x\n",
+             patch->from_index, patch->from_routine, patch->to_routine);
+
+        if (!cfg_has_routine_edge(patch->app->cfg, patch->from_routine, patch->from_index,
+                                  patch->to_routine, patch->to_index, patch->user_level)) {
+          cfg_add_routine_edge(patch->app->cfg, patch->from_routine, patch->from_index,
+                               patch->to_routine, patch->to_index, patch->user_level);
+        }
         break;
       case PENDING_OPCODE_EDGE:
-        routine_cfg_add_opcode_edge(patch->routine, patch->from_index, patch->to_index,
-                                    patch->user_level);
+        plog(cur_frame.cfm.app, PLOG_TYPE_CFG, "add (commit) taint-verified: 0x%x %04d -> %04d\n",
+             patch->routine, patch->from_index, patch->to_index);
+
+        opcode_edge = routine_cfg_lookup_opcode_edge(patch->routine, patch->from_index,
+                                                     patch->to_index);
+        if (opcode_edge == NULL) {
+          routine_cfg_add_opcode_edge(patch->routine, patch->from_index, patch->to_index,
+                                      patch->user_level);
+        } else {
+          opcode_edge->user_level = patch->user_level;
+        }
         break;
       case PENDING_NODE_USER_LEVEL:
-        patch->cfg_opcode->user_level = patch->user_level;
+        patch->cfg_opcode->user_level = patch->user_level; /* not enough info to log it */
         break;
     }
     PROCESS_FREE(patch);
   }
+
+  return patch_count;
 }
 
 static void evo_expire_taint()
 {
   evo_taint_t *tail;
   uint64 hash;
+  uint patch_count;
 
   while (evo_taint_queue.tail != NULL) {
     tail = (evo_taint_t *) evo_taint_queue.tail;
@@ -1524,7 +1538,13 @@ static void evo_expire_taint()
     if ((current_request_id - tail->request_id) < EVO_TAINT_EXPIRATION)
       break;
 
-    evo_commit_expiring_taint_patches(tail);
+    patch_count = evo_commit_expiring_taint_patches(tail);
+
+    if (cur_frame.cfm.app != NULL) {
+      plog(cur_frame.cfm.app, PLOG_TYPE_DB_MOD,
+           "Expiring taint %s.%s[%lld] with %d patches\n",
+           tail->table_name, tail->column_name, tail->table_key, patch_count);
+    }
 
     hash = hash_string(tail->table_name) ^ hash_string(tail->column_name) ^ tail->table_key; /* evo: shared code! */
     sctable_remove_value(&evo_taint_table, hash, tail);

@@ -59,6 +59,20 @@ void routine_cfg_assign_opcode(routine_cfg_t *cfg, zend_uchar opcode, zend_ulong
   cfg_opcode->user_level = user_level;
 }
 
+cfg_opcode_edge_t *routine_cfg_lookup_opcode_edge(routine_cfg_t *routine,
+                                                  uint from_index, uint to_index)
+{
+  uint i;
+
+  for (i = 0; i < routine->opcode_edges.size; i++) {
+    cfg_opcode_edge_t *edge = routine_cfg_get_opcode_edge(routine, i);
+    if (edge->from_index == from_index && edge->to_index == to_index)
+      return edge;
+  }
+
+  return NULL;
+}
+
 bool routine_cfg_has_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_index)
 {
   uint i;
@@ -81,11 +95,6 @@ void routine_cfg_add_opcode_edge(routine_cfg_t *cfg, uint from_index, uint to_in
   cfg_edge->from_index = from_index;
   cfg_edge->to_index = to_index;
   cfg_edge->user_level = user_level;
-
-  if (cfg->routine_hash == 0xfc6651c2) {
-    SPOT("Compiling opcode edge %d -> %d at level %d in (0x%x)\n",
-         from_index, to_index, user_level, cfg->routine_hash);
-  }
 }
 
 cfg_t *cfg_new()

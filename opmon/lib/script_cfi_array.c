@@ -10,7 +10,7 @@ struct _scarray_iterator_t {
 
 static void expand(scarray_t *a)
 {
-  void **new_data = malloc((a->capacity * 2) * sizeof(void *));
+  void **new_data = PROCESS_ALLOC((a->capacity * 2) * sizeof(void *));
   memcpy(new_data, a->data, a->capacity * sizeof(void *));
   PROCESS_FREE(a->data);
   a->data = new_data;
@@ -21,7 +21,7 @@ void scarray_init(scarray_t *a)
 {
   a->capacity = BASE_CAPACITY;
   a->size = 0;
-  a->data = malloc(a->capacity * sizeof(void *));
+  a->data = PROCESS_ALLOC(a->capacity * sizeof(void *));
   memset(a->data, 0, a->capacity * sizeof(void *));
 }
 

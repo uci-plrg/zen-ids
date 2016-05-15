@@ -1686,7 +1686,7 @@ static void copy_dataflow_variables(scarray_t *dst, scarray_t *src)
   dataflow_live_variable_t *var, *copy;
   scarray_iterator_t *i;
 
-  i = scarray_iterator_start(src);
+  i = scarray_iterator_start(src); // todo: free these iterators with scarray_iterator_end()!
   while ((var = (dataflow_live_variable_t *) scarray_iterator_next(i)) != NULL) {
     copy = PROCESS_NEW(dataflow_live_variable_t);
     memcpy(copy, var, sizeof(dataflow_live_variable_t));

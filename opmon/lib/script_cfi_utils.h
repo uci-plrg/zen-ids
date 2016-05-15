@@ -139,6 +139,7 @@ typedef enum _scalloc_lifespan_t {
   ALLOC_REQUEST
 } scalloc_lifespan_t;
 
+#define PROCESS_ALLOC(size) scalloc(size, ALLOC_PROCESS)
 #define PROCESS_NEW(type) (type *) scalloc(sizeof(type), ALLOC_PROCESS)
 #define PROCESS_FREE(p) scfree_process(p)
 #define REQUEST_NEW(type) (type *) scalloc(sizeof(type), ALLOC_REQUEST)

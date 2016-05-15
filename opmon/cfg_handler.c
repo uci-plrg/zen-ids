@@ -181,8 +181,8 @@ static void write_request_entry(cfg_files_t *cfg_files)
           }
           set = buffer;
           do { /* write up to the next post parameter (delimited by '&') */
-            mark = strchr(set, '&');
-            if (mark == NULL || mark > buffer + size)
+            mark = memchr(set, '&', size - (set - buffer));
+            if (mark == NULL) // || mark > buffer + size)
               break;
 #ifdef URL_DECODE
             decode_size = mark - set;
@@ -243,6 +243,7 @@ void destroy_cfg_handler()
     scarray_iterator_t *i = scarray_iterator_start(request_state.edge_pool);
     while ((edge = (request_edge_t *) scarray_iterator_next(i)) != NULL)
       PROCESS_FREE(edge);
+    scarray_iterator_end(i);
     scarray_destroy(request_state.edge_pool);
     PROCESS_FREE(request_state.edge_pool);
     request_state.edge_pool = NULL;
@@ -908,16 +909,6 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
     fprintf(plog, "\n");
 }
 #endif
-
-void plog_disassemble(application_t *app, zend_op_array *stack_frame)
-{
-  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
-  zend_op *op;
-
-  fprintf(plog, "\t === %s()", stack_frame->function_name->val);
-  for (op = stack_frame->opcodes; op < &stack_frame->opcodes[stack_frame->last]; op++)
-    dump_opcode(app, stack_frame, op); // fprintf(plog, "\t%04d(L%04d) 0x%x %s%s()", stack_frame->function_name->val);
-}
 
 static inline void plog_user_frame(application_t *app, plog_type_t type, zend_execute_data *frame)
 {
