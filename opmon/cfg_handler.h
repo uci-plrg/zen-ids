@@ -42,7 +42,7 @@ void server_startup();
 
 void cfg_initialize_application(application_t *app);
 void cfg_destroy_application(application_t *app);
-void cfg_request_boundary(bool is_first);
+void cfg_request_boundary(bool is_first, uint64 request_id);
 void cfg_form(const char *form_data, int length);
 
 void write_node(application_t *app, uint routine_hash, cfg_opcode_t *opcode, uint index);
@@ -81,5 +81,7 @@ void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *st
 void flush_all_outputs(application_t *app);
 
 int get_current_request_id();
+uint64 get_current_request_start_time();
+const char *get_current_request_address();
 
 #endif

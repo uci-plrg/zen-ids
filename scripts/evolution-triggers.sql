@@ -254,11 +254,11 @@ BEGIN
     SET option_hash = CONV(CONVERT(MD5(NEW.option_name), BINARY(8)), 16, 10);
     SELECT request_id INTO @request_id FROM opmon_request_sequence;
     REPLACE INTO opmon_evolution (request_id, table_name, column_name, table_key)
-        VALUES (request_id, 'wp_options', 'option_name', option_hash);
+        VALUES (@request_id, 'wp_options', 'option_name', option_hash);
     REPLACE INTO opmon_evolution (request_id, table_name, column_name, table_key)
-        VALUES (request_id, 'wp_options', 'option_value', option_hash);
+        VALUES (@request_id, 'wp_options', 'option_value', option_hash);
     REPLACE INTO opmon_evolution (request_id, table_name, column_name, table_key)
-        VALUES (request_id, 'wp_options', 'autoload', option_hash);
+        VALUES (@request_id, 'wp_options', 'autoload', option_hash);
   END IF;
 END $$
 
@@ -271,15 +271,15 @@ BEGIN
     SELECT request_id INTO @request_id FROM opmon_request_sequence;
     IF NEW.option_name != OLD.option_name THEN
       REPLACE INTO opmon_evolution (request_id, table_name, column_name, table_key)
-        VALUES (request_id, 'wp_options', 'option_hash', option_hash);
+        VALUES (@request_id, 'wp_options', 'option_hash', option_hash);
     END IF;
     IF NEW.option_value != OLD.option_value THEN
       REPLACE INTO opmon_evolution (request_id, table_name, column_name, table_key)
-        VALUES (request_id, 'wp_options', 'option_value', option_hash);
+        VALUES (@request_id, 'wp_options', 'option_value', option_hash);
     END IF;
     IF NEW.autoload != OLD.autoload THEN
       REPLACE INTO opmon_evolution (request_id, table_name, column_name, table_key)
-        VALUES (request_id, 'wp_options', 'autoload', option_hash);
+        VALUES (@request_id, 'wp_options', 'autoload', option_hash);
     END IF;
   END IF;
 END $$

@@ -52,7 +52,7 @@ typedef struct _php_server_context_t { // type window
 typedef struct _request_state_t {
   bool is_in_request;
   bool is_new_request;
-  uint request_id;
+  uint64 request_id;
   application_t *app;
   request_rec *r;
   sctable_t *edges; // of `request_edge_t`
@@ -98,6 +98,9 @@ static bool is_media_file(char *buffer)
 
 static void write_request_entry(cfg_files_t *cfg_files)
 {
+  SPOT("Starting request %08lld 0x%lx: %s\n", request_state.request_id,
+       request_state.r->request_time, request_state.r->the_request);
+
   fprintf(cfg_files->request, "<request-time> 0x%lx\n", request_state.r->request_time);
   fprintf(cfg_files->request, "<request> %s\n", request_state.r->the_request);
   fprintf(cfg_files->request, "<requested-file> %s\n", request_state.r->filename);
@@ -228,7 +231,7 @@ static void write_request_entry(cfg_files_t *cfg_files)
       ERROR("Unknown request type %s\n", request_state.r->method);
   }
 
-  fprintf(cfg_files->request, "<request-id> |%08d\n", request_state.request_id);
+  fprintf(cfg_files->request, "<request-id> |%08lld\n", request_state.request_id);
 }
 
 void init_cfg_handler()
@@ -497,7 +500,7 @@ void cfg_destroy_application(application_t *app)
   destroy_interp_app_context(app);
 }
 
-void cfg_request_boundary(bool is_request_start)
+void cfg_request_boundary(bool is_request_start, uint64 request_id)
 {
   request_state.is_in_request = is_request_start;
 
@@ -505,7 +508,7 @@ void cfg_request_boundary(bool is_request_start)
     php_server_context_t *context = (php_server_context_t *) SG(server_context);
     request_state.r = context->r;
     request_state.is_new_request = true;
-    request_state.request_id++;
+    request_state.request_id = request_id;
 
     if (request_state.edges == NULL) { // lazy construct b/c standalone mode doesn't need it
       request_state.edge_pool = PROCESS_NEW(scarray_t);
@@ -616,7 +619,8 @@ bool write_request_edge(bool is_new_in_process, application_t *app, uint from_ro
       fwrite(&from_index, sizeof(uint), 1, cfg_files->request_edge);
     }
 
-    fprintf(cfg_files->persistence, "@ 0x%lx\n", request_state.r->request_time);
+    fprintf(cfg_files->persistence, "@ %08lld 0x%lx: %s\n", request_state.request_id,
+            request_state.r->request_time, request_state.r->the_request);
 
     write_request_entry(cfg_files);
 
@@ -1052,4 +1056,14 @@ int get_current_request_id()
     return request_state.request_id;
   else
     return -1;
+}
+
+uint64 get_current_request_start_time()
+{
+  return (uint64) request_state.r->request_time;
+}
+
+const char *get_current_request_address()
+{
+  return request_state.r->the_request;
 }

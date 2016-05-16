@@ -332,7 +332,7 @@ void destroy_interp_app_context(application_t *app)
     mysql_close(db_connection);
 }
 
-void interp_request_boundary(bool is_request_start)
+uint64 interp_request_boundary(bool is_request_start)
 {
   if (IS_CFI_EVO()) {
     if (is_request_start) {
@@ -340,6 +340,7 @@ void interp_request_boundary(bool is_request_start)
         ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
       else
         current_request_id = mysql_insert_id(db_connection);
+
       evo_state_synch();
     } else {
       sctable_clear(&implicit_taint_table);
@@ -352,6 +353,8 @@ void interp_request_boundary(bool is_request_start)
       request_blocked = false;
     }
   }
+
+  return current_request_id;
 }
 
 static void push_exception_frame()
@@ -425,7 +428,17 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
         plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       } else {
-        request_blocked = true;
+        if (!request_blocked) {
+          const char *address = get_current_request_address();
+
+          request_blocked = true;
+
+          plog(from_cfm->app, PLOG_TYPE_CFG, "block request %08lld 0x%llx: %s\n",
+               current_request_id, get_current_request_start_time(), address);
+
+          if (strstr(address, "GET / ") == address)
+            SPOT("check it\n");
+        }
         if (to_index == 0) {
           plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
@@ -1776,21 +1789,23 @@ static inline bool is_db_write(const char *query) {
 monitor_query_flags_t db_query(const char *query)
 {
   monitor_query_flags_t flags = 0;
-  bool is_admin = current_session.user_level > 2;
+  bool is_admin = current_session.user_level > 2, is_write = is_db_write(query);
 
   if (IS_CFI_EVO() && is_admin) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
 
-    plog(cur_frame.cfm.app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query,
-         cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+    if (is_write) {
+      plog(cur_frame.cfm.app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query,
+           cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
+    }
   }
 
   if (IS_CFI_EVO()) {
     if (is_admin)
       flags |= MONITOR_QUERY_FLAG_IS_ADMIN;
   } /* else always skip the triggers */
-  if (is_db_write(query))
+  if (is_write)
     flags |= MONITOR_QUERY_FLAG_IS_WRITE;
   return flags;
 }
