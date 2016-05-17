@@ -441,6 +441,12 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
                                     to_frame->cfm.cfg->routine_hash, current_session.user_level)) {
       verified = true;
     }
+#ifdef OPMON_DEBUG
+    else {
+      dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_frame->op_index, to_index,
+                                  to_frame->cfm.cfg->routine_hash, current_session.user_level);
+    }
+#endif
   }
   if (!verified && cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
                                         to_frame->cfm.cfg, to_index, current_session.user_level)) {
