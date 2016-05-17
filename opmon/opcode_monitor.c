@@ -22,6 +22,8 @@ PHP_INI_BEGIN()
                     request_edge_enabled, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_opcode_dump_enabled", ".", PHP_INI_PERDIR, OnUpdateLong,
                     opcode_dump_enabled, zend_opcode_monitor_globals, opcode_monitor_globals)
+  STD_PHP_INI_ENTRY("opmon_cfi_bailout", ".", PHP_INI_PERDIR, OnUpdateLong,
+                    cfi_bailout, zend_opcode_monitor_globals, opcode_monitor_globals)
 PHP_INI_END()
 
 static PHP_GINIT_FUNCTION(opcode_monitor);

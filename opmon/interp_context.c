@@ -506,7 +506,8 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
 
           zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
                      current_request_id, get_current_request_start_time(), address);
-          zend_bailout();
+          if (IS_CFI_BAILOUT_ENABLED())
+            zend_bailout();
           ERROR("Failed to bail out on blocked request!\n");
         }
       }

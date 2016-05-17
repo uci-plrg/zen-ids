@@ -63,6 +63,7 @@ typedef enum _cfi_mode_t {
 
 #define IS_REQUEST_EDGE_OUTPUT_ENABLED() (OPMON_G(request_edge_enabled != 0))
 #define IS_OPCODE_DUMP_ENABLED() (OPMON_G(opcode_dump_enabled != 0))
+#define IS_CFI_BAILOUT_ENABLED() (OPMON_G(cfi_bailout != 0))
 
 #define TEST(match, in) (((in) & (match)) == (match))
 
@@ -155,6 +156,7 @@ ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   int cfi_mode;
   int request_edge_enabled;
   int opcode_dump_enabled;
+  int cfi_bailout;
 ZEND_END_MODULE_GLOBALS(opcode_monitor)
 
 ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
