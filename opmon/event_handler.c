@@ -80,6 +80,42 @@ static zend_bool zval_has_taint(const zval *value)
   return taint_var_get(value) != NULL;
 }
 
+static zend_bool nop_notify_dataflow(const zval *src, const char *src_name,
+                                     const zval *dst, const char *dst_name,
+                                     zend_bool is_internal_transfer)
+{
+  return false;
+}
+
+static zend_bool nop_has_taint(const zval *value)
+{
+  return false;
+}
+
+static void nop_notify_opcode_interp(const zend_op *op)
+{
+}
+
+static void nop_notify_function_compile_complete(zend_op_array *op_array)
+{
+}
+
+static void nop_notify_zval_free(const zval *zv)
+{
+}
+
+//static void nop_notify_http_request(zend_bool start);
+
+static monitor_query_flags_t nop_notify_database_query(const char *query)
+{
+  return 0;
+}
+
+static void nop_notify_database_fetch(uint32_t field_count, const char **table_names,
+                                      const char **column_names, const zval **value)
+{
+}
+
 void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   // scarray_unit_test();
@@ -99,17 +135,27 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     init_dataflow_analysis();
 
   monitor->set_top_level_script = init_top_level_script;
-  monitor->has_taint = zval_has_taint;
-  monitor->notify_opcode_interp = opcode_executing;
-  monitor->notify_function_compile_complete = function_compiled;
-  monitor->dataflow.notify_dataflow = internal_dataflow;
-  monitor->notify_zval_free = taint_var_free;
-  monitor->notify_http_request = request_boundary;
-  monitor->notify_database_fetch = db_fetch;
-  monitor->notify_database_query = db_query;
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;
   monitor->opmon_dataflow = start_dataflow_analysis;
+  monitor->notify_http_request = request_boundary;
+  if (true) {
+    monitor->has_taint = nop_has_taint;
+    monitor->notify_opcode_interp = nop_notify_opcode_interp;
+    monitor->notify_function_compile_complete = nop_notify_function_compile_complete;
+    monitor->dataflow.notify_dataflow = nop_notify_dataflow;
+    monitor->notify_zval_free = nop_notify_zval_free;
+    monitor->notify_database_fetch = nop_notify_database_fetch;
+    monitor->notify_database_query = nop_notify_database_query;
+  } else {
+    monitor->has_taint = zval_has_taint;
+    monitor->notify_opcode_interp = opcode_executing;
+    monitor->notify_function_compile_complete = function_compiled;
+    monitor->dataflow.notify_dataflow = internal_dataflow;
+    monitor->notify_zval_free = taint_var_free;
+    monitor->notify_database_fetch = db_fetch;
+    monitor->notify_database_query = db_query;
+  }
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
 
