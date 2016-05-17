@@ -9,6 +9,7 @@ void initialize_interp_context();
 void initialize_interp_app_context(application_t *app);
 void destroy_interp_app_context(application_t *app);
 uint64 interp_request_boundary(bool is_first);
+void set_opmon_user_level(long user_level);
 
 void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm);
 void pop_interp_context();

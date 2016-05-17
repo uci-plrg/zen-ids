@@ -139,7 +139,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->opmon_tokenize = NULL; //tokenize_file;
   monitor->opmon_dataflow = start_dataflow_analysis;
   monitor->notify_http_request = request_boundary;
-  if (true) {
+  if (false) {
     monitor->has_taint = nop_has_taint;
     monitor->notify_opcode_interp = nop_notify_opcode_interp;
     monitor->notify_function_compile_complete = nop_notify_function_compile_complete;

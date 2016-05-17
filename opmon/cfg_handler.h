@@ -7,11 +7,11 @@
 #include "taint.h"
 
 // #define PLOG_TAINT 1
-#define PLOG_CFG 1
-#define PLOG_DB 1
-#define PLOG_DB_MOD 1
-#define PLOG_WARN 1
-#define PLOG_AD_HOC 1
+// #define PLOG_CFG 1
+// #define PLOG_DB 1
+// #define PLOG_DB_MOD 1
+// #define PLOG_WARN 1
+// #define PLOG_AD_HOC 1
 
 typedef struct _cfg_files_t {
   FILE *node;

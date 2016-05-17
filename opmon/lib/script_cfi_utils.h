@@ -59,6 +59,7 @@ typedef enum _cfi_mode_t {
 #define IS_CFI_TRAINING() (CFI_MODE == CFI_MODE_TRAINING)
 #define IS_CFI_EVO() (CFI_MODE == CFI_MODE_EVO)
 
+#define IS_REQUEST_EDGE_OUTPUT_ENABLED() (OPMON_G(request_edge_enabled != 0))
 #define IS_OPCODE_DUMP_ENABLED() (OPMON_G(opcode_dump_enabled != 0))
 
 #define TEST(match, in) (((in) & (match)) == (match))
@@ -150,6 +151,7 @@ ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   const char *dataset_dir;
   int verbose;
   int cfi_mode;
+  int request_edge_enabled;
   int opcode_dump_enabled;
 ZEND_END_MODULE_GLOBALS(opcode_monitor)
 
@@ -175,7 +177,6 @@ void setup_base_path(char *path, const char *category, const char *app_path);
 
 bool is_php_session_active();
 zval *php_session_set_var(zend_string *key, zval *value);
-void set_opmon_user_level(long user_level);
 
 char *request_strdup(const char *src);
 const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);

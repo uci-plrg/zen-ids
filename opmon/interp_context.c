@@ -231,12 +231,14 @@ static scqueue_t evo_taint_queue;
 static void evo_state_synch();
 static void evo_commit_request_patches();
 
+/*
 static uint get_first_executable_index(zend_op *opcodes)
 {
   uint i;
   for (i = 0; zend_get_opcode_name(opcodes[i].opcode) == NULL; i++) ;
   return i;
 }
+*/
 
 static bool evo_taint_comparator(void *a, void *b)
 {
@@ -246,6 +248,30 @@ static bool evo_taint_comparator(void *a, void *b)
   return (strcmp(first->table_name, second->table_name) == 0 &&
           strcmp(first->column_name, second->column_name) == 0 &&
           first->table_key == second->table_key);
+}
+
+static void update_user_session()
+{
+  if (is_php_session_active()) {
+    zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
+    zval *session_zval = php_get_session_var(key);
+    if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
+      set_opmon_user_level(USER_LEVEL_BOTTOM);
+      PRINT("<session> Session has no user level for key %s during update on pid 0x%x"
+            "--assigning bottom level\n", key->val, getpid());
+    } else {
+      PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
+      current_session.user_level = (uint) Z_LVAL_P(session_zval);
+    }
+    zend_string_release(key);
+
+    current_session.active = true;
+
+    PRINT("<session> Updated current user session to level %d\n", current_session.user_level);
+  } else {
+    current_session.active = false;
+    // TODO: why is the session sometimes inactive??
+  }
 }
 
 void initialize_interp_context()
@@ -341,6 +367,7 @@ uint64 interp_request_boundary(bool is_request_start)
       else
         current_request_id = mysql_insert_id(db_connection);
 
+      update_user_session();
       evo_state_synch();
     } else {
       sctable_clear(&implicit_taint_table);
@@ -355,6 +382,32 @@ uint64 interp_request_boundary(bool is_request_start)
   }
 
   return current_request_id;
+}
+
+void set_opmon_user_level(long user_level)
+{
+  current_session.user_level = user_level;
+
+  if (is_php_session_active()) {
+    zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
+    zval *session_zval = php_get_session_var(key);
+    if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
+      zval new_session_zval;
+      ZVAL_LONG(&new_session_zval, user_level);
+      session_zval = php_session_set_var(key, &new_session_zval);
+      PRINT("<session> No user session during set_user_level--"
+            "created new session user with level %ld\n", user_level);
+    } else {
+      PRINT("<session> Found session user level %ld during set_user_level\n",
+            Z_LVAL_P(session_zval));
+      Z_LVAL_P(session_zval) = user_level;
+    }
+    zend_string_release(key);
+    PRINT("<session> Set session user with level %ld on pid 0x%x\n",
+          Z_LVAL_P(session_zval), getpid());
+  } else {
+    ERROR("<session> User level assigned with no active PHP session!\n");
+  }
 }
 
 static void push_exception_frame()
@@ -577,52 +630,16 @@ static bool validate_return(zend_execute_data *execute_data)
   return (stack_event.return_target == execute_data || stack_event.return_target == return_target);
 }
 
-static bool update_stack_frame(const zend_op *op) // true if the stack pointer changed
+static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op_array,
+                              const zend_op *op, uint op_index)
 {
-  zend_execute_data *execute_data = EG(current_execute_data), *prev_execute_data;
-  zend_op_array *op_array = &execute_data->func->op_array;
+  zend_execute_data *prev_execute_data;
   stack_frame_t new_cur_frame, new_prev_frame;
-
-  if (op_array == NULL || op_array->opcodes == NULL)
-    return false; // nothing to do
-
-  // hack
-  if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
-    new_cur_frame.cfm = get_last_eval_cfm();
-  } else {
-    lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
-  }
-
-  //if (stack_event.state == STACK_STATE_UNWINDING)
-  //  return false;
-
-  if (execute_data == cur_frame.execute_data && op_array->opcodes == cur_frame.opcodes &&
-      (execute_data->opline - op_array->opcodes) > get_first_executable_index(op_array->opcodes)) {
-    prev_frame = cur_frame;
-    cur_frame.op_index = (execute_data->opline - op_array->opcodes);
-    cur_frame.opcode = op->opcode;
-    switch (stack_event.state) {
-      case STACK_STATE_CALL:
-        ERROR("Stack frame did not change after STACK_STATE_CALL at opcode 0x%x. Still in %s\n",
-              stack_event.last_opcode, cur_frame.cfm.routine_name);
-        stack_event.state = STACK_STATE_NONE;
-        break;
-      case STACK_STATE_RETURNING:
-        if (!validate_return(execute_data))
-          ERROR("Failed to clear STACK_STATE_RETURNING. Now in %s\n", cur_frame.cfm.routine_name);
-      case STACK_STATE_RETURNED:
-        stack_event.state = STACK_STATE_NONE;
-        break;
-      default: ;
-    }
-
-    return false; // nothing to do
-  }
 
   new_cur_frame.execute_data = execute_data;
   new_cur_frame.opcodes = op_array->opcodes;
   new_cur_frame.opcode = op->opcode;
-  new_cur_frame.op_index = (execute_data->opline - op_array->opcodes);
+  new_cur_frame.op_index = op_index;
   if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
     new_cur_frame.cfm = get_last_eval_cfm();
   } else {
@@ -693,31 +710,46 @@ static bool update_stack_frame(const zend_op *op) // true if the stack pointer c
 
   cur_frame = new_cur_frame;
   prev_frame = new_prev_frame;
-  return true;
 }
 
-static void update_user_session()
+/* return true if the stack pointer changed */
+static inline bool update_stack_frame(zend_execute_data *execute_data, zend_op_array *op_array,
+                                      const zend_op *op)
 {
-  if (is_php_session_active()) {
-    zend_string *key = zend_string_init(USER_SESSION_KEY, sizeof(USER_SESSION_KEY) - 1, 0);
-    zval *session_zval = php_get_session_var(key);
-    if (session_zval == NULL || Z_TYPE_INFO_P(session_zval) != IS_LONG) {
-      set_opmon_user_level(USER_LEVEL_BOTTOM);
-      PRINT("<session> Session has no user level for key %s during update on pid 0x%x"
-            "--assigning bottom level\n", key->val, getpid());
-    } else {
-      PRINT("<session> Found session user level %ld\n", Z_LVAL_P(session_zval));
-      current_session.user_level = (uint) Z_LVAL_P(session_zval);
+  uint op_index = execute_data->opline - op_array->opcodes;
+
+  if (op_array == NULL || op_array->opcodes == NULL)
+    return false; // nothing to do
+
+  /* N.B.: stack frame may get reused repeatedly during callbacks from a builtin */
+  if (execute_data == cur_frame.execute_data && op_array->opcodes == cur_frame.opcodes) {
+    if (execute_data == prev_frame.execute_data)
+      prev_frame.op_index = cur_frame.op_index;
+    else
+      prev_frame = cur_frame;
+    cur_frame.op_index = op_index;
+    cur_frame.opcode = op->opcode;
+
+    switch (stack_event.state) {
+      case STACK_STATE_CALL:
+        ERROR("Stack frame did not change after STACK_STATE_CALL at opcode 0x%x. Still in %s\n",
+              stack_event.last_opcode, cur_frame.cfm.routine_name);
+        stack_event.state = STACK_STATE_NONE;
+        break;
+      case STACK_STATE_RETURNING:
+        if (!validate_return(execute_data))
+          ERROR("Failed to clear STACK_STATE_RETURNING. Now in %s\n", cur_frame.cfm.routine_name);
+      case STACK_STATE_RETURNED:
+        stack_event.state = STACK_STATE_NONE;
+        break;
+      default: ;
     }
-    zend_string_release(key);
 
-    current_session.active = true;
-
-    PRINT("<session> Updated current user session to level %d\n", current_session.user_level);
-  } else {
-    current_session.active = false;
-    // TODO: why is the session sometimes inactive??
+    return false; // nothing to do
   }
+
+  stack_step(execute_data, op_array, op, op_index);
+  return true;
 }
 
 static uint get_next_executable_index(uint from_index)
@@ -1084,8 +1116,6 @@ void opcode_executing(const zend_op *op)
   cfg_opcode_t *expected_opcode = NULL;
   cfg_opcode_edge_t *opcode_edge = NULL;
 
-  update_user_session();
-
   op_execution_count++;
   if ((op_execution_count & FLUSH_MASK) == 0)
     flush_all_outputs(cur_frame.cfm.app);
@@ -1110,7 +1140,7 @@ void opcode_executing(const zend_op *op)
     return;
   }
 
-  stack_pointer_moved = update_stack_frame(op);
+  stack_pointer_moved = update_stack_frame(execute_data, op_array, op);
 
   if (trace_all_opcodes) {
     plog(cur_frame.cfm.app, PLOG_TYPE_AD_HOC, "%04d(L%04d)%s:%s\n", OP_INDEX(op_array, op),

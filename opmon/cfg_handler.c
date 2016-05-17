@@ -282,7 +282,8 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
     OPEN_CFG_FILE("opcodes.log", opcode_log);
   if (!is_standalone_app) {
     OPEN_CFG_FILE("request.tab", request);
-    OPEN_CFG_FILE("request-edge.run", request_edge);
+    if (IS_REQUEST_EDGE_OUTPUT_ENABLED())
+      OPEN_CFG_FILE("request-edge.run", request_edge);
   }
 
 #undef OPEN_CFG_FILE
@@ -490,7 +491,8 @@ void cfg_destroy_application(application_t *app)
     fclose(cfg_files->persistence);
     if (!is_standalone_app) {
       fclose(cfg_files->request);
-      fclose(cfg_files->request_edge);
+      if (IS_REQUEST_EDGE_OUTPUT_ENABLED())
+        fclose(cfg_files->request_edge);
     }
     if (!is_standalone_app)
       PROCESS_FREE(cfg_files);
@@ -505,10 +507,19 @@ void cfg_request_boundary(bool is_request_start, uint64 request_id)
   request_state.is_in_request = is_request_start;
 
   if (request_state.is_in_request) {
+    cfg_files_t *cfg_files;
     php_server_context_t *context = (php_server_context_t *) SG(server_context);
     request_state.r = context->r;
     request_state.is_new_request = true;
     request_state.request_id = request_id;
+
+    request_state.app = locate_application(request_state.r->filename);
+    cfg_files = (cfg_files_t *) request_state.app->cfg_files;
+
+    fprintf(cfg_files->persistence, "@ %08lld 0x%lx: %s\n", request_state.request_id,
+            request_state.r->request_time, request_state.r->the_request);
+
+    write_request_entry(cfg_files);
 
     if (request_state.edges == NULL) { // lazy construct b/c standalone mode doesn't need it
       request_state.edge_pool = PROCESS_NEW(scarray_t);
@@ -595,38 +606,35 @@ bool write_request_edge(bool is_new_in_process, application_t *app, uint from_ro
     }
   }
 
-  PRINT("Write routine-edge {0x%x #%d} -> {0x%x #%d} to cfg\n",
-        from_routine_hash, from_index, to_routine_hash, to_index);
+  if (IS_REQUEST_EDGE_OUTPUT_ENABLED()) {
+    PRINT("Write routine-edge {0x%x #%d} -> {0x%x #%d} to cfg\n",
+          from_routine_hash, from_index, to_routine_hash, to_index);
 
-  packed_from_index = from_index | (user_level << USER_LEVEL_SHIFT);
+    packed_from_index = from_index | (user_level << USER_LEVEL_SHIFT);
 
-  if (request_state.is_new_request) {
-    uint timestamp = get_timestamp();
+    if (request_state.is_new_request) {
+      uint timestamp = get_timestamp();
 
-    fwrite(&request_header_tag, sizeof(uint), 1, cfg_files->request_edge);
-    fwrite(&request_state.request_id, sizeof(uint), 1, cfg_files->request_edge);
-    fwrite(&session.hash, sizeof(uint), 1, cfg_files->request_edge);
-    fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&request_header_tag, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&request_state.request_id, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&session.hash, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);
 
-    /* Make an entry point if the stack policy didn't see it */
-    if (from_routine_hash != ENTRY_POINT_HASH) {
-      uint entry_point_hash = ENTRY_POINT_HASH;
-      uint entry_point_index = (user_level << USER_LEVEL_SHIFT);
+      /* Make an entry point if the stack policy didn't see it */
+      if (from_routine_hash != ENTRY_POINT_HASH) {
+        uint entry_point_hash = ENTRY_POINT_HASH;
+        uint entry_point_index = (user_level << USER_LEVEL_SHIFT);
 
-      fwrite(&entry_point_hash, sizeof(uint), 1, cfg_files->request_edge);
-      fwrite(&entry_point_index, sizeof(uint), 1, cfg_files->request_edge);
-      fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
-      fwrite(&from_index, sizeof(uint), 1, cfg_files->request_edge);
+        fwrite(&entry_point_hash, sizeof(uint), 1, cfg_files->request_edge);
+        fwrite(&entry_point_index, sizeof(uint), 1, cfg_files->request_edge);
+        fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
+        fwrite(&from_index, sizeof(uint), 1, cfg_files->request_edge);
+      }
+
+      request_state.is_new_request = false;
     }
-
-    fprintf(cfg_files->persistence, "@ %08lld 0x%lx: %s\n", request_state.request_id,
-            request_state.r->request_time, request_state.r->the_request);
-
-    write_request_entry(cfg_files);
-
-    request_state.is_new_request = false;
-    request_state.app = app;
   }
+
   if (!is_standalone_app) {
     if (!request_state.is_in_request)
       ERROR("Routine edge occurred outside of a request!\n");
@@ -649,10 +657,12 @@ bool write_request_edge(bool is_new_in_process, application_t *app, uint from_ro
       sctable_add_or_replace(request_state.edges, key, new_edge);
     }
 
-    fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
-    fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->request_edge);
-    fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
-    fwrite(&to_index, sizeof(uint), 1, cfg_files->request_edge);
+    if (IS_REQUEST_EDGE_OUTPUT_ENABLED()) {
+      fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&to_index, sizeof(uint), 1, cfg_files->request_edge);
+    }
   }
 
   return true;
@@ -1045,7 +1055,8 @@ void flush_all_outputs(application_t *app)
   fflush(cfg_files->persistence);
   if (!is_standalone_app) {
     fflush(cfg_files->request);
-    fflush(cfg_files->request_edge);
+    if (IS_REQUEST_EDGE_OUTPUT_ENABLED())
+      fflush(cfg_files->request_edge);
   }
   fflush(stderr);
 }
