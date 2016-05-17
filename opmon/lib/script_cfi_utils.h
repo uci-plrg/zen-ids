@@ -4,6 +4,8 @@
 #include "php.h"
 #include "../../php/ext/session/php_session.h"
 
+// #define OPMON_DEBUG 1
+
 #define ALWAYS_LEVEL 0
 #define ERROR_LEVEL 1
 #define WARN_LEVEL 2

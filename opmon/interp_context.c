@@ -481,17 +481,6 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
         plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       } else {
-        if (!request_blocked) {
-          const char *address = get_current_request_address();
-
-          request_blocked = true;
-
-          plog(from_cfm->app, PLOG_TYPE_CFG, "block request %08lld 0x%llx: %s\n",
-               current_request_id, get_current_request_start_time(), address);
-
-          if (strstr(address, "GET / ") == address)
-            SPOT("check it\n");
-        }
         if (to_index == 0) {
           plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
@@ -500,6 +489,19 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
         }
         plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, to_frame->execute_data);
+        if (!request_blocked) {
+          const char *address = get_current_request_address();
+
+          request_blocked = true;
+
+          plog(from_cfm->app, PLOG_TYPE_CFG, "block request %08lld 0x%llx: %s\n",
+               current_request_id, get_current_request_start_time(), address);
+
+          zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
+                     current_request_id, get_current_request_start_time(), address);
+          zend_bailout();
+          ERROR("Failed to bail out on blocked request!\n");
+        }
       }
     }
   }
@@ -640,6 +642,7 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
   new_cur_frame.opcodes = op_array->opcodes;
   new_cur_frame.opcode = op->opcode;
   new_cur_frame.op_index = op_index;
+  new_cur_frame.last_builtin_name = NULL;
   if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
     new_cur_frame.cfm = get_last_eval_cfm();
   } else {
@@ -683,6 +686,7 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
     new_prev_frame.opcode = prev_execute_data->opline->opcode;
     new_prev_frame.op_index = (prev_execute_data->opline - prev_op_array->opcodes);
     new_prev_frame.implicit_taint = NULL;
+    new_prev_frame.last_builtin_name = NULL;
     lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
   }
 
@@ -1120,11 +1124,13 @@ void opcode_executing(const zend_op *op)
   if ((op_execution_count & FLUSH_MASK) == 0)
     flush_all_outputs(cur_frame.cfm.app);
 
+#ifdef OPMON_DEBUG
   if (pthread_self() != first_thread_id) {
     ERROR("Multiple threads are not supported (started on 0x%x, current is 0x%x)\n",
           (uint) first_thread_id, (uint) pthread_self());
     exit(1);
   }
+#endif
 
   if (op->opcode == ZEND_HANDLE_EXCEPTION) {
     SPOT("@ Processing ZEND_HANDLE_EXCEPTION in stack state %u of "PX"|"PX"\n",
@@ -1142,6 +1148,7 @@ void opcode_executing(const zend_op *op)
 
   stack_pointer_moved = update_stack_frame(execute_data, op_array, op);
 
+#ifdef OPMON_DEBUG
   if (trace_all_opcodes) {
     plog(cur_frame.cfm.app, PLOG_TYPE_AD_HOC, "%04d(L%04d)%s:%s\n", OP_INDEX(op_array, op),
          op->lineno, site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
@@ -1149,6 +1156,7 @@ void opcode_executing(const zend_op *op)
     PRINT("\t@ %04d(L%04d)%s:%s\n", OP_INDEX(op_array, op), op->lineno,
           site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
   }
+#endif
 
   is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) && prev_frame.op_index > cur_frame.op_index);
   if (cur_frame.op_index > 0)
@@ -1186,10 +1194,12 @@ void opcode_executing(const zend_op *op)
     }
   }
 
+#ifdef OPMON_DEBUG
   if (!current_session.active) {
     PRINT("<session> Inactive session while executing %s. User level is %d.\n",
           cur_frame.cfm.routine_name, current_session.user_level);
   }
+#endif
 
 #ifdef TAINT_IO
   if (IS_CFI_EVO()) {
@@ -1295,17 +1305,6 @@ void opcode_executing(const zend_op *op)
     ERROR("No cfg for opcodes at "PX"|"PX"\n", p2int(execute_data),
           p2int(execute_data->func->op_array.opcodes));
   } else {
-    if (cur_frame.op_index >= cur_frame.cfm.cfg->opcodes.size) {
-      ERROR("attempt to execute foobar op %u in opcodes "PX"|"PX" of routine 0x%x\n",
-            cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
-            cur_frame.cfm.cfg->routine_hash);
-      return;
-    }
-
-    PRINT("@ Executing %s at index %u of 0x%x (user level %d)\n",
-          zend_get_opcode_name(cur_frame.opcode), cur_frame.op_index,
-          cur_frame.cfm.cfg->routine_hash, op_user_level);
-
     expected_opcode = routine_cfg_get_opcode(cur_frame.cfm.cfg, cur_frame.op_index);
     if (cur_frame.opcode != expected_opcode->opcode &&
         !is_alias(cur_frame.opcode, expected_opcode->opcode)) {
@@ -1321,6 +1320,19 @@ void opcode_executing(const zend_op *op)
       if (expected_opcode->user_level < op_user_level)
         op_user_level = expected_opcode->user_level; // don't verify the op on this basis until the corresponding taint expires!
     }
+
+#ifdef OPMON_DEBUG
+    if (cur_frame.op_index >= cur_frame.cfm.cfg->opcodes.size) {
+      ERROR("attempt to execute foobar op %u in opcodes "PX"|"PX" of routine 0x%x\n",
+            cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
+            cur_frame.cfm.cfg->routine_hash);
+      return;
+    }
+
+    PRINT("@ Executing %s at index %u of 0x%x (user level %d)\n",
+          zend_get_opcode_name(cur_frame.opcode), cur_frame.op_index,
+          cur_frame.cfm.cfg->routine_hash, op_user_level);
+#endif
 
     // slightly weak for returns: not checking continuation pc
     if (stack_event.state == STACK_STATE_RETURNED || stack_pointer_moved || is_loopback/*safe w/o goto*/ ||
@@ -1389,9 +1401,6 @@ void opcode_executing(const zend_op *op)
           case ZEND_SEND_UNPACK:
           case ZEND_SEND_ARRAY:
           case ZEND_SEND_USER:
-          /*
-          also returns?
-          */
             lValue = get_zval(execute_data, &op->op1, op->op1_type);
             plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "implicit %s (I%d)->(0x%llx) at %04d(L%04d)%s\n",
                  zend_get_opcode_name(op->opcode), cur_frame.implicit_taint->id, (uint64) lValue,
@@ -1400,12 +1409,13 @@ void opcode_executing(const zend_op *op)
             cur_frame.implicit_taint->last_applied_op_index = cur_frame.op_index;
         }
 
-        /*
+#ifdef PLOG_TAINT
         plog(cur_frame.cfm.app, PLOG_TYPE_TAINT, "+implicit on %04d(L%04d)%s until %04d(L%04d)\n",
              OP_INDEX(op_array, op), op->lineno, site_relative_path(cur_frame.cfm.app, op_array),
              OP_INDEX(op_array, cur_frame.implicit_taint->end_op), cur_frame.implicit_taint->end_op->lineno);
         plog_taint_var(cur_frame.cfm.app, cur_frame.implicit_taint->taint, 0);
-        */
+#endif
+
         taint_lowers_op_user_level = cur_frame.implicit_taint->taint;
 
         if (is_return(op->opcode))
@@ -1480,9 +1490,6 @@ void opcode_executing(const zend_op *op)
     }
   } else {
     if (opcode_edge_needs_update && taint_lowers_op_user_level != NULL) {
-      compiled_edge_target_t compiled_target;
-      zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
-
       pending_cfg_patch_t *patch = PROCESS_NEW(pending_cfg_patch_t);
       patch->type = PENDING_OPCODE_EDGE;
       patch->taint_source = GET_TAINT_VAR_EVO_SOURCE(taint_lowers_op_user_level);
@@ -1494,13 +1501,18 @@ void opcode_executing(const zend_op *op)
       patch->next_pending = NULL;
       scarray_append(&pending_cfg_patches, patch);
 
-      if (false) { // todo: also allow conditional branches to have op edges
+#ifdef OPMON_DEBUG
+      {
+        compiled_edge_target_t compiled_target;
+        zend_op *from_op = &prev_frame.opcodes[prev_frame.op_index];
+        // todo: also allow conditional branches to have op edges
         compiled_target = get_compiled_edge_target(from_op, prev_frame.op_index);
         if (compiled_target.type != COMPILED_EDGE_INDIRECT) {
           ERROR("Generating indirect edge from compiled target type %d (opcode 0x%x)\n",
                compiled_target.type, op->opcode);
         }
       }
+#endif
     }
 
     if (taint_lowers_op_user_level != NULL) {
