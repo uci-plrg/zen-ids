@@ -8,7 +8,5 @@ void destroy_event_handler();
 const char *get_static_analysis();
 bool is_static_analysis();
 bool is_dataflow_analysis();
-bool is_opcode_dump_enabled();
-bool is_taint_analysis_enabled();
 
 #endif

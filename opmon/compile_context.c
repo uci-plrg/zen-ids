@@ -64,7 +64,7 @@ static inline void push_fcall_init(application_t *app, uint index, zend_uchar op
   INCREMENT_STACK(fcall_stack, fcall_frame);
   fcall_frame->init_index = index;
   fcall_frame->routine_hash = routine_hash;
-  fcall_frame->routine_name = strdup(routine_name);
+  fcall_frame->routine_name = request_strdup(routine_name); // mem: per request?
   fcall_frame->opcode = opcode;
 
   push_dataflow_fcall_init(app, routine_hash, routine_name);
@@ -130,7 +130,7 @@ void function_compiled(zend_op_array *op_array)
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
-  function_fqn_t *fqn = PROCESS_NEW(function_fqn_t);
+  function_fqn_t *fqn = REQUEST_NEW(function_fqn_t);
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename;
@@ -168,7 +168,7 @@ void function_compiled(zend_op_array *op_array)
     }
   } else {
     PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
-    PROCESS_FREE(fqn);
+    // PROCESS_FREE(fqn);
     return;
   }
 
@@ -191,7 +191,7 @@ void function_compiled(zend_op_array *op_array)
     }
     fqn->unit.application = locate_application(filename);
     site_filename = filename + strlen(fqn->unit.application->root);
-    buffer = malloc(strlen(site_filename) + 1);
+    buffer = REQUEST_ALLOC(strlen(site_filename) + 1);
     strcpy(buffer, site_filename);
     fqn->unit.path = buffer;
     buffer = NULL;
@@ -213,7 +213,7 @@ void function_compiled(zend_op_array *op_array)
   if (strlen(routine_caller_name) == 0)
     strcat(routine_caller_name, routine_name);
 
-  buffer = malloc(strlen(routine_name) + 1);
+  buffer = REQUEST_ALLOC(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
   cfm.app = fqn->unit.application;
@@ -273,17 +273,10 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.callee_hash);
   }
 
-  if (is_opcode_dump_enabled()) {
-    if (is_script_body)
-      dump_script_header(cfm.app, routine_name, fqn->function.callee_hash);
-    else
-      dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.callee_hash);
-  }
-
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
   PRINT("Installing hashcodes for %s (0x%x) under hash 0x%llx\n", routine_name,
        fqn->function.caller_hash, hash_addr(op_array->opcodes));
-  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn);
+  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn); // mem: clear this at request boundary
 
   if (is_already_compiled) {
     PRINT("(skipping existing routine 0x%x at "PX")\n", fqn->function.callee_hash,
@@ -292,7 +285,14 @@ void function_compiled(zend_op_array *op_array)
     return; // verify equal?
   }
 
-  if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled())
+  if (IS_OPCODE_DUMP_ENABLED()) {
+    if (is_script_body)
+      dump_script_header(cfm.app, routine_name, fqn->function.callee_hash);
+    else
+      dump_function_header(cfm.app, fqn->unit.path, routine_name, fqn->function.callee_hash);
+  }
+
+  if (is_static_analysis() || is_dataflow_analysis() || IS_OPCODE_DUMP_ENABLED())
     reset_fcall_stack();
   if (is_dataflow_analysis()) {
     add_dataflow_routine(fqn->unit.application, fqn->function.caller_hash, op_array,
@@ -308,7 +308,7 @@ void function_compiled(zend_op_array *op_array)
     PRINT("Compiling opcode 0x%x at index %d of %s (0x%x)\n",
           op->opcode, i, routine_name, fqn->function.callee_hash);
 
-    if (is_opcode_dump_enabled()) {
+    if (IS_OPCODE_DUMP_ENABLED()) {
       fcall_init_t *fcall;
 
       switch (op->opcode) {
@@ -388,7 +388,7 @@ void function_compiled(zend_op_array *op_array)
     if (zend_get_opcode_name(op->opcode) == NULL)
       continue;
 
-    if (is_static_analysis() || is_dataflow_analysis() || is_opcode_dump_enabled()) {
+    if (is_static_analysis() || is_dataflow_analysis() || IS_OPCODE_DUMP_ENABLED()) {
       uint to_routine_hash;
       const char *classname;
       bool ignore_call = false;
@@ -421,7 +421,7 @@ void function_compiled(zend_op_array *op_array)
                   }
                   strcat(to_unit_path, internal_to_path); // `internal_to_path` is just the to filename
                 }
-                PROCESS_FREE((char *) internal_to_path);
+                // PROCESS_FREE((char *) internal_to_path); // mem: per-request?
 
                 internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
                 if (internal_to_path == NULL) {
@@ -444,13 +444,15 @@ void function_compiled(zend_op_array *op_array)
 
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
 
-                write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
+                write_request_edge(true, cfm.app, fqn->function.callee_hash, i,
+                                   to_routine_hash, 0, USER_LEVEL_TOP);
+                write_routine_edge(cfm.app, fqn->function.callee_hash, i,
                                    to_routine_hash, 0, USER_LEVEL_TOP);
               } break;
               case ZEND_EVAL: {
                 char *eval_body = resolve_eval_body(op);
                 PRINT("Opcode %d calls eval(%s)\n", i, eval_body);
-                PROCESS_FREE(eval_body);
+                // PROCESS_FREE(eval_body); // mem: per-request?
               } break;
             }
           }
@@ -472,7 +474,9 @@ void function_compiled(zend_op_array *op_array)
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER) {
             PRINT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
             if (is_static_analysis()) {
-              write_routine_edge(true, cfm.app, fqn->function.callee_hash, i,
+              write_request_edge(true, cfm.app, fqn->function.callee_hash, i,
+                                 fcall->routine_hash, 0, USER_LEVEL_TOP);
+              write_routine_edge(cfm.app, fqn->function.callee_hash, i,
                                  fcall->routine_hash, 0, USER_LEVEL_TOP);
             }
           } else if (fcall->routine_hash == 0 && fcall->opcode > 0) {
@@ -481,7 +485,7 @@ void function_compiled(zend_op_array *op_array)
                  op->lineno, fqn->function.callee_hash, cfm.dataset == NULL ? "missing" : "found",
                  cfm.dataset == NULL ? 0 : dataset_get_call_target_count(cfm.app, cfm.dataset, i));
           }
-          PROCESS_FREE((char *) fcall->routine_name);
+          // PROCESS_FREE((char *) fcall->routine_name);
         } break;
         case ZEND_INIT_FCALL:
         case ZEND_INIT_FCALL_BY_NAME:
@@ -495,7 +499,7 @@ void function_compiled(zend_op_array *op_array)
             // This is matching user-defined functions...? Needs to be builtins only.
             if (func != NULL && Z_TYPE_P(func) == IS_PTR &&
                 func->value.func->type == ZEND_INTERNAL_FUNCTION) {
-              ignore_call |= !is_opcode_dump_enabled();
+              ignore_call |= !IS_OPCODE_DUMP_ENABLED();
               sprintf(routine_name, "builtin:%s", Z_STRVAL_P(op->op2.zv));
               push_fcall_init(cfm.app, i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);
               break; // ignore builtins for now (unless dumping ops)
@@ -557,7 +561,7 @@ void function_compiled(zend_op_array *op_array)
       }
     }
 
-    routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, op->lineno, i);
+    routine_cfg_assign_opcode(cfm.cfg, op->opcode, op->extended_value, op->lineno, i, USER_LEVEL_TOP);
     target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
       if (target.index >= op_array->last) {

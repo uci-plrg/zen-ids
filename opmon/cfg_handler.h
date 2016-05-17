@@ -42,15 +42,17 @@ void server_startup();
 
 void cfg_initialize_application(application_t *app);
 void cfg_destroy_application(application_t *app);
-void cfg_request(bool start);
+void cfg_request_boundary(bool is_first, uint64 request_id);
 void cfg_form(const char *form_data, int length);
 
 void write_node(application_t *app, uint routine_hash, cfg_opcode_t *opcode, uint index);
 void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint to_index,
                    user_level_t user_level);
-bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
+bool write_request_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
                         uint from_index, uint to_routine_hash, uint to_index,
                         user_level_t user_level);
+void write_routine_edge(application_t *app, uint from_routine_hash, uint from_index,
+                        uint to_routine_hash, uint to_index, user_level_t user_level);
 void write_routine_catalog_entry(application_t *app, uint routine_hash, const char *unit_path,
                                  const char *routine_name);
 
@@ -74,11 +76,12 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
 void plog(application_t *app, plog_type_t type, const char *message, ...);
 /* without printing the tag */
 void plog_append(application_t *app, plog_type_t type, const char *message, ...);
-void plog_disassemble(application_t *app, zend_op_array *stack_frame);
 void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame);
 
 void flush_all_outputs(application_t *app);
 
 int get_current_request_id();
+uint64 get_current_request_start_time();
+const char *get_current_request_address();
 
 #endif

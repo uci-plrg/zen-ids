@@ -13,8 +13,6 @@
 #define MAX_FUNCTION_NAME 256
 #define MAX_STACK_FRAME 256
 #define ENV_STATIC_ANALYSIS "OPMON_STATIC_ANALYSIS"
-#define ENV_OPCODE_DUMP "OPMON_OPCODE_DUMP"
-#define ENV_TAINT_ANALYSIS "OPMON_TAINT_ANALYSIS"
 
 #define CHECK_FUNCTION_NAME_LENGTH(len) \
 do { \
@@ -29,8 +27,6 @@ typedef enum _opmon_run_type {
 } opmon_run_type;
 
 static const char *static_analysis = NULL;
-static bool opcode_dump_enabled = false;
-static bool taint_analysis_enabled = false;
 static opmon_run_type run_type = OPMON_RUN_EXECUTION;
 static void init_top_level_script(const char *script_path)
 {
@@ -42,14 +38,14 @@ static void init_worker()
   worker_startup();
 }
 
-static void request_boundary(bool is_first)
+static void request_boundary(bool is_request_start)
 {
-  cfg_request(is_first);
+  uint64 request_id = interp_request_boundary(is_request_start);
+  cfg_request_boundary(is_request_start, request_id);
 
-  if (!is_first) {
+  if (!is_request_start) {
     scfree_request();
     taint_clear();
-    implicit_taint_clear();
   }
 }
 
@@ -79,16 +75,6 @@ bool is_dataflow_analysis()
   return run_type == OPMON_RUN_DATAFLOW_ANALYSIS;
 }
 
-bool is_opcode_dump_enabled()
-{
-  return opcode_dump_enabled;
-}
-
-bool is_taint_analysis_enabled()
-{
-  return taint_analysis_enabled;
-}
-
 static zend_bool zval_has_taint(const zval *value)
 {
   return taint_var_get(value) != NULL;
@@ -103,16 +89,13 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   if (static_analysis != NULL)
     run_type = OPMON_RUN_STATIC_ANALYSIS;
 
-  opcode_dump_enabled = (getenv(ENV_OPCODE_DUMP) != NULL);
-  taint_analysis_enabled = (getenv(ENV_TAINT_ANALYSIS) != NULL);
-
   init_utils();
   init_compile_context();
   init_cfg_handler();
   init_metadata_handler();
   init_taint_tracker();
 
-  if (opcode_dump_enabled)
+  if (IS_OPCODE_DUMP_ENABLED())
     init_dataflow_analysis();
 
   monitor->set_top_level_script = init_top_level_script;
@@ -122,7 +105,6 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->dataflow.notify_dataflow = internal_dataflow;
   monitor->notify_zval_free = taint_var_free;
   monitor->notify_http_request = request_boundary;
-  monitor->notify_database_site_modification = db_site_modification;
   monitor->notify_database_fetch = db_fetch;
   monitor->notify_database_query = db_query;
   monitor->notify_worker_startup = init_worker;

@@ -199,6 +199,30 @@ bool propagate_zval_taint(application_t *app, zend_execute_data *execute_data,
   }
 }
 
+bool propagate_zval_taint_quiet(application_t *app, bool clobber,
+                                const zval *src, const char *src_name,
+                                const zval *dst, const char *dst_name)
+{
+  taint_variable_t *taint_var = taint_var_get(src);
+
+  if (src == NULL || dst == NULL)
+    return false; // bug?
+
+  if (clobber) {
+    if (taint_var_remove(dst) != NULL)
+      plog(app, PLOG_TYPE_TAINT, "clobber %s (0x%llx) at a builtin\n", dst_name, (uint64) dst);
+  }
+
+  if (taint_var == NULL) {
+    return false;
+  } else {
+    plog(app, PLOG_TYPE_TAINT, "write %s(0x%llx)->%s(0x%llx) at a builtin\n",
+         src_name, (uint64) src, dst_name, (uint64) dst);
+    taint_var_add(app, dst, taint_var);
+    return true;
+  }
+}
+
 static void propagate_operand_taint(application_t *app, zend_execute_data *execute_data,
                                     zend_op_array *stack_frame, const zend_op *op, bool clobber,
                                     taint_operand_index_t src, taint_operand_index_t dst)
@@ -663,9 +687,9 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog_append(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
-                    get_operand_index_name(op, TAINT_OPERAND_1), OP_INDEX(stack_frame, op),
-                    op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+             get_operand_index_name(op, TAINT_OPERAND_1), OP_INDEX(stack_frame, op),
+             op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
         plog_append(app, PLOG_TYPE_TAINT, "\n");
       }
@@ -674,9 +698,9 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog_append(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
-                    get_operand_index_name(op, TAINT_OPERAND_2), OP_INDEX(stack_frame, op),
-                    op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+             get_operand_index_name(op, TAINT_OPERAND_2), OP_INDEX(stack_frame, op),
+             op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
         plog_append(app, PLOG_TYPE_TAINT, "\n");
       }
@@ -685,9 +709,9 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     if (operand != NULL) {
       taint_var = taint_var_get(operand);
       if (taint_var != NULL) {
-        plog_append(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
-                    get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
-                    op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+             get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
+             op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
         plog_taint(app, taint_var);
         plog_append(app, PLOG_TYPE_TAINT, "\n");
       }
@@ -695,9 +719,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
   }
 #endif
 }
-
-static const char *disassembly[] = { "wp_get_nav_menu_items" };
-static uint disassembly_count = 1;
 
 void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
                         const zend_op **args, uint arg_count)
@@ -718,15 +739,6 @@ void taint_prepare_call(application_t *app, zend_execute_data *execute_data,
     ERROR("<taint> Error! Found dangling call.\n");
     memset(call, 0, sizeof(taint_call_t));
     call->arg_count = arg_count;
-  }
-
-  // plog(app, "<taint> prepare call to %s(0x%llx)\n", callee_name, hash);
-
-  for (i = 0; i < disassembly_count; i++) {
-    if (disassembly[i] != NULL && strcmp(callee_name, disassembly[i]) == 0) {
-      plog_disassemble(app, stack_frame);
-      disassembly[i] = NULL;
-    }
   }
 
   for (i = 0; i < arg_count; i++) {

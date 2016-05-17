@@ -52,19 +52,19 @@ const char *resolve_constant_include(zend_op *op)
 
   resolved_path = zend_resolve_path(Z_STRVAL_P(inc_filename), (int)Z_STRLEN_P(inc_filename)); // TSRMLS_CC);
   if (resolved_path) {
-    return_path = malloc(strlen(resolved_path) + 1);
+    return_path = REQUEST_ALLOC(strlen(resolved_path) + 1);
     strcpy(return_path, resolved_path);
     efree(resolved_path);
 
-    SPOT("malloc %ld bytes for return_path %s\n",
-         strlen(resolved_path) + 1, return_path);
+    PRINT("PROCESS_ALLOC %ld bytes for return_path %s\n",
+          strlen(resolved_path) + 1, return_path);
   } else {
     const char *val = Z_STRVAL_P(inc_filename);
     size_t length = Z_STRLEN_P(inc_filename) + 1;
-    return_path = malloc(length);
+    return_path = REQUEST_ALLOC(length);
     strcpy(return_path, val);
 
-    PRINT("malloc %ld bytes for return_path %s\n",
+    PRINT("PROCESS_ALLOC %ld bytes for return_path %s\n",
           length, return_path);
   }
 
@@ -89,7 +89,7 @@ char *resolve_eval_body(zend_op *op)
 		eval_body_z = &tmp_eval_body_z;
 	}
 
-  eval_body = malloc(Z_STRLEN_P(eval_body_z) + 1);
+  eval_body = REQUEST_ALLOC(Z_STRLEN_P(eval_body_z) + 1);
   strcpy(eval_body, Z_STRVAL_P(eval_body_z));
 
 	if (Z_TYPE(tmp_eval_body_z) != IS_UNDEF) {
@@ -112,7 +112,7 @@ static application_t *new_site_app(char *buffer)
     app_name = buffer;
   else
     app_name++;
-  new_app_name = malloc(strlen(app_name) + 1);
+  new_app_name = PROCESS_ALLOC(strlen(app_name) + 1);
   strcpy(new_app_name, app_name);
   new_app->app.name = new_app_name;
 
@@ -155,7 +155,7 @@ application_t *locate_application(const char *filename /*absolute path*/)
   if (app != NULL)
     return app;
 
-  buffer = malloc(length + SITE_ROOTS_FILENAME_LEN + 1);
+  buffer = PROCESS_ALLOC(length + SITE_ROOTS_FILENAME_LEN + 1);
   strcpy(buffer, filename);
 
   if (strcmp(buffer + length - 5, ".phar") == 0) {
@@ -183,7 +183,7 @@ application_t *locate_application(const char *filename /*absolute path*/)
           if (strcmp(line, ".") == 0) {
             path = strdup(buffer);
           } else {
-            path = malloc(strlen(buffer) + line_length + 2);
+            path = PROCESS_ALLOC(strlen(buffer) + line_length + 2);
             strcpy(path, buffer);
             if (path[strlen(path)-1] != '/')
               strcat(path, "/");
@@ -206,6 +206,8 @@ application_t *locate_application(const char *filename /*absolute path*/)
     if (app != NULL)
       return app;
   }
+
+  PROCESS_FREE(buffer);
 
   return &unknown_app;
 }

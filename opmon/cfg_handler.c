@@ -52,7 +52,7 @@ typedef struct _php_server_context_t { // type window
 typedef struct _request_state_t {
   bool is_in_request;
   bool is_new_request;
-  uint request_id;
+  uint64 request_id;
   application_t *app;
   request_rec *r;
   sctable_t *edges; // of `request_edge_t`
@@ -98,6 +98,9 @@ static bool is_media_file(char *buffer)
 
 static void write_request_entry(cfg_files_t *cfg_files)
 {
+  SPOT("Starting request %08lld 0x%lx: %s\n", request_state.request_id,
+       request_state.r->request_time, request_state.r->the_request);
+
   fprintf(cfg_files->request, "<request-time> 0x%lx\n", request_state.r->request_time);
   fprintf(cfg_files->request, "<request> %s\n", request_state.r->the_request);
   fprintf(cfg_files->request, "<requested-file> %s\n", request_state.r->filename);
@@ -181,8 +184,8 @@ static void write_request_entry(cfg_files_t *cfg_files)
           }
           set = buffer;
           do { /* write up to the next post parameter (delimited by '&') */
-            mark = strchr(set, '&');
-            if (mark == NULL || mark > buffer + size)
+            mark = memchr(set, '&', size - (set - buffer));
+            if (mark == NULL) // || mark > buffer + size)
               break;
 #ifdef URL_DECODE
             decode_size = mark - set;
@@ -228,7 +231,7 @@ static void write_request_entry(cfg_files_t *cfg_files)
       ERROR("Unknown request type %s\n", request_state.r->method);
   }
 
-  fprintf(cfg_files->request, "<request-id> |%08d\n", request_state.request_id);
+  fprintf(cfg_files->request, "<request-id> |%08lld\n", request_state.request_id);
 }
 
 void init_cfg_handler()
@@ -243,6 +246,7 @@ void destroy_cfg_handler()
     scarray_iterator_t *i = scarray_iterator_start(request_state.edge_pool);
     while ((edge = (request_edge_t *) scarray_iterator_next(i)) != NULL)
       PROCESS_FREE(edge);
+    scarray_iterator_end(i);
     scarray_destroy(request_state.edge_pool);
     PROCESS_FREE(request_state.edge_pool);
     request_state.edge_pool = NULL;
@@ -274,7 +278,7 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
   OPEN_CFG_FILE("routine-edge.run", routine_edge);
   OPEN_CFG_FILE("routine-catalog.tab", routine_catalog);
   OPEN_CFG_FILE("persistence.log", persistence);
-  if (is_opcode_dump_enabled())
+  if (IS_OPCODE_DUMP_ENABLED())
     OPEN_CFG_FILE("opcodes.log", opcode_log);
   if (!is_standalone_app) {
     OPEN_CFG_FILE("request.tab", request);
@@ -496,15 +500,15 @@ void cfg_destroy_application(application_t *app)
   destroy_interp_app_context(app);
 }
 
-void cfg_request(bool start)
+void cfg_request_boundary(bool is_request_start, uint64 request_id)
 {
-  request_state.is_in_request = start;
+  request_state.is_in_request = is_request_start;
 
   if (request_state.is_in_request) {
     php_server_context_t *context = (php_server_context_t *) SG(server_context);
     request_state.r = context->r;
     request_state.is_new_request = true;
-    request_state.request_id++;
+    request_state.request_id = request_id;
 
     if (request_state.edges == NULL) { // lazy construct b/c standalone mode doesn't need it
       request_state.edge_pool = PROCESS_NEW(scarray_t);
@@ -566,7 +570,7 @@ void write_op_edge(application_t *app, uint routine_hash, uint from_index, uint 
 /* 4 x 4 bytes: { from_routine_hash | user_level (6) from_index (26) |
  *                to_routine_hash | to_index }
  */
-bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
+bool write_request_edge(bool is_new_in_process, application_t *app, uint from_routine_hash,
                         uint from_index, uint to_routine_hash, uint to_index,
                         user_level_t user_level)
 {
@@ -615,18 +619,13 @@ bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
       fwrite(&from_index, sizeof(uint), 1, cfg_files->request_edge);
     }
 
-    fprintf(cfg_files->persistence, "@ 0x%lx\n", request_state.r->request_time);
+    fprintf(cfg_files->persistence, "@ %08lld 0x%lx: %s\n", request_state.request_id,
+            request_state.r->request_time, request_state.r->the_request);
 
     write_request_entry(cfg_files);
 
     request_state.is_new_request = false;
     request_state.app = app;
-  }
-  if (is_new_in_process) {
-    fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
-    fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->routine_edge);
-    fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
-    fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
   }
   if (!is_standalone_app) {
     if (!request_state.is_in_request)
@@ -657,6 +656,18 @@ bool write_routine_edge(bool is_new_in_process, application_t *app, uint from_ro
   }
 
   return true;
+}
+
+void write_routine_edge(application_t *app, uint from_routine_hash, uint from_index,
+                        uint to_routine_hash, uint to_index, user_level_t user_level)
+{
+  cfg_files_t *cfg_files = (cfg_files_t *) app->cfg_files;
+  uint packed_from_index = from_index | (user_level << USER_LEVEL_SHIFT);
+
+  fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->routine_edge);
+  fwrite(&to_index, sizeof(uint), 1, cfg_files->routine_edge);
 }
 
 /* text line: "<routine_hash> <unit_path>|<routine_name>" */
@@ -903,16 +914,6 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
 }
 #endif
 
-void plog_disassemble(application_t *app, zend_op_array *stack_frame)
-{
-  FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
-  zend_op *op;
-
-  fprintf(plog, "\t === %s()", stack_frame->function_name->val);
-  for (op = stack_frame->opcodes; op < &stack_frame->opcodes[stack_frame->last]; op++)
-    dump_opcode(app, stack_frame, op); // fprintf(plog, "\t%04d(L%04d) 0x%x %s%s()", stack_frame->function_name->val);
-}
-
 static inline void plog_user_frame(application_t *app, plog_type_t type, zend_execute_data *frame)
 {
   const char *routine_name;
@@ -1055,4 +1056,14 @@ int get_current_request_id()
     return request_state.request_id;
   else
     return -1;
+}
+
+uint64 get_current_request_start_time()
+{
+  return (uint64) request_state.r->request_time;
+}
+
+const char *get_current_request_address()
+{
+  return request_state.r->the_request;
 }

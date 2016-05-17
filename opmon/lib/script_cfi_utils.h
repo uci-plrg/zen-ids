@@ -50,6 +50,17 @@ do { \
     fprintf(stderr, "\t> "__VA_ARGS__); \
 } while (0)
 
+typedef enum _cfi_mode_t {
+  CFI_MODE_TRAINING = 1,
+  CFI_MODE_EVO      = 2,
+} cfi_mode_t;
+
+#define CFI_MODE (OPMON_G(cfi_mode))
+#define IS_CFI_TRAINING() (CFI_MODE == CFI_MODE_TRAINING)
+#define IS_CFI_EVO() (CFI_MODE == CFI_MODE_EVO)
+
+#define IS_OPCODE_DUMP_ENABLED() (OPMON_G(opcode_dump_enabled != 0))
+
 #define TEST(match, in) (((in) & (match)) == (match))
 
 #define PX "0x%llx"
@@ -128,6 +139,7 @@ typedef enum _scalloc_lifespan_t {
   ALLOC_REQUEST
 } scalloc_lifespan_t;
 
+#define PROCESS_ALLOC(size) scalloc(size, ALLOC_PROCESS)
 #define PROCESS_NEW(type) (type *) scalloc(sizeof(type), ALLOC_PROCESS)
 #define PROCESS_FREE(p) scfree_process(p)
 #define REQUEST_NEW(type) (type *) scalloc(sizeof(type), ALLOC_REQUEST)
@@ -137,6 +149,8 @@ ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;
   int verbose;
+  int cfi_mode;
+  int opcode_dump_enabled;
 ZEND_END_MODULE_GLOBALS(opcode_monitor)
 
 ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)

@@ -80,7 +80,9 @@ typedef struct _dataset_app_t {
 #define RESOLVE_PTR(app, ptr, type) ((type *)((app)->dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
 #define IS_CHAIN_TERMINUS(chain) (*(uint *)chain == 0)
 #define MASK_TARGET_INDEX(to_index) ((to_index) & 0x3ffffff)
-#define MASK_USER_LEVEL(to_index) ((to_index) >> 0x1b)
+#define MASK_USER_LEVEL(to_index) ((to_index) >> 0x1a)
+
+#define SET_USER_LEVEL(node, user_level) ((node)->user_level
 
 static bool is_fall_through(zend_uchar opcode, uint from_index, uint to_index) {
   switch (opcode) {
@@ -250,4 +252,3 @@ uint dataset_routine_get_node_user_level(dataset_routine_t *dataset, uint index)
   dataset_node_t *node = &dataset->nodes[index];
   return MASK_USER_LEVEL(node->user_level);
 }
-

@@ -16,6 +16,10 @@ PHP_INI_BEGIN()
                     dataset_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_verbose", ".", PHP_INI_PERDIR, OnUpdateLong,
                     verbose, zend_opcode_monitor_globals, opcode_monitor_globals)
+  STD_PHP_INI_ENTRY("opmon_cfi_mode", ".", PHP_INI_PERDIR, OnUpdateLong,
+                    cfi_mode, zend_opcode_monitor_globals, opcode_monitor_globals)
+  STD_PHP_INI_ENTRY("opmon_opcode_dump_enabled", ".", PHP_INI_PERDIR, OnUpdateLong,
+                    opcode_dump_enabled, zend_opcode_monitor_globals, opcode_monitor_globals)
 PHP_INI_END()
 
 static PHP_GINIT_FUNCTION(opcode_monitor);

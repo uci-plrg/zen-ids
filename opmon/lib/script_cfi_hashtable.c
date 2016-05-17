@@ -151,13 +151,19 @@ sctable_lookup(sctable_t *t, KEY_TYPE key)
 bool
 sctable_has_value(sctable_t *t, KEY_TYPE key, void *value)
 {
+  return sctable_lookup_value(t, key, value) != NULL;
+}
+
+void *
+sctable_lookup_value(sctable_t *t, KEY_TYPE key, void *value)
+{
   sctable_entry_t *e;
   uint hindex = HASH_FUNC(key, t);
   for (e = t->data[hindex]; e; e = e->next) {
     if (e->key == key && t->comparator(e->payload, value))
-      return true;
+      return e->payload;
   }
-  return false;
+  return NULL;
 }
 
 void
