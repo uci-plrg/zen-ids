@@ -200,9 +200,9 @@ static user_session_t current_session;
 
 static uint64 current_request_id = 0;
 
-static uint op_execution_count = 0;
-
+#ifdef OPMON_DEBUG
 static pthread_t first_thread_id;
+#endif
 
 static zend_op entry_op;
 
@@ -225,11 +225,14 @@ static scarray_t pending_cfg_patches;
 static sctable_t evo_key_table;
 static sctable_t evo_taint_table;
 static scqueue_t evo_taint_queue;
+static bool request_has_taint = false;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
 static void evo_state_synch();
 static void evo_commit_request_patches();
+static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_op_array *op_array,
+                                          const zend_op *op, bool stack_pointer_moved);
 
 /*
 static uint get_first_executable_index(zend_op *opcodes)
@@ -302,7 +305,9 @@ void initialize_interp_context()
   stack_event.state = STACK_STATE_NONE;
   stack_event.last_opcode = 0;
 
+#ifdef OPMON_DEBUG
   first_thread_id = pthread_self();
+#endif
 
   current_session.user_level = USER_LEVEL_BOTTOM;
   current_session.active = false;
@@ -378,6 +383,8 @@ uint64 interp_request_boundary(bool is_request_start)
         evo_commit_request_patches();
       pending_cfg_patches.size = 0; /* evo: need to free them if request blocked */
       request_blocked = false;
+
+      flush_all_outputs(cur_frame.cfm.app);
     }
   }
 
@@ -820,6 +827,7 @@ static bool is_unconditional_fallthrough()
   return cur_frame.op_index == get_next_executable_index(from_index);
 }
 
+/*
 static bool is_return(zend_uchar opcode)
 {
   switch(opcode) {
@@ -830,6 +838,7 @@ static bool is_return(zend_uchar opcode)
   }
   return false;
 }
+*/
 
 /*
 static bool is_lambda_call_init(const zend_op *op)
@@ -1000,17 +1009,16 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
          cur_frame.op_index, op->lineno, site_relative_path(cur_frame.cfm.app, op_array));
   }
   */
-
   inflate_call(execute_data, op_array, op, args, &arg_count);
 
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
     cur_frame.last_builtin_name = callee_name; // use after free!
-  } else if (IS_CFI_EVO()) {
-
+  } else {
     stack_event.state = STACK_STATE_CALL;
     stack_event.last_opcode = op->opcode;
 
-    taint_prepare_call(cur_frame.cfm.app, execute_data, args, arg_count);
+    if (IS_CFI_EVO())
+      taint_prepare_call(cur_frame.cfm.app, execute_data, args, arg_count);
   }
 
   if (trace_all_opcodes) {
@@ -1111,20 +1119,9 @@ void opcode_executing(const zend_op *op)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
-  const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
-  const zval *jump_predicate = NULL;
-  bool stack_pointer_moved, is_loopback, caught_exception = false;
-  bool opcode_verified = false, opcode_edge_needs_update = false;
-  taint_variable_t *taint_lowers_op_user_level = NULL;
-  uint op_user_level = USER_LEVEL_TOP;
-  cfg_opcode_t *expected_opcode = NULL;
-  cfg_opcode_edge_t *opcode_edge = NULL;
+  bool stack_pointer_moved;
 
-  op_execution_count++;
-  if ((op_execution_count & FLUSH_MASK) == 0)
-    flush_all_outputs(cur_frame.cfm.app);
-
-#ifdef OPMON_DEBUG
+  #ifdef OPMON_DEBUG
   if (pthread_self() != first_thread_id) {
     ERROR("Multiple threads are not supported (started on 0x%x, current is 0x%x)\n",
           (uint) first_thread_id, (uint) pthread_self());
@@ -1146,9 +1143,110 @@ void opcode_executing(const zend_op *op)
     return;
   }
 
+  // if definitely not under a builtin, and there is no stack motion pending, could skip this
   stack_pointer_moved = update_stack_frame(execute_data, op_array, op);
 
+  switch (op->opcode) {
+    case ZEND_DO_FCALL:
+      fcall_executing(execute_data, op_array, (zend_op *) op);
+      //if (cur_frame.implicit_taint != NULL && implicit_taint_call_chain.start_frame == NULL)
+      //  implicit_taint_call_chain.start_frame = execute_data;
+      break;
+    case ZEND_INCLUDE_OR_EVAL:
+      if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
+        stack_event.state = STACK_STATE_CALL;
+        stack_event.last_opcode = op->opcode;
+      }
+      break;
+    case ZEND_RETURN:
+    case ZEND_RETURN_BY_REF: {
+      control_flow_metadata_t return_target_cfm;
+      zend_execute_data *return_target = find_return_target(execute_data);
+      if (return_target == NULL) {
+        stack_event.return_target = NULL;
+        stack_event.return_target_name = "<base-frame>";
+      } else {
+        lookup_cfm(return_target, &return_target->func->op_array, &return_target_cfm);
+        stack_event.return_target = return_target;
+        stack_event.return_target_name = return_target_cfm.routine_name;
+      }
+      PRINT("Preparing return at op %d of %s to %s\n", cur_frame.op_index,
+            cur_frame.cfm.routine_name, stack_event.return_target_name);
+      stack_event.state = STACK_STATE_RETURNING;
+
+      //if (is_return(op->opcode)) { // evo: test that it works here!
+        remove_implicit_taint();
+        pending_implicit_taint.end_op = NULL;
+      //}
+    } break;
+    case ZEND_FAST_RET:
+      //exception_frame->suspended = false;
+      stack_event.state = STACK_STATE_UNWINDING;
+
+      //if (is_return(op->opcode)) { // evo: test that it works here!
+        remove_implicit_taint();
+        pending_implicit_taint.end_op = NULL;
+      //}
+      break;
+    case ZEND_CATCH: {
+      if (stack_event.state == STACK_STATE_UNWINDING) {
+        WARN("Exception at op %d of 0x%x caught at op index %d in opcodes "PX"|"PX" of 0x%x\n",
+             exception_frame->throw_index,
+             exception_frame->cfm.cfg->routine_hash,
+             cur_frame.op_index,
+             p2int(cur_frame.execute_data), p2int(cur_frame.opcodes),
+             cur_frame.cfm.cfg->routine_hash);
+        stack_event.state = STACK_STATE_NONE;
+
+        if (exception_frame->execute_data == cur_frame.execute_data) {
+          if (IS_CFI_EVO()) {
+            ERROR("Dataset evolution does not support Exception edges.\n");
+          } else {
+            if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, exception_frame->throw_index,
+                                             cur_frame.op_index)) {
+              generate_opcode_edge(&cur_frame.cfm, exception_frame->throw_index,
+                                   cur_frame.op_index);
+            } else {
+              PRINT("(skipping existing exception edge)\n");
+            }
+          }
+        } else {
+          if (IS_CFI_EVO()) {
+            evaluate_routine_edge(exception_frame, &cur_frame, cur_frame.op_index);
+          } else {
+            generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,
+                                  cur_frame.cfm.cfg, cur_frame.op_index);
+          }
+        }
+        DECREMENT_STACK(exception_stack, exception_frame);
+        // what to do with implicit taint here?
+      } // else it was matching the Exception type (and missed)
+    } break;
+    default:
+      if (stack_event.state == STACK_STATE_UNWINDING)
+        stack_event.state = STACK_STATE_NONE;
+      if (IS_CFI_TRAINING() || request_has_taint)
+        intra_opcode_executing(execute_data, op_array, op, stack_pointer_moved);
+      break;
+  }
+}
+
+static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_op_array *op_array,
+                                          const zend_op *op, bool stack_pointer_moved)
+{
+  const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
+  const zval *jump_predicate = NULL;
+  bool is_loopback, opcode_verified = false, opcode_edge_needs_update = false;
+  taint_variable_t *taint_lowers_op_user_level = NULL;
+  uint op_user_level = USER_LEVEL_TOP;
+  cfg_opcode_t *expected_opcode = NULL;
+  cfg_opcode_edge_t *opcode_edge = NULL;
+
 #ifdef OPMON_DEBUG
+  if (op->opcode != ZEND_CATCH && stack_event.state == STACK_STATE_UNWINDING) {
+    WARN("Executing op %s while unwinding an exception!\n", zend_get_opcode_name(op->opcode));
+  }
+
   if (trace_all_opcodes) {
     plog(cur_frame.cfm.app, PLOG_TYPE_AD_HOC, "%04d(L%04d)%s:%s\n", OP_INDEX(op_array, op),
          op->lineno, site_relative_path(cur_frame.cfm.app, op_array), cur_frame.cfm.routine_name);
@@ -1223,84 +1321,6 @@ void opcode_executing(const zend_op *op)
   }
 #endif
 
-  switch (op->opcode) {
-    case ZEND_DO_FCALL:
-      fcall_executing(execute_data, op_array, (zend_op *) op);
-      //if (cur_frame.implicit_taint != NULL && implicit_taint_call_chain.start_frame == NULL)
-      //  implicit_taint_call_chain.start_frame = execute_data;
-      break;
-    case ZEND_INCLUDE_OR_EVAL:
-      if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
-        stack_event.state = STACK_STATE_CALL;
-        stack_event.last_opcode = op->opcode;
-      }
-      break;
-    case ZEND_RETURN:
-    case ZEND_RETURN_BY_REF: {
-      control_flow_metadata_t return_target_cfm;
-      zend_execute_data *return_target = find_return_target(execute_data);
-      if (return_target == NULL) {
-        stack_event.return_target = NULL;
-        stack_event.return_target_name = "<base-frame>";
-      } else {
-        lookup_cfm(return_target, &return_target->func->op_array, &return_target_cfm);
-        stack_event.return_target = return_target;
-        stack_event.return_target_name = return_target_cfm.routine_name;
-      }
-      PRINT("Preparing return at op %d of %s to %s\n", cur_frame.op_index, cur_frame.cfm.routine_name,
-            stack_event.return_target_name);
-      stack_event.state = STACK_STATE_RETURNING;
-    } break;
-    case ZEND_FAST_RET:
-      //exception_frame->suspended = false;
-      stack_event.state = STACK_STATE_UNWINDING;
-      break;
-    case ZEND_CATCH:
-      break;
-    default:
-      if (stack_event.state == STACK_STATE_UNWINDING)
-        stack_event.state = STACK_STATE_NONE;
-      break;
-  }
-
-  if (op->opcode == ZEND_CATCH) {
-    if (stack_event.state == STACK_STATE_UNWINDING) {
-      WARN("Exception at op %d of 0x%x caught at op index %d in opcodes "PX"|"PX" of 0x%x\n",
-           exception_frame->throw_index,
-           exception_frame->cfm.cfg->routine_hash,
-           cur_frame.op_index,
-           p2int(cur_frame.execute_data), p2int(cur_frame.opcodes),
-           cur_frame.cfm.cfg->routine_hash);
-      stack_event.state = STACK_STATE_NONE;
-
-      if (exception_frame->execute_data == cur_frame.execute_data) {
-        if (IS_CFI_EVO()) {
-          ERROR("Dataset evolution does not support Exception edges.\n");
-        } else {
-          if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, exception_frame->throw_index,
-                                           cur_frame.op_index)) {
-            generate_opcode_edge(&cur_frame.cfm, exception_frame->throw_index,
-                                 cur_frame.op_index);
-          } else {
-            PRINT("(skipping existing exception edge)\n");
-          }
-        }
-      } else {
-        if (IS_CFI_EVO()) {
-          evaluate_routine_edge(exception_frame, &cur_frame, cur_frame.op_index);
-        } else {
-          generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,
-                                cur_frame.cfm.cfg, cur_frame.op_index);
-        }
-      }
-      DECREMENT_STACK(exception_stack, exception_frame);
-      caught_exception = true;
-      // what to do with implicit taint here?
-    } // else it was matching the Exception type (and missed)
-  } else if (stack_event.state == STACK_STATE_UNWINDING) {
-    WARN("Executing op %s while unwinding an exception!\n", zend_get_opcode_name(op->opcode));
-  }
-
   if (cur_frame.cfm.cfg == NULL) {
     ERROR("No cfg for opcodes at "PX"|"PX"\n", p2int(execute_data),
           p2int(execute_data->func->op_array.opcodes));
@@ -1345,7 +1365,7 @@ void opcode_executing(const zend_op *op)
         PRINT("@ Verified node %u in 0x%x\n", cur_frame.op_index, cur_frame.cfm.cfg->routine_hash);
       }
       opcode_verified = true;
-    } else if (!caught_exception) {
+    } else {
       opcode_edge = routine_cfg_lookup_opcode_edge(cur_frame.cfm.cfg, prev_frame.op_index,
                                                    cur_frame.op_index);
 
@@ -1417,9 +1437,6 @@ void opcode_executing(const zend_op *op)
 #endif
 
         taint_lowers_op_user_level = cur_frame.implicit_taint->taint;
-
-        if (is_return(op->opcode))
-          remove_implicit_taint();
       } else {
         if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
             last_executed_op->opcode == ZEND_JMP &&
@@ -1669,6 +1686,8 @@ static void evo_state_synch()
       mysql_free_result(result);
     }
   }
+
+  request_has_taint = (evo_taint_queue.head != NULL);
 }
 
 static void evo_commit_request_patches()
