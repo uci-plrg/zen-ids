@@ -28,7 +28,8 @@ Next build php: go to the top-level php directory and:
         --enable-zend-monitor
         --with-config-file-path=$PHP_HOME/conf.d
         --with-config-file-scan-dir=$PHP_HOME/conf.d/ext
-3. make -j3
+3. make -j#
+   i. for release, use: make -j# CFLAGS="-g -O2 -Wall"
 4. make install
 
 Seems to require bison 2.7, which is not available on 14.04. This
