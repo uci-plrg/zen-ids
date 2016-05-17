@@ -506,9 +506,10 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
 
           zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
                      current_request_id, get_current_request_start_time(), address);
-          if (IS_CFI_BAILOUT_ENABLED())
+          if (IS_CFI_BAILOUT_ENABLED()) {
             zend_bailout();
-          ERROR("Failed to bail out on blocked request!\n");
+            ERROR("Failed to bail out on blocked request!\n");
+          }
         }
       }
     }
@@ -660,6 +661,8 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
   if (IS_CFI_EVO()) {
     new_cur_frame.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
                                                                        hash_addr(execute_data));
+  } else {
+    new_cur_frame.implicit_taint = NULL;
   }
 
   if (IS_SAME_FRAME(cur_frame, void_frame))
