@@ -1363,7 +1363,7 @@ static dataflow_live_variable_t *lookup_live_temp_variable(scarray_t *live_varia
 static dataflow_live_variable_t *lookup_live_variable(scarray_t *live_variables, uint *index,
                                                       dataflow_operand_t *doperand)
 {
-  dataflow_live_variable_t *var;
+  dataflow_live_variable_t *var = NULL;
 
   switch (doperand->value.type) {
     case DATAFLOW_VALUE_TYPE_NONE:

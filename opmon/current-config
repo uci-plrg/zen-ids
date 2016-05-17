@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CFLAGS="$CFLAGS -g -Wall -Werror" ./configure \
+CFLAGS="$CFLAGS -g -O2 -Wall -Werror" ./configure \
     --enable-opcode-monitor \
     --prefix=$PHP_HOME \
     --with-php-config=$PHP_HOME/bin/php-config

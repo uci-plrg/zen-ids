@@ -322,7 +322,7 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
   } else if (Z_TYPE_P(map) == IS_STRING) {
     clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_MAP);
   } else {
-    zval *key, temp_key;
+    zval *key = NULL, temp_key;
 
     if (op->op2_type == IS_UNUSED) { /* it's an append, so point key at the appended element */
       zend_long count = php_count_recursive(map, COUNT_NORMAL);
@@ -360,7 +360,7 @@ void propagate_taint_from_object(application_t *app, zend_execute_data *execute_
                                  zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
   const zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
-  const zval *src, *dst;
+  const zval *src = NULL, *dst = NULL;
 
   if (op->op1_type == IS_UNUSED) {
     map = &execute_data->This;
@@ -437,7 +437,7 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
 {
   zval *map, *key = (zval *) get_operand_zval(execute_data, op, TAINT_OPERAND_KEY);
   const zval *src = get_operand_zval(execute_data, op+1, TAINT_OPERAND_1);
-  zval *dst;
+  zval *dst = NULL;
 
   if (op->op1_type == IS_UNUSED)
     map = &execute_data->This;

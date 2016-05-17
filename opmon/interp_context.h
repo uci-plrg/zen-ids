@@ -1,6 +1,7 @@
 #ifndef INTERP_CONTEXT_H
 #define INTERP_CONTEXT_H 1
 
+#include <php.h>
 #include "metadata_handler.h"
 #include "cfg.h"
 
