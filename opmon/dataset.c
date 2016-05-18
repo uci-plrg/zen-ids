@@ -28,22 +28,21 @@ typedef struct _dataset_eval_targets_t {
   dataset_eval_target_t targets[1];
 } dataset_eval_targets_t;
 
-typedef enum _dataset_node_type_t {
-  DATASET_NODE_TYPE_NORMAL,
-  DATASET_NODE_TYPE_BRANCH,
-  //DATASET_NODE_TYPE_DIRECT_BRANCH,
-  //DATASET_NODE_TYPE_INDIRECT_BRANCH,
-  DATASET_NODE_TYPE_CALL,
-  DATASET_NODE_TYPE_EVAL
-} dataset_node_type_t;
+typedef enum _dataset_node_type_flags_t {
+  DATASET_NODE_TYPE_BRANCH = 0x1,
+  DATASET_NODE_TYPE_CALL   = 0x2,
+  DATASET_NODE_TYPE_EVAL   = 0x4,
+} dataset_node_type_flags_t;
 
 typedef struct _dataset_node_t {
   zend_uchar opcode;
-  zend_uchar type;
+  zend_uchar type_flags; /* of dataset_node_type_flags_t */
   ushort line_number;
   union {
     uint user_level;   // normal node: [user level | zero]
     uint target_index; // branch node: [user level | branch target index]
+  };
+  union {
     uint call_targets; // call node:   dataset_call_targets_t * (relative to dataset top)
     uint eval_targets; // eval node:   dataset_eval_targets_t * (relative to dataset top)
   };
@@ -209,8 +208,8 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
     dataset_node_t *node = &routine->nodes[from_index];
     dataset_app_t *dataset = (dataset_app_t *) app->dataset;
 
-    if (node->type == DATASET_NODE_TYPE_CALL) {
-      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, MASK_TARGET_INDEX(node->call_targets),
+    if (TEST(DATASET_NODE_TYPE_CALL, node->type_flags)) {
+      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, node->call_targets,
                                                     dataset_call_targets_t);
       for (i = 0; i < targets->target_count; i++) {
         if (targets->targets[i].routine_hash == to_routine_hash &&
@@ -219,11 +218,11 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
           return true;
       }
       return false; // for debug stopping
-    } else if (node->type == DATASET_NODE_TYPE_EVAL) {
-      dataset_eval_targets_t *targets = RESOLVE_PTR(dataset, MASK_TARGET_INDEX(node->eval_targets),
+    } else if (TEST(DATASET_NODE_TYPE_EVAL, node->type_flags)) {
+      dataset_eval_targets_t *targets = RESOLVE_PTR(dataset, node->eval_targets,
                                                     dataset_eval_targets_t);
       for (i = 0; i < targets->target_count; i++) {
-        if (MASK_TARGET_INDEX(targets->targets[i].index) == to_index &&
+        if (targets->targets[i].index == to_index &&
             MASK_USER_LEVEL(targets->targets[i].index) <= user_level)
           return true;
       }
@@ -238,8 +237,8 @@ uint dataset_get_call_target_count(application_t *app, dataset_routine_t *routin
   if (app->dataset != NULL) {
     dataset_node_t *node = &routine->nodes[from_index];
     dataset_app_t *dataset = (dataset_app_t *) app->dataset;
-    if (node->type == DATASET_NODE_TYPE_CALL) {
-      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, MASK_TARGET_INDEX(node->call_targets),
+    if (TEST(DATASET_NODE_TYPE_CALL, node->type_flags)) {
+      dataset_call_targets_t *targets = RESOLVE_PTR(dataset, node->call_targets,
                                                     dataset_call_targets_t);
       return targets->target_count;
     }
