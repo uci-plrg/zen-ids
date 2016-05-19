@@ -333,7 +333,7 @@ void initialize_interp_context()
     if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
       ERROR("Failed to connect to the database!\n");
     else
-      SPOT("Connected to the database!\n");
+      SPOT("Successfully connected to the Opmon Evolution database.\n");
   }
 }
 
@@ -372,7 +372,6 @@ uint64 interp_request_boundary(bool is_request_start)
       else
         current_request_id = mysql_insert_id(db_connection);
 
-      update_user_session();
       evo_state_synch();
     } else {
       sctable_clear(&implicit_taint_table);
@@ -382,10 +381,17 @@ uint64 interp_request_boundary(bool is_request_start)
       if (!request_blocked)
         evo_commit_request_patches();
       pending_cfg_patches.size = 0; /* evo: need to free them if request blocked */
-      request_blocked = false;
-
-      flush_all_outputs(cur_frame.cfm.app);
     }
+  }
+
+  if (is_request_start) {
+    update_user_session();
+
+    if (!IS_CFI_EVO())
+      current_request_id++;
+  } else {
+      request_blocked = false;
+      flush_all_outputs(cur_frame.cfm.app);
   }
 
   return current_request_id;
@@ -448,12 +454,13 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
     }
 #endif
   }
-  if (!verified && cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
-                                        to_frame->cfm.cfg, to_index, current_session.user_level)) {
-    verified = true;
+
+  if (IS_CFI_EVO() && !verified) {
+    verified = cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
+                                    to_frame->cfm.cfg, to_index, current_session.user_level);
   }
 
-  if (!verified) {
+  if (IS_CFI_EVO() && !verified) {
     if (to_index == 0) {
       if (implicit_taint_call_chain.start_frame == NULL) {
         if (cur_frame.implicit_taint != NULL) {
@@ -494,6 +501,14 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
         plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       } else {
+        const char *address = get_current_request_address();
+
+        if (!request_blocked) {
+          request_blocked = true;
+
+          plog(from_cfm->app, PLOG_TYPE_CFG, "block request %08lld 0x%llx: %s\n",
+               current_request_id, get_current_request_start_time(), address);
+        }
         if (to_index == 0) {
           plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
@@ -502,20 +517,12 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
         }
         plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, to_frame->execute_data);
-        if (!request_blocked) {
-          const char *address = get_current_request_address();
 
-          request_blocked = true;
-
-          plog(from_cfm->app, PLOG_TYPE_CFG, "block request %08lld 0x%llx: %s\n",
-               current_request_id, get_current_request_start_time(), address);
-
+        if (IS_CFI_BAILOUT_ENABLED()) {
           zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
                      current_request_id, get_current_request_start_time(), address);
-          if (IS_CFI_BAILOUT_ENABLED()) {
-            zend_bailout();
-            ERROR("Failed to bail out on blocked request!\n");
-          }
+          zend_bailout();
+          ERROR("Failed to bail out on blocked request!\n");
         }
       }
     }
@@ -712,7 +719,7 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
           getpid(), cur_frame.cfm.routine_name, new_cur_frame.cfm.routine_name, p2int(execute_data),
           p2int(op_array->opcodes), p2int(cur_frame.cfm.cfg));
   } else if (new_cur_frame.cfm.cfg != NULL) {
-    if (IS_CFI_EVO()) {
+    if (IS_CFI_MONITOR()) {
       evaluate_routine_edge(&new_prev_frame, &new_cur_frame, 0/*routine entry*/);
     } else {
       generate_routine_edge(&new_prev_frame.cfm, new_prev_frame.op_index,
@@ -979,6 +986,11 @@ static void post_propagate_builtin(zend_op_array *op_array, const zend_op *op)
   propagate_args_to_result(cur_frame.cfm.app, execute_data, op, args, arg_count,
                            cur_frame.last_builtin_name);
 
+  if (strcmp(cur_frame.last_builtin_name, "fopen") == 0)
+    SPOT("fopen\n");
+  else if (strcmp(cur_frame.last_builtin_name, "file_put_contents") == 0)
+    SPOT("file_put_contents\n");
+
 #ifdef TAINT_IO
   if (TAINT_ALL) {
     if (is_file_sink_function(cur_frame.last_builtin_name))
@@ -1211,7 +1223,7 @@ void opcode_executing(const zend_op *op)
         if (exception_frame->execute_data == cur_frame.execute_data) {
           if (IS_CFI_EVO()) {
             ERROR("Dataset evolution does not support Exception edges.\n");
-          } else {
+          } else if (IS_CFI_TRAINING()) {
             if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, exception_frame->throw_index,
                                              cur_frame.op_index)) {
               generate_opcode_edge(&cur_frame.cfm, exception_frame->throw_index,
@@ -1221,7 +1233,7 @@ void opcode_executing(const zend_op *op)
             }
           }
         } else {
-          if (IS_CFI_EVO()) {
+          if (IS_CFI_MONITOR()) {
             evaluate_routine_edge(exception_frame, &cur_frame, cur_frame.op_index);
           } else {
             generate_routine_edge(&exception_frame->cfm, exception_frame->throw_index,

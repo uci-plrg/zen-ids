@@ -55,11 +55,14 @@ do { \
 typedef enum _cfi_mode_t {
   CFI_MODE_TRAINING = 1,
   CFI_MODE_EVO      = 2,
+  CFI_MODE_RIGID    = 3,
 } cfi_mode_t;
 
 #define CFI_MODE (OPMON_G(cfi_mode))
 #define IS_CFI_TRAINING() (CFI_MODE == CFI_MODE_TRAINING)
 #define IS_CFI_EVO() (CFI_MODE == CFI_MODE_EVO)
+#define IS_CFI_RIGID() (CFI_MODE == CFI_MODE_RIGID)
+#define IS_CFI_MONITOR() (CFI_MODE == CFI_MODE_RIGID || CFI_MODE == CFI_MODE_EVO)
 
 #define IS_REQUEST_EDGE_OUTPUT_ENABLED() (OPMON_G(request_edge_enabled != 0))
 #define IS_OPCODE_DUMP_ENABLED() (OPMON_G(opcode_dump_enabled != 0))
