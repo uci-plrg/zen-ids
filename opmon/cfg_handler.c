@@ -43,12 +43,6 @@ typedef struct _request_edge_t {
   struct _request_edge_t *next;
 } request_edge_t;
 
-typedef struct _php_server_context_t { // type window
-  int opaque;
-  request_rec *r;
-  apr_bucket_brigade *bb;
-} php_server_context_t;
-
 typedef struct _request_state_t {
   bool is_in_request;
   bool is_new_request;
@@ -923,6 +917,65 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
     fprintf(plog, "\n");
 }
 #endif
+
+void plog_call(zend_execute_data *execute_data, application_t *app, plog_type_t type,
+               const char *callee_name, const zend_op **args, uint arg_count)
+{
+  uint i;
+  const zval *arg_value;
+
+  plog(app, type, "call %s(", callee_name);
+  for (i = 0; i < arg_count; i++) {
+    arg_value = get_arg_zval(execute_data, args[i]);
+    switch (Z_TYPE_P(arg_value)) {
+      case IS_UNDEF:
+        plog_append(app, type, "?");
+        break;
+      case IS_NULL:
+        plog_append(app, type, "null");
+        break;
+      case IS_TRUE:
+        plog_append(app, type, "true");
+        break;
+      case IS_FALSE:
+        plog_append(app, type, "false");
+        break;
+      case IS_STRING:
+        plog_append(app, type, "%.20s", Z_STRVAL_P(arg_value));
+        break;
+      case IS_LONG:
+        plog_append(app, type, "%d", Z_LVAL_P(arg_value));
+        break;
+      case IS_DOUBLE:
+        plog_append(app, type, "%f", Z_DVAL_P(arg_value));
+        break;
+      case IS_ARRAY:
+        plog_append(app, type, "<arr>");
+        break;
+      case IS_OBJECT:
+        plog_append(app, type, "<obj>");
+        break;
+      case IS_RESOURCE:
+        plog_append(app, type, "<res>");
+        break;
+      case IS_REFERENCE:
+        plog_append(app, type, "<ref>");
+        break;
+      case IS_CONSTANT:
+        plog_append(app, type, "<const>");
+        break;
+      case IS_INDIRECT:
+        plog_append(app, type, "<ind>");
+        break;
+      default:
+        plog_append(app, type, "<%d>", Z_TYPE_P(arg_value));
+        break;
+    }
+    if (i < (arg_count - 1))
+      plog_append(app, type, ", ");
+  }
+  plog_append(app, type, ")\n");
+}
 
 static inline void plog_user_frame(application_t *app, plog_type_t type, zend_execute_data *frame)
 {

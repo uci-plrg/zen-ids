@@ -422,11 +422,11 @@ void propagate_taint_from_object(application_t *app, zend_execute_data *execute_
     if (src != NULL)
       propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "[property]", dst, "R");
     else
-      ERROR("<taint> Can't find property %s\n", Z_STRVAL_P(key));
+      WARN("<taint> Can't find property %s\n", Z_STRVAL_P(key));
   } else {
-    ERROR("<taint> Error in %s: found an unknown object type %d at %04d(L%04d)%s\n",
-          zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
-          OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+    WARN("<taint> Error in %s: found an unknown object type %d at %04d(L%04d)%s\n",
+         zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
+         OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
   }
 
   merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);

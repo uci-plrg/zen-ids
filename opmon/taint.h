@@ -40,9 +40,9 @@ typedef struct _request_input_t {
 
 typedef enum _taint_type_t {
   TAINT_TYPE_SITE_MOD,
-#ifdef TAINT_IO
+//#ifdef TAINT_IO
   TAINT_TYPE_REQUEST_INPUT
-#endif
+//#endif
 } taint_type_t;
 
 typedef enum _taint_variable_type_t {

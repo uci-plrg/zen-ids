@@ -6,12 +6,18 @@
 #include "cfg.h"
 #include "taint.h"
 
-// #define PLOG_TAINT 1
-#define PLOG_CFG 1
+//#define PLOG_TAINT 1
+//#define PLOG_CFG 1
 // #define PLOG_DB 1
-// #define PLOG_DB_MOD 1
+//#define PLOG_DB_MOD 1
 // #define PLOG_WARN 1
-// #define PLOG_AD_HOC 1
+//#define PLOG_AD_HOC 1
+
+typedef struct _php_server_context_t { // type window
+  int opaque;
+  request_rec *r;
+  apr_bucket_brigade *bb;
+} php_server_context_t;
 
 typedef struct _cfg_files_t {
   FILE *node;
@@ -76,6 +82,8 @@ void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash
 void plog(application_t *app, plog_type_t type, const char *message, ...);
 /* without printing the tag */
 void plog_append(application_t *app, plog_type_t type, const char *message, ...);
+void plog_call(zend_execute_data *execute_data, application_t *app, plog_type_t type,
+               const char *callee_name, const zend_op **args, uint arg_count);
 void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame);
 
 void flush_all_outputs(application_t *app);
