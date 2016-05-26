@@ -1268,7 +1268,7 @@ void opcode_executing(const zend_op *op)
   }
 
 //#ifdef TAINT_IO
-  if (IS_CFI_DGC()) {
+  if (IS_CFI_DGC() && cur_frame.op_index > 0) {
     zend_op *previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
     request_input_type_t input_type = get_request_input_type(previous_op);
     if (input_type != REQUEST_INPUT_TYPE_NONE) { // && TAINT_ALL) {
@@ -1295,7 +1295,7 @@ void opcode_executing(const zend_op *op)
   }
 //#endif
 
-  // if (IS_CFI_TRAINING() || request_has_taint) /* N.B.: taint post-propagates! */
+  if (IS_CFI_TRAINING() || request_has_taint) /* N.B.: taint post-propagates! */
     intra_opcode_executing(execute_data, op_array, op, stack_pointer_moved);
 }
 

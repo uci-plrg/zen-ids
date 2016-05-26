@@ -80,38 +80,38 @@ static zend_bool zval_has_taint(const zval *value)
   return taint_var_get(value) != NULL;
 }
 
-static zend_bool nop_notify_dataflow(const zval *src, const char *src_name,
+zend_bool nop_notify_dataflow(const zval *src, const char *src_name,
                                      const zval *dst, const char *dst_name,
                                      zend_bool is_internal_transfer)
 {
   return false;
 }
 
-static zend_bool nop_has_taint(const zval *value)
+zend_bool nop_has_taint(const zval *value)
 {
   return false;
 }
 
-static void nop_notify_opcode_interp(const zend_op *op)
+void nop_notify_opcode_interp(const zend_op *op)
 {
 }
 
-static void nop_notify_function_compile_complete(zend_op_array *op_array)
+void nop_notify_function_compile_complete(zend_op_array *op_array)
 {
 }
 
-static void nop_notify_zval_free(const zval *zv)
+void nop_notify_zval_free(const zval *zv)
 {
 }
 
 //static void nop_notify_http_request(zend_bool start);
 
-static monitor_query_flags_t nop_notify_database_query(const char *query)
+monitor_query_flags_t nop_notify_database_query(const char *query)
 {
   return 0;
 }
 
-static void nop_notify_database_fetch(uint32_t field_count, const char **table_names,
+void nop_notify_database_fetch(uint32_t field_count, const char **table_names,
                                       const char **column_names, const zval **value)
 {
 }
