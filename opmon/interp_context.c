@@ -216,6 +216,7 @@ static bool request_blocked = false;
 
 typedef struct _taint_call_chain_t {
   zend_execute_data *start_frame;
+  zend_execute_data *suspension_frame;
   implicit_taint_t *taint_source;
 } taint_call_chain_t;
 
@@ -224,6 +225,7 @@ static implicit_taint_t pending_implicit_taint = { 0, NULL, NULL, -1 };
 static uint implicit_taint_id = 0;
 static taint_call_chain_t implicit_taint_call_chain = { 0 };
 static scarray_t pending_cfg_patches;
+static const zend_op *verified_jump = NULL;
 
 static sctable_t evo_key_table;
 static sctable_t evo_taint_table;
@@ -383,6 +385,7 @@ uint64 interp_request_boundary(bool is_request_start)
       sctable_clear(&implicit_taint_table);
       implicit_taint_id = 0;
       implicit_taint_call_chain.start_frame = NULL;
+      implicit_taint_call_chain.suspension_frame = NULL;
 
       if (!request_blocked)
         evo_commit_request_patches();
@@ -448,24 +451,7 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
     return;
   }
 
-  if (IS_CFI_DGC()) {
-    if (implicit_taint_call_chain.start_frame == NULL) {
-      if (to_frame->cfm.dataset == NULL && strstr(to_frame->cfm.routine_name, "cache/") == to_frame->cfm.routine_name) {
-        implicit_taint_call_chain.start_frame = from_frame->execute_data;
-        verified = true;
-
-        plog(from_cfm->app, PLOG_TYPE_CFG, "call chain activated at %04d(L%04d) %s -> %s\n",
-             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
-      }
-    } else {
-      verified = true;
-
-      plog(from_cfm->app, PLOG_TYPE_CFG, "call chain allows %04d(L%04d) %s -> %s\n",
-           from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
-    }
-  }
-
-  if (!verified && from_cfm->dataset != NULL) {
+  if (from_cfm->dataset != NULL) {
     if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_frame->op_index, to_index,
                                     to_frame->cfm.cfg->routine_hash, current_session.user_level)) {
       verified = true;
@@ -476,6 +462,38 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
                                   to_frame->cfm.cfg->routine_hash, current_session.user_level);
     }
 #endif
+  }
+
+  if (IS_CFI_DGC()) {
+    if (verified) {
+      if (implicit_taint_call_chain.start_frame != NULL &&
+          implicit_taint_call_chain.suspension_frame == NULL) {
+        // implicit_taint_call_chain.suspension_frame = from_frame->execute_data;
+
+        // plog(from_cfm->app, PLOG_TYPE_CFG, "call chain would be suspended at %04d(L%04d) %s -> %s\n",
+        //     from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+        // plog_stacktrace(current_app, PLOG_TYPE_CFG, from_frame->execute_data);
+      }
+    } else {
+      if (implicit_taint_call_chain.start_frame == NULL) {
+        if (to_frame->cfm.dataset == NULL &&
+            (strstr(to_frame->cfm.routine_name, "cache/") == to_frame->cfm.routine_name ||
+             strstr(to_frame->cfm.routine_name, "__TwigTemplate") == to_frame->cfm.routine_name)) {
+          implicit_taint_call_chain.start_frame = from_frame->execute_data;
+          verified_jump = NULL;
+          verified = true;
+
+          plog(from_cfm->app, PLOG_TYPE_CFG, "call chain activated at %04d(L%04d) %s -> %s\n",
+               from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+        }
+      } else if (implicit_taint_call_chain.suspension_frame == NULL) {
+        verified = true;
+
+        plog(from_cfm->app, PLOG_TYPE_CFG, "call chain allows %04d(L%04d) %s -> %s\n",
+             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+        plog_stacktrace(current_app, PLOG_TYPE_CFG, from_frame->execute_data);
+      }
+    }
   }
 
   if (IS_CFI_EVO() && !verified) {
@@ -1268,7 +1286,7 @@ void opcode_executing(const zend_op *op)
   }
 
 //#ifdef TAINT_IO
-  if (IS_CFI_DGC()) {
+  if (IS_CFI_DGC()) { // todo: fix! find the previous ___executed____ opcode!
     zend_op *previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
     request_input_type_t input_type = get_request_input_type(previous_op);
     if (input_type != REQUEST_INPUT_TYPE_NONE) { // && TAINT_ALL) {
@@ -1295,7 +1313,7 @@ void opcode_executing(const zend_op *op)
   }
 //#endif
 
-  // if (IS_CFI_TRAINING() || request_has_taint) /* N.B.: taint post-propagates! */
+  if (IS_CFI_TRAINING() || IS_CFI_DGC() || request_has_taint) /* N.B.: taint post-propagates! */
     intra_opcode_executing(execute_data, op_array, op, stack_pointer_moved);
 }
 
@@ -1360,6 +1378,20 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
               site_relative_path(current_app, op_array), cur_frame.cfm.routine_name);
 
         propagate_taint(current_app, execute_data, op_array, last_executed_op);
+      }
+    }
+  } else if (IS_CFI_DGC()) {
+    if (stack_pointer_moved && last_executed_op != NULL) { // && last_executed_op->opcode == ZEND_DO_FCALL) {
+      if (execute_data == implicit_taint_call_chain.start_frame) {
+        implicit_taint_call_chain.start_frame = NULL;
+
+        plog(current_app, PLOG_TYPE_CFG, "call chain returned at %04d(L%04d)\n",
+             cur_frame.op_index, op->lineno);
+      } else if (execute_data == implicit_taint_call_chain.suspension_frame) {
+        implicit_taint_call_chain.suspension_frame = NULL;
+
+        plog(current_app, PLOG_TYPE_CFG, "call chain resumed at %04d(L%04d)\n",
+             cur_frame.op_index, op->lineno);
       }
     }
   }
@@ -1540,6 +1572,33 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
            site_relative_path(current_app, op_array));
     }
 #endif
+  } else if (IS_CFI_DGC()) {
+    if (implicit_taint_call_chain.start_frame != NULL) {
+      if (opcode_verified) {
+        const zend_op *jump_op = op;
+
+        switch (jump_op->opcode) {
+          case ZEND_JMPZ:
+          case ZEND_JMPZNZ:
+          case ZEND_JMPZ_EX:
+          case ZEND_JMPNZ_EX:
+            if (jump_op->op2.jmp_addr > jump_op) {
+              verified_jump = jump_op;
+            } break;
+          default:
+            verified_jump = NULL;
+        }
+      } else {
+        if (verified_jump != NULL) {
+          plog(current_app, PLOG_TYPE_CFG,
+               "jump with DGC escort into untrusted territory at %04d(L%04d)%s\n",
+               OP_INDEX(op_array, verified_jump), verified_jump->lineno,
+               site_relative_path(current_app, op_array));
+        }
+      }
+    } else {
+      verified_jump = NULL;
+    }
   }
 
   if (IS_CFI_TRAINING()) {
