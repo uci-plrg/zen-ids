@@ -489,9 +489,9 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
       } else if (implicit_taint_call_chain.suspension_frame == NULL) {
         verified = true;
 
-        plog(from_cfm->app, PLOG_TYPE_CFG, "call chain allows %04d(L%04d) %s -> %s\n",
-             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
-        plog_stacktrace(current_app, PLOG_TYPE_CFG, from_frame->execute_data);
+        //plog(from_cfm->app, PLOG_TYPE_CFG, "call chain allows %04d(L%04d) %s -> %s\n",
+        //     from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+        // plog_stacktrace(current_app, PLOG_TYPE_CFG, from_frame->execute_data);
       }
     }
   }
@@ -557,7 +557,7 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
           plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
         }
-        plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, to_frame->execute_data);
+        //plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, to_frame->execute_data);
 
         if (IS_CFI_BAILOUT_ENABLED()) {
           zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
@@ -1590,10 +1590,10 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
         }
       } else {
         if (verified_jump != NULL) {
-          plog(current_app, PLOG_TYPE_CFG,
-               "jump with DGC escort into untrusted territory at %04d(L%04d)%s\n",
-               OP_INDEX(op_array, verified_jump), verified_jump->lineno,
-               site_relative_path(current_app, op_array));
+          //plog(current_app, PLOG_TYPE_CFG,
+          //     "jump with DGC escort into untrusted territory at %04d(L%04d)%s\n",
+          //     OP_INDEX(op_array, verified_jump), verified_jump->lineno,
+          //     site_relative_path(current_app, op_array));
         }
       }
     } else {
