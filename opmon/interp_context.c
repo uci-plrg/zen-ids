@@ -1103,7 +1103,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
   inflate_call(execute_data, op_array, op, args, &arg_count);
 
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
-    cur_frame.last_builtin_name = callee_name; // use after free!
+    cur_frame.last_builtin_name = callee_name; // careful about use after free!
   } else {
     stack_event.state = STACK_STATE_CALL;
     stack_event.last_opcode = op->opcode;
@@ -1322,7 +1322,7 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
 {
   const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
   const zval *jump_predicate = NULL;
-  bool is_loopback, opcode_verified = false, opcode_edge_needs_update = false;
+  bool is_loopback, opcode_verified = false, opcode_edge_needs_update = false, is_fcall_return;
   taint_variable_t *taint_lowers_op_user_level = NULL;
   uint op_user_level = USER_LEVEL_TOP;
   cfg_opcode_t *expected_opcode = NULL;
@@ -1345,20 +1345,22 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
   //if (cur_frame.cfm.cfg->routine_hash == 0x356d7234)
   //  SPOT("hang here...\n");
 
-  is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) && prev_frame.op_index > cur_frame.op_index);
   if (cur_frame.op_index > 0)
     cur_frame_previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
   if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved) {
     last_executed_op = &prev_frame.opcodes[prev_frame.op_index];
   } else {
-    last_executed_op = cur_frame_previous_op; /* works for CC, but NULL for a call (fix?) */
+    last_executed_op = cur_frame_previous_op; /* works for CC, but NULL in the callee (fix?) */
 
     if (last_executed_op == NULL && cur_frame.op_index > 0)
       ERROR("Failed to identify the last executed op within a stack frame!\n");
   }
+  is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) && prev_frame.op_index > cur_frame.op_index);
+  is_fcall_return = stack_pointer_moved && last_executed_op != NULL &&
+                    last_executed_op->opcode == ZEND_DO_FCALL;
 
   if (IS_CFI_EVO()) {
-    if (stack_pointer_moved && last_executed_op != NULL && last_executed_op->opcode == ZEND_DO_FCALL) {
+    if (is_fcall_return) {
       taint_propagate_return(current_app, execute_data, op_array, last_executed_op);
 
       if (execute_data == implicit_taint_call_chain.start_frame)
@@ -1381,7 +1383,7 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
       }
     }
   } else if (IS_CFI_DGC()) {
-    if (stack_pointer_moved && last_executed_op != NULL) { // && last_executed_op->opcode == ZEND_DO_FCALL) {
+    if (is_fcall_return) {
       if (execute_data == implicit_taint_call_chain.start_frame) {
         implicit_taint_call_chain.start_frame = NULL;
 
@@ -1394,6 +1396,18 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
              cur_frame.op_index, op->lineno);
       }
     }
+  }
+
+  if (!is_loopback && last_executed_op != NULL && last_executed_op->opcode == ZEND_DO_FCALL &&
+      cur_frame.last_builtin_name != NULL && strcmp(cur_frame.last_builtin_name, "file_put_contents") == 0) {
+    const zval *filepath;
+    const zend_op *args[0x20];
+    uint arg_count;
+
+    inflate_call(execute_data, op_array, last_executed_op, args, &arg_count);
+    filepath = get_arg_zval(execute_data, args[1]);
+    plog(current_app, PLOG_TYPE_CFG, "file_put_contents(%s)\n", Z_STRVAL_P(filepath));
+    plog_stacktrace(current_app, PLOG_TYPE_CFG, execute_data);
   }
 
 #ifdef OPMON_DEBUG
