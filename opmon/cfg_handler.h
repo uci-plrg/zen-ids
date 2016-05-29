@@ -48,6 +48,7 @@ void server_startup();
 
 void cfg_initialize_application(application_t *app);
 void cfg_destroy_application(application_t *app);
+bool is_standalone_mode();
 void cfg_request_boundary(bool is_first, uint64 request_id);
 void cfg_form(const char *form_data, int length);
 

@@ -250,6 +250,11 @@ void destroy_cfg_handler()
   }
 }
 
+bool is_standalone_mode()
+{
+  return is_standalone_app;
+}
+
 static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path, const char *mode)
 {
   char *cfg_file_truncate = cfg_file_path + strlen(cfg_file_path);
@@ -615,8 +620,8 @@ bool write_request_edge(bool is_new_in_process, application_t *app, uint from_ro
       fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);
 
       /* Make an entry point if the stack policy didn't see it */
-      if (from_routine_hash != ENTRY_POINT_HASH) {
-        uint entry_point_hash = ENTRY_POINT_HASH;
+      if (from_routine_hash != BASE_FRAME_HASH) {
+        uint entry_point_hash = BASE_FRAME_HASH;
         uint entry_point_index = (user_level << USER_LEVEL_SHIFT);
 
         fwrite(&entry_point_hash, sizeof(uint), 1, cfg_files->request_edge);

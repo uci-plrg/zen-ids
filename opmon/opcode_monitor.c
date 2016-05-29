@@ -99,6 +99,7 @@ PHP_MSHUTDOWN_FUNCTION(opcode_monitor)
   UNREGISTER_INI_ENTRIES();
 
   destroy_event_handler();
+  register_opcode_monitor(NULL);
 
   return SUCCESS;
 }

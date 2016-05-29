@@ -200,11 +200,12 @@ application_t *locate_application(const char *filename /*absolute path*/)
     }
 
     loaded_opmon_roots = true;
-    PROCESS_FREE(buffer);
 
     app = lookup_application(filename);
-    if (app != NULL)
+    if (app != NULL) {
+      PROCESS_FREE(buffer);
       return app;
+    }
   }
 
   PROCESS_FREE(buffer);

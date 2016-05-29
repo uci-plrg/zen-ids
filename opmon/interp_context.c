@@ -48,6 +48,12 @@
 
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
+/* N.B.: distinguish user-space calls to __destruct()! */
+#define IS_DESTRUCTOR(ex)                   \
+  ((ex)->prev_execute_data != NULL &&       \
+   (ex)->prev_execute_data->func == NULL && \
+   strcmp((ex)->func->op_array.function_name->val, "__destruct") == 0)
+
 typedef struct _implicit_taint_t {
   uint id;
   const zend_op *end_op;
@@ -296,7 +302,7 @@ void initialize_interp_context()
   entry_op.extended_value = ENTRY_POINT_EXTENDED_VALUE;
   void_frame.opcodes = &entry_op;
   void_frame.opcode = entry_op.opcode;
-  void_frame.cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
+  void_frame.cfm.cfg = routine_cfg_new(BASE_FRAME_HASH);
   cur_frame = prev_frame = void_frame;
   routine_cfg_assign_opcode(cur_frame.cfm.cfg, ENTRY_POINT_OPCODE,
                             ENTRY_POINT_EXTENDED_VALUE, 0, 0, USER_LEVEL_TOP);
@@ -342,27 +348,38 @@ void initialize_interp_context()
   }
 }
 
-void initialize_interp_app_context(application_t *app)
+static stack_frame_t *initialize_entry_point(application_t *app, uint entry_point_hash)
 {
-  stack_frame_t *base_frame = PROCESS_NEW(stack_frame_t); // mem: why not static?
-  memset(base_frame, 0, sizeof(stack_frame_t));
-  base_frame->opcodes = &entry_op;
-  base_frame->opcode = entry_op.opcode;
-  base_frame->cfm.cfg = routine_cfg_new(ENTRY_POINT_HASH);
-  base_frame->cfm.app = app;
-  app->base_frame = (void *) base_frame;
-  routine_cfg_assign_opcode(base_frame->cfm.cfg, ENTRY_POINT_OPCODE,
+  stack_frame_t *entry_frame = PROCESS_NEW(stack_frame_t);
+  memset(entry_frame, 0, sizeof(stack_frame_t));
+  entry_frame->opcodes = &entry_op;
+  entry_frame->opcode = entry_op.opcode;
+  entry_frame->cfm.cfg = routine_cfg_new(entry_point_hash);
+  entry_frame->cfm.app = app;
+  routine_cfg_assign_opcode(entry_frame->cfm.cfg, ENTRY_POINT_OPCODE,
                             ENTRY_POINT_EXTENDED_VALUE, 0, 0, USER_LEVEL_TOP);
 
-  base_frame->cfm.dataset = dataset_routine_lookup(app, ENTRY_POINT_HASH);
-  if (base_frame->cfm.dataset == NULL)
-    write_node(app, ENTRY_POINT_HASH, routine_cfg_get_opcode(base_frame->cfm.cfg, 0), 0);
+  entry_frame->cfm.dataset = dataset_routine_lookup(app, entry_point_hash);
+  if (entry_frame->cfm.dataset == NULL)
+    write_node(app, entry_point_hash, routine_cfg_get_opcode(entry_frame->cfm.cfg, 0), 0);
+
+  return entry_frame;
+}
+
+void initialize_interp_app_context(application_t *app)
+{
+  current_app = app;
+
+  app->base_frame = (void *) initialize_entry_point(app, BASE_FRAME_HASH);
+  app->system_frame = (void *) initialize_entry_point(app, SYSTEM_FRAME_HASH);
 }
 
 void destroy_interp_app_context(application_t *app)
 {
   routine_cfg_free(((stack_frame_t *) app->base_frame)->cfm.cfg);
   PROCESS_FREE(app->base_frame);
+  routine_cfg_free(((stack_frame_t *) app->system_frame)->cfm.cfg);
+  PROCESS_FREE(app->system_frame);
 
   if (IS_CFI_EVO())
     mysql_close(db_connection);
@@ -542,10 +559,12 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
         plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
       } else {
-        const char *address = get_current_request_address();
+        const char *address = NULL;
+        bool block_now = !is_standalone_mode() && !request_blocked;
 
-        if (!request_blocked) {
+        if (block_now) {
           request_blocked = true;
+          address = get_current_request_address();
 
           plog(from_cfm->app, PLOG_TYPE_CFG, "block request %08lld 0x%llx: %s\n",
                current_request_id, get_current_request_start_time(), address);
@@ -559,7 +578,7 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
         }
         //plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, to_frame->execute_data);
 
-        if (IS_CFI_BAILOUT_ENABLED()) {
+        if (block_now && IS_CFI_BAILOUT_ENABLED()) {
           zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
                      current_request_id, get_current_request_start_time(), address);
           zend_bailout();
@@ -683,18 +702,39 @@ static void lookup_cfm(zend_execute_data *execute_data, zend_op_array *op_array,
 
 static inline zend_execute_data *find_return_target(zend_execute_data *execute_data)
 {
-  zend_execute_data *return_target = execute_data->prev_execute_data;
-  while (return_target != NULL &&
-         (return_target->func == NULL ||
-          return_target->func->op_array.type == ZEND_INTERNAL_FUNCTION))
-    return_target = return_target->prev_execute_data;
+  zend_execute_data *return_target = execute_data;
+
+  do {
+    if (IS_DESTRUCTOR(return_target))
+      return_target = return_target->prev_execute_data->prev_execute_data->prev_execute_data;
+    else
+      return_target = return_target->prev_execute_data;
+  } while (return_target != NULL &&
+           (return_target->func == NULL ||
+            return_target->func->op_array.type == ZEND_INTERNAL_FUNCTION));
+
   return return_target;
 }
 
-static bool validate_return(zend_execute_data *execute_data)
+static void validate_return(zend_execute_data *execute_data, control_flow_metadata_t *new_cur_cfm,
+                            bool is_intra_procedural_step)
 {
-  zend_execute_data *return_target = find_return_target(execute_data);
-  return (stack_event.return_target == execute_data || stack_event.return_target == return_target);
+  if (IS_DESTRUCTOR(execute_data)) {
+    /* will validate return from dtor to the callee--assuming VM is not broken here! */
+    stack_event.state = STACK_STATE_NONE;
+  } else {
+    zend_execute_data *return_target = find_return_target(execute_data);
+    if (stack_event.return_target == execute_data || stack_event.return_target == return_target) {
+      stack_event.state = STACK_STATE_RETURNED;
+    } else {
+      if (is_intra_procedural_step) {
+        ERROR("Failed to clear STACK_STATE_RETURNING. Now in %s\n", new_cur_cfm->routine_name);
+      } else {
+        ERROR("Expected return to %s but returned to %s\n", stack_event.return_target_name,
+              new_cur_cfm->routine_name);
+      }
+    }
+  }
 }
 
 static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op_array,
@@ -729,32 +769,31 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
       stack_event.state = STACK_STATE_NONE;
       break;
     case STACK_STATE_RETURNING:
-      if (validate_return(execute_data)) {
-        stack_event.state = STACK_STATE_RETURNED;
-      } else {
-        ERROR("Expected return to %s but returned to %s\n", stack_event.return_target_name,
-              new_cur_frame.cfm.routine_name);
-      }
+      validate_return(execute_data, &new_cur_frame.cfm, false);
       break;
     default: ;
   }
 
-  prev_execute_data = execute_data->prev_execute_data;
-  while (prev_execute_data != NULL &&
-         (prev_execute_data->func == NULL ||
-          prev_execute_data->func->op_array.type == ZEND_INTERNAL_FUNCTION))
-    prev_execute_data = prev_execute_data->prev_execute_data;
-  if (prev_execute_data == NULL) {
-    new_prev_frame = *(stack_frame_t *) current_app->base_frame;
+  if (IS_DESTRUCTOR(execute_data)) {
+    new_prev_frame = *(stack_frame_t *) current_app->system_frame;
   } else {
-    zend_op_array *prev_op_array = &prev_execute_data->func->op_array;
-    new_prev_frame.execute_data = prev_execute_data;
-    new_prev_frame.opcodes = prev_op_array->opcodes;
-    new_prev_frame.opcode = prev_execute_data->opline->opcode;
-    new_prev_frame.op_index = (prev_execute_data->opline - prev_op_array->opcodes);
-    new_prev_frame.implicit_taint = NULL;
-    new_prev_frame.last_builtin_name = NULL;
-    lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
+    prev_execute_data = execute_data->prev_execute_data;
+    while (prev_execute_data != NULL &&
+           (prev_execute_data->func == NULL ||
+            prev_execute_data->func->op_array.type == ZEND_INTERNAL_FUNCTION))
+      prev_execute_data = prev_execute_data->prev_execute_data;
+    if (prev_execute_data == NULL) {
+      new_prev_frame = *(stack_frame_t *) current_app->base_frame;
+    } else {
+      zend_op_array *prev_op_array = &prev_execute_data->func->op_array;
+      new_prev_frame.execute_data = prev_execute_data;
+      new_prev_frame.opcodes = prev_op_array->opcodes;
+      new_prev_frame.opcode = prev_execute_data->opline->opcode;
+      new_prev_frame.op_index = (prev_execute_data->opline - prev_op_array->opcodes);
+      new_prev_frame.implicit_taint = NULL;
+      new_prev_frame.last_builtin_name = NULL;
+      lookup_cfm(prev_execute_data, prev_op_array, &new_prev_frame.cfm);
+    }
   }
 
   if (stack_event.state == STACK_STATE_RETURNED && (execute_data->opline - op_array->opcodes) > 0) {
@@ -834,8 +873,7 @@ static inline bool update_stack_frame(zend_execute_data *execute_data, zend_op_a
         stack_event.state = STACK_STATE_NONE;
         break;
       case STACK_STATE_RETURNING:
-        if (!validate_return(execute_data))
-          ERROR("Failed to clear STACK_STATE_RETURNING. Now in %s\n", cur_frame.cfm.routine_name);
+        validate_return(execute_data, &cur_frame.cfm, true);
       case STACK_STATE_RETURNED:
         stack_event.state = STACK_STATE_NONE;
         break;

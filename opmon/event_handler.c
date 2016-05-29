@@ -28,6 +28,7 @@ typedef enum _opmon_run_type {
 
 static const char *static_analysis = NULL;
 static opmon_run_type run_type = OPMON_RUN_EXECUTION;
+
 static void init_top_level_script(const char *script_path)
 {
   starting_script(script_path);
