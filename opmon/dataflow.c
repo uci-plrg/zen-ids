@@ -961,6 +961,8 @@ bool is_file_source_function(const char *name)
     return true;
   } else if (strcmp(name, "getcwd") == 0) {
     return true;
+  } else if (strcmp(name, "opendir") == 0) {
+    return true;
   } else if (strcmp(name, "readdir") == 0) {
     return true;
   } else if (strcmp(name, "scandir") == 0) {
@@ -1011,6 +1013,8 @@ bool is_file_source_function(const char *name)
     return true;
   } else if (strcmp(name, "fnmatch") == 0) {
     return true;
+  } else if (strcmp(name, "fpassthru") == 0) {
+    return true;
   } else if (strcmp(name, "fread") == 0) {
     return true;
   } else if (strcmp(name, "fscanf") == 0) {
@@ -1055,8 +1059,6 @@ bool is_file_sink_function(const char *name)
     return true;
   } else if (strcmp(name, "closedir") == 0) {
     return true;
-  } else if (strcmp(name, "opendir") == 0) {
-    return true;
   } else if (strcmp(name, "rewinddir") == 0) {
     return true;
   } else if (strcmp(name, "chgrp") == 0) {
@@ -1075,9 +1077,7 @@ bool is_file_sink_function(const char *name)
     return true;
   } else if (strcmp(name, "flock") == 0) {
     return true;
-  } else if (strcmp(name, "fopen") == 0) {
-    return true;
-  } else if (strcmp(name, "fpassthru") == 0) {
+  } else if (strcmp(name, "fopen") == 0) { /* may open newtork connection to anywhere */
     return true;
   } else if (strcmp(name, "fputcsv") == 0) {
     return true;

@@ -5,6 +5,7 @@
 #include "cfg.h"
 
 // #define TAINT_IO 1
+#define TAINT_REQUEST_INPUT 1
 
 typedef enum _site_modification_type_t {
   SITE_MOD_NONE,
@@ -35,14 +36,14 @@ typedef enum _request_input_type_t {
 
 typedef struct _request_input_t {
   request_input_type_t type;
-  zval *value; /* NULL indicates fetch of the superglobal itself */
+  const zval *value; /* NULL indicates fetch of the superglobal itself */
 } request_input_t;
 
 typedef enum _taint_type_t {
   TAINT_TYPE_SITE_MOD,
-//#ifdef TAINT_IO
+#ifdef TAINT_REQUEST_INPUT
   TAINT_TYPE_REQUEST_INPUT
-//#endif
+#endif
 } taint_type_t;
 
 typedef enum _taint_variable_type_t {

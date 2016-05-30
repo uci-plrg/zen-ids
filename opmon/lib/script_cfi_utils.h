@@ -79,6 +79,7 @@ typedef enum _cfi_mode_t {
 #define EVAL_FUNCTION_NAME "<eval>"
 #define BASE_FRAME_HASH 1
 #define SYSTEM_FRAME_HASH 2
+#define REQUEST_HEADER_TAG 3
 #define ENTRY_POINT_OPCODE ZEND_DO_FCALL
 #define ENTRY_POINT_EXTENDED_VALUE 0xff
 #define USER_SESSION_KEY "__opmon_user_session"

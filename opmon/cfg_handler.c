@@ -55,7 +55,7 @@ typedef struct _request_state_t {
 } request_state_t;
 
 static request_state_t request_state;
-static const uint request_header_tag = 2; // N.B.: avoid collision with app entry point hash
+static const uint request_header_tag = REQUEST_HEADER_TAG;
 static session_t session = { {0}, 0 };
 
 static inline void fnull(size_t size, FILE *file)
@@ -832,7 +832,7 @@ static void print_taint(FILE *out, taint_variable_t *taint)
         default: ;
       }
     } break;
-# ifdef TAINT_IO
+# ifdef TAINT_REQUEST_INPUT
     case TAINT_TYPE_REQUEST_INPUT: {
       request_input_t *input = (request_input_t *) taint->taint;
       switch (input->type) {
@@ -945,9 +945,29 @@ void plog_call(zend_execute_data *execute_data, application_t *app, plog_type_t 
       case IS_FALSE:
         plog_append(app, type, "false");
         break;
-      case IS_STRING:
-        plog_append(app, type, "%.20s", Z_STRVAL_P(arg_value));
-        break;
+      case IS_STRING: {
+        const char *str = Z_STRVAL_P(arg_value);
+        uint len = strlen(str);
+
+        if (len < 0x80 && strchr(str, '\n') == NULL && strchr(str, '\r') == NULL) {
+          plog_append(app, type, "%s", str);
+        } else {
+          char buffer[20];
+          uint i;
+
+          if (len > 20)
+            len = 20;
+
+          for (i = 0; i < len; i++) {
+            if (str[i] == '\n' || str[i] == '\r')
+              buffer[i] = '$';
+            else
+              buffer[i] = str[i];
+          }
+          buffer[i] = '\0';
+          plog_append(app, type, "%.20s", buffer);
+        }
+      } break;
       case IS_LONG:
         plog_append(app, type, "%d", Z_LVAL_P(arg_value));
         break;
@@ -1037,6 +1057,14 @@ static inline bool is_plog_type_enabled(plog_type_t type)
   if (type == PLOG_TYPE_DB_MOD)
     return true;
 #endif
+#ifdef PLOG_FILE_OUTPUT
+  if (type == PLOG_TYPE_FILE_OUTPUT)
+    return true;
+#endif
+#ifdef PLOG_SYS_WRITE
+  if (type == PLOG_TYPE_SYS_WRITE)
+    return true;
+#endif
 #ifdef PLOG_WARN
   if (type == PLOG_TYPE_WARN)
     return true;
@@ -1062,6 +1090,12 @@ static inline void plog_type_tag(FILE *plog, plog_type_t type)
       break;
     case PLOG_TYPE_DB_MOD:
       fprintf(plog, "<db-mod> ");
+      break;
+    case PLOG_TYPE_FILE_OUTPUT:
+      fprintf(plog, "<file-out> ");
+      break;
+    case PLOG_TYPE_SYS_WRITE:
+      fprintf(plog, "<sys-write> ");
       break;
     case PLOG_TYPE_WARN:
       fprintf(plog, "<warning> ");
@@ -1117,6 +1151,23 @@ void flush_all_outputs(application_t *app)
       fflush(cfg_files->request_edge);
   }
   fflush(stderr);
+}
+
+bool is_stateful_syscall(const char *callee_name)
+{
+  if (is_file_sink_function(callee_name))
+    return true;
+
+  if (strcmp(callee_name, "exec") == 0)
+    return true;
+  if (strcmp(callee_name, "shell_exec") == 0)
+    return true;
+  if (strcmp(callee_name, "system") == 0)
+    return true;
+  if (strcmp(callee_name, "proc_open") == 0)
+    return true;
+
+  return false;
 }
 
 int get_current_request_id()

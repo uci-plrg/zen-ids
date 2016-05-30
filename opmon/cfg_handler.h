@@ -10,8 +10,11 @@
 #define PLOG_CFG 1
 //#define PLOG_DB 1
 //#define PLOG_DB_MOD 1
+#define PLOG_FILE_OUTPUT 1
+#define PLOG_SYS_WRITE 1
+//#define PLOG_SYS_READ 1
 //#define PLOG_WARN 1
-//#define PLOG_AD_HOC 1
+#define PLOG_AD_HOC 1
 
 typedef struct _php_server_context_t { // type window
   int opaque;
@@ -35,6 +38,8 @@ typedef enum _plog_type_t {
   PLOG_TYPE_CFG,
   PLOG_TYPE_DB,
   PLOG_TYPE_DB_MOD,
+  PLOG_TYPE_FILE_OUTPUT,
+  PLOG_TYPE_SYS_WRITE,
   PLOG_TYPE_WARN,
   PLOG_TYPE_AD_HOC,
 } plog_type_t;
@@ -88,6 +93,8 @@ void plog_call(zend_execute_data *execute_data, application_t *app, plog_type_t 
 void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame);
 
 void flush_all_outputs(application_t *app);
+
+bool is_stateful_syscall(const char *callee_name);
 
 int get_current_request_id();
 uint64 get_current_request_start_time();

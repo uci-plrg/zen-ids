@@ -929,6 +929,8 @@ void propagate_args_to_result(application_t *app, zend_execute_data *execute_dat
   char arg_id[128];
   uint i;
 
+  // todo: what if `result` is `null`, or `true`? Don't taint global constants!
+
   for (i = 0; i < arg_count; i++) {
     arg_value = get_operand_zval(execute_data, args[i], TAINT_OPERAND_1);
     arg_taint = taint_var_get(arg_value);
