@@ -877,11 +877,21 @@ static inline bool update_stack_frame(zend_execute_data *execute_data, zend_op_a
     cur_frame.opcode = op->opcode;
 
     switch (stack_event.state) {
-      case STACK_STATE_CALL:
-        ERROR("Stack frame did not change after STACK_STATE_CALL at opcode 0x%x. Still in %s\n",
-              stack_event.last_opcode, cur_frame.cfm.routine_name);
+      case STACK_STATE_CALL: {
+        const zend_op *call_op = (op-1);
+
+        if (op_index > 0 && (op-1)->opcode == ZEND_INCLUDE_OR_EVAL &&
+            op->opcode == ZEND_END_SILENCE) {
+          WARN("Failed to find an include file in %s at %04d(L%04d)%s.\n",
+                cur_frame.cfm.routine_name, OP_INDEX(op_array, call_op), call_op->lineno,
+                site_relative_path(current_app, op_array));
+        } else {
+          ERROR("Stack frame did not change after STACK_STATE_CALL in %s at %04d(L%04d)%s.\n",
+                cur_frame.cfm.routine_name, OP_INDEX(op_array, call_op), call_op->lineno,
+                site_relative_path(current_app, op_array));
+        }
         stack_event.state = STACK_STATE_NONE;
-        break;
+      } break;
       case STACK_STATE_RETURNING:
         validate_return(execute_data, &cur_frame.cfm, true);
       case STACK_STATE_RETURNED:
@@ -1158,7 +1168,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
     cur_frame.last_builtin_name = callee_name; // careful about use after free!
 
-    if (strcmp(callee_name, "proc_open") == 0) {
+    if (IS_CFI_DGC() && strcmp(callee_name, "proc_open") == 0) {
 #define MBOX "mbox -- "
 #define MBOX_TAIL " | awk '/^Sandbox Root/ { exit } { print }'"
 
@@ -1296,8 +1306,18 @@ void opcode_executing(const zend_op *op)
       break;
     case ZEND_INCLUDE_OR_EVAL:
       if (op->extended_value == ZEND_INCLUDE || op->extended_value == ZEND_REQUIRE) {
-        stack_event.state = STACK_STATE_CALL;
-        stack_event.last_opcode = op->opcode;
+        /* ignore includes of static files like plain html */
+        const zval *zincluded_filename = get_zval(execute_data, &op->op1, op->op1_type);
+
+        if (zincluded_filename != NULL && Z_TYPE_P(zincluded_filename) == IS_STRING) {
+          const char *included_filename = Z_STRVAL_P(zincluded_filename);
+          uint len = strlen(included_filename);
+
+          if (len > 4 && strcasecmp(included_filename + (len - 4), ".php") == 0) {
+            stack_event.state = STACK_STATE_CALL;
+            stack_event.last_opcode = op->opcode;
+          }
+        }
       }
       break;
     case ZEND_RETURN:
