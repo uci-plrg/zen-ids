@@ -19,6 +19,7 @@
 #include "interp_context.h"
 
 // # define OPMON_LOG_SELECT 1
+// # defne TRANSACTIONAL_SUBPROCESS 1
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
@@ -1113,13 +1114,15 @@ static void post_propagate_builtin(zend_op_array *op_array, const zend_op *op)
   propagate_args_to_result(current_app, execute_data, op, args, arg_count,
                            cur_frame.last_builtin_name);
 
-  if (strcmp(cur_frame.last_builtin_name, "proc_open") == 0) {
+#ifdef TRANSACTIONAL_SUBPROCESS
+  if (IS_CFI_DGC() && strcmp(cur_frame.last_builtin_name, "proc_open") == 0) {
     if (cur_frame.last_builtin_original_arg != NULL) {
       // zend_string *mbox_command = Z_STR_P(cur_frame.last_builtin_arg);
       ZVAL_STR(cur_frame.last_builtin_arg, cur_frame.last_builtin_original_arg); // put it back where I found it
       // efree(mbox_command);
     }
   }
+#endif
 
 #ifdef TAINT_IO
   if (TAINT_ALL) {
@@ -1168,6 +1171,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
     cur_frame.last_builtin_name = callee_name; // careful about use after free!
 
+#ifdef TRANSACTIONAL_SUBPROCESS
     if (IS_CFI_DGC() && strcmp(callee_name, "proc_open") == 0) {
 #define MBOX "mbox -- "
 #define MBOX_TAIL " | awk '/^Sandbox Root/ { exit } { print }'"
@@ -1182,6 +1186,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
       snprintf(mbox_command, len, MBOX"%s"MBOX_TAIL, command);
       ZVAL_STR(zcommand, zend_string_init(mbox_command, len, 0));
     }
+#endif
 
 #ifdef PLOG_FILE_OUTPUT
     if (is_file_sink_function(cur_frame.last_builtin_name))
