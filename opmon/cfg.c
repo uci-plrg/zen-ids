@@ -34,6 +34,14 @@ routine_cfg_t *routine_cfg_new(uint routine_hash)
   return cfg;
 }
 
+routine_cfg_t *routine_cfg_new_empty(uint routine_hash)
+{
+  routine_cfg_t *cfg = PROCESS_NEW(routine_cfg_t);
+  memset(cfg, 0, sizeof(routine_cfg_t));
+  cfg->routine_hash = routine_hash;
+  return cfg;
+}
+
 void routine_cfg_free(routine_cfg_t *cfg) // mem-todo
 {
   scarray_destroy(&cfg->opcodes);

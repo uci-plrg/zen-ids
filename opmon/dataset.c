@@ -133,7 +133,7 @@ dataset_routine_t *dataset_routine_lookup(application_t *app, uint routine_hash)
   return NULL;
 }
 
-static bool match_eval_routines(dataset_routine_t *dataset, routine_cfg_t *routine)
+static bool match_eval_routine(dataset_routine_t *dataset, routine_cfg_t *routine)
 {
   uint i;
 
@@ -157,7 +157,7 @@ void dataset_match_eval(control_flow_metadata_t *cfm)
 
   for (i = 0; i < dataset->eval_list->count; i++) {
     routine = RESOLVE_PTR(dataset, dataset->eval_list->list[i], dataset_routine_t);
-    if (match_eval_routines(routine, cfm->cfg)) {
+    if (match_eval_routine(routine, cfm->cfg)) {
       MON("Matched eval %d to dataset eval %d\n", get_eval_id(cfm->cfg->routine_hash), i);
 
       cfm->dataset = routine;

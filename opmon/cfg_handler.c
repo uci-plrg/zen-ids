@@ -657,6 +657,10 @@ bool write_request_edge(bool is_new_in_process, application_t *app, uint from_ro
     }
 
     if (IS_REQUEST_EDGE_OUTPUT_ENABLED()) {
+
+      if (to_routine_hash == 0x5ad54d5 || to_routine_hash == 0x5ab7529 || to_routine_hash == 0x297c80da)
+        SPOT("wait!\n");
+
       fwrite(&from_routine_hash, sizeof(uint), 1, cfg_files->request_edge);
       fwrite(&packed_from_index, sizeof(uint), 1, cfg_files->request_edge);
       fwrite(&to_routine_hash, sizeof(uint), 1, cfg_files->request_edge);

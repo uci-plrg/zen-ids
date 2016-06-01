@@ -24,8 +24,8 @@ typedef struct _compilation_unit_t {
 } compilation_unit_t;
 
 typedef struct _compilation_routine_t {
-  uint caller_hash;
-  uint callee_hash;
+  uint caller_hash; /* <scope>:<function-name> */
+  uint callee_hash; /* <path>:<line-number>:<function-name> */
   control_flow_metadata_t cfm;
 } compilation_routine_t;
 
@@ -395,7 +395,7 @@ void function_compiled(zend_op_array *op_array)
 
       switch (op->opcode) {
         case ZEND_INCLUDE_OR_EVAL: {
-          if (op->op1_type == IS_CONST) {
+          if ((is_static_analysis() || is_dataflow_analysis()) && op->op1_type == IS_CONST) {
             switch (op->extended_value) {
               case ZEND_INCLUDE:
               case ZEND_REQUIRE:

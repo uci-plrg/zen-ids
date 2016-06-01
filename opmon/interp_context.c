@@ -212,6 +212,8 @@ static user_session_t current_session;
 
 static uint64 current_request_id = 0;
 
+static sctable_t builtin_cfgs;
+
 #ifdef OPMON_DEBUG
 static pthread_t first_thread_id;
 #endif
@@ -322,6 +324,9 @@ void initialize_interp_context()
 #ifdef OPMON_DEBUG
   first_thread_id = pthread_self();
 #endif
+
+  builtin_cfgs.hash_bits = 7;
+  sctable_init(&builtin_cfgs);
 
   current_session.user_level = USER_LEVEL_BOTTOM;
   current_session.active = false;
@@ -1142,6 +1147,29 @@ static void post_propagate_builtin(zend_op_array *op_array, const zend_op *op)
   cur_frame.last_builtin_original_arg = NULL;
 }
 
+static void configure_builtin_frame(stack_frame_t *frame, const char *builtin_name)
+{
+  routine_cfg_t *cfg;
+  char builtin_key_name[256]; /* N.B.: separate key per app, but universal builtin name and hash*/
+  uint builtin_key;
+
+  snprintf(builtin_key_name, 256, "%s:%s", current_app->name, builtin_name);
+  builtin_key = hash_string(builtin_key_name);
+  cfg = sctable_lookup(&builtin_cfgs, builtin_key);
+
+  if (cfg == NULL) {
+    uint builtin_hash = hash_routine(builtin_name);
+
+    cfg = routine_cfg_new_empty(builtin_hash);
+    sctable_add(&builtin_cfgs, builtin_key, cfg);
+
+    write_routine_catalog_entry(current_app, builtin_hash, "builtin", builtin_name);
+  }
+
+  frame->cfm.routine_name = builtin_name;
+  frame->cfm.cfg = cfg;
+}
+
 static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_array, const zend_op *op)
 {
   const zend_op *args[0x20];
@@ -1170,6 +1198,22 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
 
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
     cur_frame.last_builtin_name = callee_name; // careful about use after free!
+
+    if (cur_frame.cfm.cfg != NULL) {
+      stack_frame_t builtin_frame = { 0 };
+      char builtin_name[256];
+
+      /* N.B.: create a separate builtin per app or they will go to the wrong catalog! */
+      snprintf(builtin_name, 256, "builtin:%s", callee_name);
+      configure_builtin_frame(&builtin_frame, builtin_name);
+
+      if (IS_CFI_MONITOR()) {
+        evaluate_routine_edge(&cur_frame, &builtin_frame, 0/*routine entry*/);
+      } else {
+        generate_routine_edge(&cur_frame.cfm, cur_frame.op_index,
+                              builtin_frame.cfm.cfg, 0/*routine entry*/);
+      }
+    }
 
 #ifdef TRANSACTIONAL_SUBPROCESS
     if (IS_CFI_DGC() && strcmp(callee_name, "proc_open") == 0) {
