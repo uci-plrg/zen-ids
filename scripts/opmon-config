@@ -1,0 +1,51 @@
+#!/bin/bash
+
+c="opmon_cfi_mode"
+o="opmon_opcode_dump_enabled"
+e="opmon_request_edge_enabled"
+v="opmon_verbose"
+b="opmon_cfi_bailout"
+
+config="$PHP_HOME/conf.d/ext/opmon.ini"
+
+function usage() {
+  echo "opmon-config"
+  echo "   -s show current config (after making changes)"
+  echo "   -c <$c>"
+  echo "   -o <$o>"
+  echo "   -e <$e>"
+  echo "   -v <$v>"
+  echo "   -b <$b>"
+}
+
+function add_expression() {
+  var=$1
+  val=$2
+
+  sed -i -e "s/$var = [0-9]\+/$var = $val/" $config
+}
+
+[ "$1" == "--help" ] && usage && exit
+[ -z "$PHP_HOME" ] && echo "This script requires variable \$PHP_HOME. Exiting now." && exit
+
+while getopts "c:o:e:v:b:s" option
+do
+  case $option in
+    c) add_expression $c $OPTARG;;
+    o) add_expression $o $OPTARG;;
+    e) add_expression $e $OPTARG;;
+    v) add_expression $v $OPTARG;;
+    b) add_expression $b $OPTARG;;
+    s) show=true;;
+  esac
+done
+shift $(( $OPTIND-1 ))
+
+if [ ! -z "$show" ]
+then
+  grep "$c" $config
+  grep "$o" $config
+  grep "$e" $config
+  grep "$v" $config
+  grep "$b" $config
+fi

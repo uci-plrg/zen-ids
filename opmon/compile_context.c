@@ -213,49 +213,75 @@ void function_compiled(zend_op_array *op_array)
   if (strlen(routine_caller_name) == 0)
     strcat(routine_caller_name, routine_name);
 
+  cfm.app = fqn->unit.application;
+
+  if (is_eval) {
+    uint eval_routine_hash = dataset_match_eval(&cfm, op_array);
+
+    if (eval_routine_hash == 0) {
+      cfm.cfg = cfg_get_matching_eval(cfm.app->cfg, op_array);
+      if (cfm.cfg == NULL)
+        fqn->function.callee_hash = fqn->function.caller_hash = hash_eval(eval_id);
+      else
+        fqn->function.callee_hash = fqn->function.caller_hash = cfm.cfg->routine_hash;
+    } else {
+      fqn->function.callee_hash = fqn->function.caller_hash = eval_routine_hash;
+      cfm.cfg = cfg_routine_lookup(cfm.app->cfg, eval_routine_hash);
+    }
+
+    if (cfm.cfg == NULL) {
+      cfm.cfg = routine_cfg_new(fqn->function.callee_hash);
+      cfg_add_routine(cfm.app->cfg, cfm.cfg);
+      cfg_add_eval(cfm.app->cfg, cfm.cfg);
+      write_routine_catalog_entry(cfm.app, fqn->function.callee_hash, fqn->unit.path, routine_name);
+    } else {
+      is_already_compiled = true;
+      eval_id = get_eval_id(cfm.cfg->routine_hash);
+    }
+    sprintf(routine_name, "<eval-%d>", eval_id);
+  } else {
+    fqn->function.callee_hash = hash_routine(routine_name);
+    fqn->function.caller_hash = hash_routine(routine_caller_name);
+
+    cfm.dataset = dataset_routine_lookup(cfm.app, fqn->function.callee_hash);
+    cfm.cfg = cfg_routine_lookup(cfm.app->cfg, fqn->function.callee_hash);
+
+    if (cfm.cfg == NULL) {
+      cfm.cfg = routine_cfg_new(fqn->function.callee_hash);
+      cfg_add_routine(cfm.app->cfg, cfm.cfg);
+      write_routine_catalog_entry(cfm.app, fqn->function.callee_hash, fqn->unit.path, routine_name);
+    } else {
+      zend_op *op;
+      cfg_opcode_t *cfg_opcode;
+      bool recompile = false;
+      //cfg_opcode_edge_t *cfg_edge; // skipping edges for now
+      //compiled_edge_target_t target;
+      for (i = 0; i < op_array->last; i++) {
+        op = &op_array->opcodes[i];
+        if (zend_get_opcode_name(op->opcode) == NULL)
+          continue;
+        cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
+        //cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
+
+        if (op->opcode != cfg_opcode->opcode ||
+            op->extended_value != cfg_opcode->extended_value) {
+          recompile = true;
+          break;
+        }
+        //target = get_compiled_edge_target(op, i);
+      }
+      is_already_compiled = !recompile;
+    }
+  }
+
   buffer = REQUEST_ALLOC(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
-  cfm.app = fqn->unit.application;
   buffer = NULL;
-  if (is_eval) {
-    fqn->function.callee_hash = fqn->function.caller_hash = hash_eval(eval_id);
-  } else {
-    fqn->function.callee_hash = hash_routine(cfm.routine_name);
-    fqn->function.caller_hash = hash_routine(routine_caller_name);
-  }
-
-  if (!is_eval) {
-    cfm.dataset = dataset_routine_lookup(cfm.app, fqn->function.callee_hash);
-    cfm.cfg = cfg_routine_lookup(cfm.app->cfg, fqn->function.callee_hash);
-  }
-  if (cfm.cfg == NULL) {
-    cfm.cfg = routine_cfg_new(fqn->function.callee_hash);
-    cfg_add_routine(cfm.app->cfg, cfm.cfg);
-    write_routine_catalog_entry(cfm.app, fqn->function.callee_hash, fqn->unit.path, routine_name);
-  } else {
-    zend_op *op;
-    cfg_opcode_t *cfg_opcode;
-    bool recompile = false;
-    //cfg_opcode_edge_t *cfg_edge; // skipping edges for now
-    //compiled_edge_target_t target;
-    for (i = 0; i < op_array->last; i++) {
-      op = &op_array->opcodes[i];
-      if (zend_get_opcode_name(op->opcode) == NULL)
-        continue;
-      cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
-      //cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
-
-      if (op->opcode != cfg_opcode->opcode ||
-          op->extended_value != cfg_opcode->extended_value) {
-        recompile = true;
-        break;
-      }
-      //target = get_compiled_edge_target(op, i);
-    }
-    is_already_compiled = !recompile;
-  }
   fqn->function.cfm = cfm;
+
+  if (is_eval)
+    last_eval_cfm = cfm;
 
 #ifdef SPOT_DEBUG
   spot = (fqn->function.callee_hash == 0x933ca2cd);
@@ -585,11 +611,6 @@ void function_compiled(zend_op_array *op_array)
             fqn->unit.path, fqn->function.cfm.routine_name,
             fqn->function.callee_hash);
     }
-  }
-
-  if (is_eval) {
-    dataset_match_eval(&cfm);
-    last_eval_cfm = cfm;
   }
 
   if (cfm.dataset == NULL) {

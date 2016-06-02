@@ -112,6 +112,7 @@ cfg_t *cfg_new()
   sctable_init(&cfg->routines);
   cfg->routine_edges.hash_bits = 10;
   sctable_init(&cfg->routine_edges);
+  scarray_init(&cfg->evals);
   return cfg;
 }
 
@@ -120,6 +121,7 @@ void cfg_free(cfg_t *cfg) // mem-todo
   if (cfg != NULL) {
     sctable_destroy(&cfg->routines);
     sctable_destroy(&cfg->routine_edges);
+    scarray_destroy(&cfg->evals);
     PROCESS_FREE(cfg);
   }
 }
@@ -173,6 +175,41 @@ void cfg_add_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_ind
     cfg_entry->edge.to_routine = to_routine;
     cfg_entry->edge.user_level = user_level;
   }
+}
+
+static bool is_same_eval_routine(routine_cfg_t *routine, zend_op_array *op_array)
+{
+  zend_op *op = op_array->opcodes, *end = op + op_array->last;
+  cfg_opcode_t **node = (cfg_opcode_t **) routine->opcodes.data;
+
+  if (routine->opcodes.size != op_array->last)
+    return false;
+
+  while (op < end) {
+    if ((*node)->opcode != op->opcode)
+      return false;
+    op++;
+    node++;
+  }
+  return true;
+}
+
+routine_cfg_t *cfg_get_matching_eval(cfg_t *cfg, zend_op_array *op_array)
+{
+  uint i;
+  routine_cfg_t *routine;
+
+  for (i = 0; i < cfg->evals.size; i++) {
+    routine = (routine_cfg_t *) cfg->evals.data[i];
+    if (is_same_eval_routine(routine, op_array))
+      return routine;
+  }
+  return NULL;
+}
+
+void cfg_add_eval(cfg_t *cfg, routine_cfg_t *eval)
+{
+  scarray_append(&cfg->evals, eval);
 }
 
 const char *site_relative_path(application_t *app, zend_op_array *stack_frame)

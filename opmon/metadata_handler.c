@@ -12,6 +12,7 @@
 static size_t dataset_size;
 //static void *dataset;
 
+static uint base_eval_id;
 static uint eval_id = 0;
 
 void init_metadata_handler()
@@ -25,6 +26,10 @@ void destroy_metadata_handler()
   //  munmap(dataset, dataset_size);
 }
 
+void metadata_start_request()
+{
+}
+
 void *load_dataset(const char *script_path)
 {
   char dataset_path[256] = {0};
@@ -34,6 +39,8 @@ void *load_dataset(const char *script_path)
 
   setup_base_path(dataset_path, "sets", script_path);
   strcat(dataset_path, ".set");
+
+  SPOT("Attempting to open dataset from %s\n", dataset_path);
 
   if (stat(dataset_path, &fileinfo) != 0) {
     WARN("Failed to obtain file info for path %s. Skipping dataset operations.\n", dataset_path);
@@ -55,12 +62,12 @@ void *load_dataset(const char *script_path)
   SPOT("Mapped %d bytes from dataset at path %s.\n", (int) dataset_size, dataset_path);
 
   dataset = install_dataset(map);
-  eval_id = dataset_get_eval_count(dataset);
+  base_eval_id = dataset_get_eval_count(dataset);
+  eval_id = base_eval_id;
   return dataset;
 }
 
 uint get_next_eval_id()
 {
-  // todo: thread safety?
   return eval_id++;
 }

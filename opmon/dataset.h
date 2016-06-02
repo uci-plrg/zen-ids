@@ -7,7 +7,7 @@
 void *install_dataset(void *dataset);
 uint dataset_get_eval_count(void *app);
 dataset_routine_t *dataset_routine_lookup(application_t *app, uint routine_hash);
-void dataset_match_eval(control_flow_metadata_t *cfm);
+uint dataset_match_eval(control_flow_metadata_t *cfm, zend_op_array *op_array);
 
 void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset,
                                           uint from_index, uint to_index);

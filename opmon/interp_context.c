@@ -197,8 +197,8 @@ static uint64 evo_last_synch_request_id = 0ULL; /* trimmed to taint expiration w
 static exception_frame_t exception_stack[MAX_STACK_FRAME_exception_stack];
 static exception_frame_t *exception_frame;
 
-static lambda_frame_t lambda_stack[MAX_STACK_FRAME_lambda_stack];
-static lambda_frame_t *lambda_frame;
+//static lambda_frame_t lambda_stack[MAX_STACK_FRAME_lambda_stack];
+//static lambda_frame_t *lambda_frame;
 
 static stack_frame_t void_frame;
 static stack_frame_t prev_frame;
@@ -315,8 +315,8 @@ void initialize_interp_context()
   memset(exception_stack, 0, 2 * sizeof(exception_frame_t));
   exception_frame = exception_stack + 1;
 
-  memset(lambda_stack, 0, 2 * sizeof(lambda_frame_t));
-  lambda_frame = lambda_stack + 1;
+  // memset(lambda_stack, 0, 2 * sizeof(lambda_frame_t));
+  // lambda_frame = lambda_stack + 1;
 
   stack_event.state = STACK_STATE_NONE;
   stack_event.last_opcode = 0;

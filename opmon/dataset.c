@@ -133,40 +133,44 @@ dataset_routine_t *dataset_routine_lookup(application_t *app, uint routine_hash)
   return NULL;
 }
 
-static bool match_eval_routine(dataset_routine_t *dataset, routine_cfg_t *routine)
+static bool match_eval_routine(dataset_routine_t *dataset, zend_op_array *op_array)
 {
-  uint i;
+  zend_op *op = op_array->opcodes, *end = op + op_array->last;
+  dataset_node_t *node = dataset->nodes;
 
-  if (dataset->node_count != routine->opcodes.size)
+  if (dataset->node_count != op_array->last)
     return false;
-  for (i = 0; i < dataset->node_count; i++) {
-    if (dataset->nodes[i].opcode != routine_cfg_get_opcode(routine, i)->opcode)
+
+  while (op < end) {
+    if (node->opcode != op->opcode)
       return false;
+    op++;
+    node++;
   }
   return true;
 }
 
-void dataset_match_eval(control_flow_metadata_t *cfm)
+uint dataset_match_eval(control_flow_metadata_t *cfm, zend_op_array *op_array)
 {
   uint i;
   dataset_routine_t *routine;
   dataset_app_t *dataset = (dataset_app_t *) cfm->app->dataset;
 
   if (dataset == NULL)
-    return;
+    return 0;
 
   for (i = 0; i < dataset->eval_list->count; i++) {
     routine = RESOLVE_PTR(dataset, dataset->eval_list->list[i], dataset_routine_t);
-    if (match_eval_routine(routine, cfm->cfg)) {
-      MON("Matched eval %d to dataset eval %d\n", get_eval_id(cfm->cfg->routine_hash), i);
+    if (match_eval_routine(routine, op_array)) {
+      MON("Matched eval to dataset eval %d\n", get_eval_id(routine->routine_hash));
 
       cfm->dataset = routine;
-      cfm->cfg->routine_hash = hash_eval(i);
-      return;
+      return routine->routine_hash;
     }
   }
 
   MON("Failed to match eval %d\n", cfm->cfg->routine_hash);
+  return 0;
 }
 
 void dataset_routine_verify_compiled_edge(dataset_routine_t *dataset,

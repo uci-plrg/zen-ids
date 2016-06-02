@@ -44,7 +44,9 @@ static void request_boundary(bool is_request_start)
   uint64 request_id = interp_request_boundary(is_request_start);
   cfg_request_boundary(is_request_start, request_id);
 
-  if (!is_request_start) {
+  if (is_request_start) {
+    metadata_start_request();
+  } else {
     scfree_request();
     taint_clear();
   }

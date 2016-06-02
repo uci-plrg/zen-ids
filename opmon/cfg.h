@@ -49,6 +49,7 @@ typedef struct _cfg_routine_edge_t {
 typedef struct _cfg_t {
   sctable_t routines;       // routine_cfg_t * // TODO: shouldn't I be a hashtable?
   sctable_t routine_edges;  // cfg_routine_edge_t *
+  scarray_t evals;
 } cfg_t;
 
 typedef struct _application_t {
@@ -113,6 +114,8 @@ bool cfg_has_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_ind
                           routine_cfg_t *to_routine, uint to_index, uint user_level);
 void cfg_add_routine_edge(cfg_t *cfg, routine_cfg_t *from_routine, uint from_index,
                           routine_cfg_t *to_routine, uint to_index, user_level_t user_level);
+routine_cfg_t *cfg_get_matching_eval(cfg_t *cfg, zend_op_array *op_array);
+void cfg_add_eval(cfg_t *cfg, routine_cfg_t *eval);
 
 const char *site_relative_path(application_t *app, zend_op_array *stack_frame);
 

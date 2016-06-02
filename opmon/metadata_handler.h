@@ -15,6 +15,7 @@ typedef struct _control_flow_metadata_t {
 
 void init_metadata_handler();
 void destroy_metadata_handler();
+void metadata_start_request();
 
 void *load_dataset(const char *script_path);
 uint get_next_eval_id();
