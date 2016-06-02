@@ -245,7 +245,8 @@ static bool request_has_taint = false;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
-static void evo_state_synch();
+static void evo_db_state_synch();
+static void evo_file_state_synch();
 static void evo_commit_request_patches();
 static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_op_array *op_array,
                                           const zend_op *op, bool stack_pointer_moved);
@@ -331,15 +332,23 @@ void initialize_interp_context()
   current_session.user_level = USER_LEVEL_BOTTOM;
   current_session.active = false;
 
-  if (IS_CFI_EVO()) {
-    implicit_taint_table.hash_bits = 7;
-    sctable_init(&implicit_taint_table);
-
+  if (IS_CFI_DB()) {
     evo_key_table.hash_bits = 6;
     sctable_init(&evo_key_table);
 
     for (i = 0; i < EVO_KEY_COUNT; i++)
       sctable_add(&evo_key_table, hash_string(evo_keys[i].table_name), &evo_keys[i]);
+
+    db_connection = mysql_init(NULL);
+    if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
+      ERROR("Failed to connect to the database!\n");
+    else
+      SPOT("Successfully connected to the Opmon Evolution database.\n");
+  }
+
+  if (IS_CFI_DATA()) {
+    implicit_taint_table.hash_bits = 7;
+    sctable_init(&implicit_taint_table);
 
     evo_taint_table.hash_bits = 8;
     evo_taint_table.comparator = evo_taint_comparator;
@@ -347,12 +356,6 @@ void initialize_interp_context()
     SCQUEUE_INIT(&evo_taint_queue, evo_taint_t, prev, next);
 
     scarray_init(&pending_cfg_patches);
-
-    db_connection = mysql_init(NULL);
-    if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
-      ERROR("Failed to connect to the database!\n");
-    else
-      SPOT("Successfully connected to the Opmon Evolution database.\n");
   }
 }
 
@@ -389,23 +392,31 @@ void destroy_interp_app_context(application_t *app)
   routine_cfg_free(((stack_frame_t *) app->system_frame)->cfm.cfg);
   PROCESS_FREE(app->system_frame);
 
-  if (IS_CFI_EVO())
+  if (IS_CFI_DB())
     mysql_close(db_connection);
 }
 
 uint64 interp_request_boundary(bool is_request_start)
 {
-  if (is_request_start)
+  if (is_request_start) {
     current_app = locate_application(((php_server_context_t *) SG(server_context))->r->filename);
 
-  if (IS_CFI_EVO()) {
-    if (is_request_start) {
-      if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
-        ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
-      else
-        current_request_id = mysql_insert_id(db_connection);
+    if (!IS_CFI_DB())
+      current_request_id++;
+  }
 
-      evo_state_synch();
+  if (IS_CFI_DATA()) {
+    if (is_request_start) {
+      if (IS_CFI_DB()) {
+        if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
+          ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
+        else
+          current_request_id = mysql_insert_id(db_connection);
+
+        evo_db_state_synch();
+      } else {
+        evo_file_state_synch();
+      }
     } else {
       sctable_clear(&implicit_taint_table);
       implicit_taint_id = 0;
@@ -420,9 +431,6 @@ uint64 interp_request_boundary(bool is_request_start)
 
   if (is_request_start) {
     update_user_session();
-
-    if (!IS_CFI_EVO())
-      current_request_id++;
   } else {
       request_blocked = false;
       flush_all_outputs(current_app);
@@ -521,12 +529,12 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
     }
   }
 
-  if (IS_CFI_EVO() && !verified) {
+  if (IS_CFI_DATA() && !verified) {
     verified = cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_frame->op_index,
                                     to_frame->cfm.cfg, to_index, current_session.user_level);
   }
 
-  if (IS_CFI_EVO() && !verified) {
+  if (IS_CFI_DATA() && !verified) {
     if (to_index == 0) {
       if (implicit_taint_call_chain.start_frame == NULL) {
         if (cur_frame.implicit_taint != NULL) {
@@ -768,7 +776,7 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
     lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
   }
 
-  if (IS_CFI_EVO()) {
+  if (IS_CFI_DATA()) {
     new_cur_frame.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
                                                                        hash_addr(execute_data));
   } else {
@@ -1176,24 +1184,6 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
   uint arg_count;
   const char *callee_name = EX(call)->func->common.function_name->val;
 
-  /*
-  if (strcmp(callee_name, "get_option") == 0) {
-    trace_start_frame = execute_data;
-    trace_all_opcodes = true;
-    plog(current_app, PLOG_TYPE_AD_HOC, "Calling get_option at %04d(L%04d)%s\n",
-         cur_frame.op_index, op->lineno, site_relative_path(current_app, op_array));
-  } else if (strcmp(callee_name, "set_permalink_structure") == 0) {
-    plog(current_app, PLOG_TYPE_AD_HOC, "Calling set_permalink_structure at %04d(L%04d)%s\n",
-         cur_frame.op_index, op->lineno, site_relative_path(current_app, op_array));
-  }
-
-  if (strcmp(callee_name, "wp_load_alloptions") == 0) {
-    trace_start_frame = execute_data;
-    trace_all_opcodes = true;
-    plog(current_app, PLOG_TYPE_AD_HOC, "Calling wp_load_alloptions at %04d(L%04d)%s\n",
-         cur_frame.op_index, op->lineno, site_relative_path(current_app, op_array));
-  }
-  */
   inflate_call(execute_data, op_array, op, args, &arg_count);
 
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
@@ -1252,7 +1242,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
     stack_event.state = STACK_STATE_CALL;
     stack_event.last_opcode = op->opcode;
 
-    if (IS_CFI_EVO())
+    if (IS_CFI_DATA())
       taint_prepare_call(current_app, execute_data, args, arg_count);
   }
 
@@ -1410,7 +1400,7 @@ void opcode_executing(const zend_op *op)
         stack_event.state = STACK_STATE_NONE;
 
         if (exception_frame->execute_data == cur_frame.execute_data) {
-          if (IS_CFI_EVO()) {
+          if (IS_CFI_DATA()) {
             ERROR("Dataset evolution does not support Exception edges.\n");
           } else if (IS_CFI_TRAINING()) {
             if (!routine_cfg_has_opcode_edge(cur_frame.cfm.cfg, exception_frame->throw_index,
@@ -1513,7 +1503,7 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
   is_fcall_return = stack_pointer_moved && last_executed_op != NULL &&
                     last_executed_op->opcode == ZEND_DO_FCALL;
 
-  if (IS_CFI_EVO()) {
+  if (IS_CFI_DATA()) {
     if (is_fcall_return) {
       taint_propagate_return(current_app, execute_data, op_array, last_executed_op);
 
@@ -1538,7 +1528,7 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
     }
   }
 
-  if (IS_CFI_EVO() || IS_CFI_DGC()) {
+  if (IS_CFI_EVO()) {
     if (!is_loopback && (cur_frame_previous_op == NULL || IS_FIRST_AFTER_ARGS(op)))
       taint_propagate_into_arg_receivers(current_app, execute_data, op_array, (zend_op *) op);
 
@@ -1647,7 +1637,7 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
     }
   }
 
-  if (IS_CFI_EVO()) {
+  if (IS_CFI_DATA()) {
     if (pending_implicit_taint.end_op != NULL) {
       if (!opcode_verified) {
         implicit_taint_t *implicit = REQUEST_NEW(implicit_taint_t);
@@ -1944,7 +1934,7 @@ static void db_site_modification(uint request_id, const char *table_name,
     plog(current_app, PLOG_TYPE_DB_MOD, "%s.%s[%lld]\n", table_name, column_name, table_key);
 }
 
-static void evo_state_synch()
+static void evo_db_state_synch()
 {
   char evo_state_query[EVO_STATE_QUERY_MAX_LENGTH];
   MYSQL_RES *result;
@@ -1983,6 +1973,10 @@ static void evo_state_synch()
   }
 
   request_has_taint = (evo_taint_queue.head != NULL);
+}
+
+static void evo_file_state_synch()
+{
 }
 
 static void evo_commit_request_patches()
@@ -2044,7 +2038,7 @@ static bool is_key_index(int *indexes, uint index_count, int target)
 void db_fetch(uint32_t field_count, const char **table_names, const char **column_names,
               const zval **values)
 {
-  if (IS_CFI_EVO() && field_count > 0 && current_session.user_level < 2) {
+  if (IS_CFI_DB() && field_count > 0 && current_session.user_level < 2) {
     taint_variable_t *var;
     site_modification_t *mod;
 
@@ -2147,7 +2141,7 @@ monitor_query_flags_t db_query(const char *query)
   monitor_query_flags_t flags = 0;
   bool is_admin = current_session.user_level > 2, is_write = is_db_write(query);
 
-  if (IS_CFI_EVO() && is_admin) { // && TAINT_ALL) {
+  if (IS_CFI_DB() && is_admin) { // && TAINT_ALL) {
     zend_op *op = &cur_frame.opcodes[cur_frame.op_index];
     zend_op_array *op_array = &cur_frame.execute_data->func->op_array;
 
@@ -2157,7 +2151,7 @@ monitor_query_flags_t db_query(const char *query)
     }
   }
 
-  if (IS_CFI_EVO()) {
+  if (IS_CFI_DB()) {
     if (is_admin)
       flags |= MONITOR_QUERY_FLAG_IS_ADMIN;
   } /* else always skip the triggers */
@@ -2172,7 +2166,7 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
 {
   zend_bool has_taint = false;
 
-  if ((!IS_CFI_EVO() && !IS_CFI_DGC()) || cur_frame.execute_data == NULL)
+  if (!IS_CFI_EVO() || cur_frame.execute_data == NULL)
     return has_taint;
 
   if (stack_event.state == STACK_STATE_RETURNING) {

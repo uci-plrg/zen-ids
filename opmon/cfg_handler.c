@@ -867,7 +867,7 @@ static void print_taint(FILE *out, taint_variable_t *taint)
 #endif
 
 #ifdef TAINT_IO
-void plog_call(application_t *app, const char *tag, const char *callee_name,
+void plog_call__obsolete(application_t *app, const char *tag, const char *callee_name,
                zend_op_array *op_array, const zend_op *call_op,
                uint arg_count, const zend_op **args)
 {
@@ -980,9 +980,15 @@ void plog_call(zend_execute_data *execute_data, application_t *app, plog_type_t 
       case IS_OBJECT:
         plog_append(app, type, "<obj>");
         break;
-      case IS_RESOURCE:
-        plog_append(app, type, "<res>");
-        break;
+      case IS_RESOURCE: {
+        int res_type = Z_RES_TYPE_P(arg_value);
+        if (res_type == php_file_le_stream() || res_type == php_file_le_pstream()) {
+          php_stream *stream = (php_stream *) Z_RES_VAL_P(arg_value);
+          plog_append(app, type, "file:%s", stream->orig_path);
+        } else {
+          plog_append(app, type, "<res>");
+        }
+      } break;
       case IS_REFERENCE:
         plog_append(app, type, "<ref>");
         break;
