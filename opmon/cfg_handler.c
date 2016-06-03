@@ -284,6 +284,9 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
     if (IS_REQUEST_EDGE_OUTPUT_ENABLED())
       OPEN_CFG_FILE("request-edge.run", request_edge);
   }
+  if (IS_CFI_FILE())
+    cfg_files->taint_log = fopen("/lab/temp/taint.log", "ra" /* hrm... */);
+    //OPEN_CFG_FILE("taint.log", taint_log);
 
 #undef OPEN_CFG_FILE
 }

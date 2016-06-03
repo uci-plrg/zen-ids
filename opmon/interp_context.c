@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <mysql.h>
 #include <openssl/md5.h>
+#include <sys/file.h>
 #include "SAPI.h"
 
 #include "php_opcode_monitor.h"
@@ -242,6 +243,7 @@ static sctable_t evo_key_table;
 static sctable_t evo_taint_table;
 static scqueue_t evo_taint_queue;
 static bool request_has_taint = false;
+static size_t taint_log_synch_pos = 0;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
@@ -373,6 +375,8 @@ static stack_frame_t *initialize_entry_point(application_t *app, uint entry_poin
   entry_frame->cfm.dataset = dataset_routine_lookup(app, entry_point_hash);
   if (entry_frame->cfm.dataset == NULL)
     write_node(app, entry_point_hash, routine_cfg_get_opcode(entry_frame->cfm.cfg, 0), 0);
+
+  evo_file_state_synch(); // hack!
 
   return entry_frame;
 }
@@ -1094,6 +1098,16 @@ static void inflate_call(zend_execute_data *execute_data,
       }
     }
   } while ((--walk >= op_array->opcodes) && !done);
+
+  if (*arg_count > 1) {
+    uint i, j, middle = *arg_count / 2;
+
+    for (i = 0, j = (*arg_count - 1); i < middle; i++, j--) {
+      walk = args[i];
+      args[i] = args[j];
+      args[j] = walk;
+    }
+  }
 }
 
 #ifdef TAINT_IO
@@ -1568,7 +1582,7 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
     uint arg_count;
 
     inflate_call(execute_data, op_array, last_executed_op, args, &arg_count);
-    filepath = get_arg_zval(execute_data, args[1]);
+    filepath = get_arg_zval(execute_data, args[0]);
     plog(current_app, PLOG_TYPE_CFG, "file_put_contents(%s)\n", Z_STRVAL_P(filepath));
     plog_stacktrace(current_app, PLOG_TYPE_CFG, execute_data);
   }
@@ -1882,7 +1896,7 @@ static uint evo_commit_expiring_taint_patches(evo_taint_t *taint)
   return patch_count;
 }
 
-static void evo_expire_taint()
+static void evo_expire_db_taint()
 {
   evo_taint_t *tail;
   uint64 hash;
@@ -1941,7 +1955,7 @@ static void evo_db_state_synch()
   MYSQL_ROW row;
   uint request_id;
 
-  evo_expire_taint();
+  evo_expire_db_taint();
 
   if ((current_request_id - evo_last_synch_request_id) > EVO_TAINT_EXPIRATION) {
     if (current_request_id < EVO_TAINT_EXPIRATION)
@@ -1977,6 +1991,40 @@ static void evo_db_state_synch()
 
 static void evo_file_state_synch()
 {
+  uint request_id;
+  ssize_t line_len;
+  char *line = NULL, *sep, request_id_buffer[16];
+  FILE *taint_log = ((cfg_files_t *) current_app->cfg_files)->taint_log;
+
+  if (taint_log == NULL) {
+    ERROR("Failed to load the evo taint log file!\n");
+    return;
+  }
+
+  if (flock(fileno(taint_log), LOCK_SH) != 0) {
+    ERROR("Failed to lock the evo taint log file!\n");
+    return;
+  }
+
+  evo_expire_db_taint();
+
+  while ((line_len = getline(&line, &taint_log_synch_pos, taint_log)) != -1) {
+    sep = strchr(line, '|');
+    if (sep != NULL) {
+      memcpy(request_id_buffer, line, sep - line);
+      request_id_buffer[sep - line] = '\0';
+      request_id = atoi(request_id_buffer);
+
+      sep++; // now `sep` contains the file path
+
+      plog(current_app, PLOG_TYPE_CFG, "Found taint on file %s at request #%d\n", sep, request_id);
+    }
+  }
+
+  if (flock(fileno(taint_log), LOCK_UN) != 0)
+    ERROR("Failed to unlock the evo taint log file!\n");
+
+  free(line);
 }
 
 static void evo_commit_request_patches()

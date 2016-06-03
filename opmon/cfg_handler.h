@@ -31,6 +31,7 @@ typedef struct _cfg_files_t {
   FILE *routine_catalog;
   FILE *persistence;
   FILE *opcode_log;
+  FILE *taint_log;
 } cfg_files_t;
 
 typedef enum _plog_type_t {
