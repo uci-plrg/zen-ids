@@ -15,11 +15,11 @@ typedef enum _site_modification_type_t {
 
 typedef struct _site_modification_t {
   site_modification_type_t type;
+  const char *db_table;
   union {
     const char *file_path;
-    const char *db_table;
+    const char *db_column;
   };
-  const char *db_column;
   const char *db_value;
   void *source;
 } site_modification_t;

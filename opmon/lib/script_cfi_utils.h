@@ -100,6 +100,9 @@ typedef enum _cfi_mode_t {
 #define p2int(p) ((uint_ptr_t) (p))
 #define int2p(p) ((byte *) (p))
 
+#define MATCH_ANY_ARG_COUNT(...) (sizeof((const char *[]){__VA_ARGS__})/sizeof(const char *))
+#define MATCH_ANY(match, ...) match_any((match), MATCH_ANY_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+
 typedef unsigned char bool;
 typedef unsigned long long uint64;
 typedef unsigned short ushort;
@@ -246,6 +249,24 @@ static inline uint hash_eval(uint eval_id)
 static inline uint get_eval_id(uint eval_hash)
 {
   return (eval_hash & 0x7fffffff);
+}
+
+static inline bool match_any(const char *match, uint count, ...)
+{
+  uint i;
+  va_list candidates;
+  bool found = false;
+
+  va_start(candidates, count);
+  for (i = 0; i < count; i++) {
+    if (strcmp(match, va_arg(candidates, const char *)) == 0) {
+      found = true;
+      break;
+    }
+  }
+  va_end(candidates);
+
+  return found;
 }
 
 #endif

@@ -1120,15 +1120,13 @@ static inline void plog_type_tag(FILE *plog, plog_type_t type)
 void plog(application_t *app, plog_type_t type, const char *message, ...)
 {
   if (is_plog_type_enabled(type)) {
+    va_list args;
     FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
 
     plog_type_tag(plog, type);
 
-    va_list args;
     va_start(args, message);
-
     vfprintf(plog, message, args);
-
     va_end(args);
   }
 }

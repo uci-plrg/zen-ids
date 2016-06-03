@@ -156,7 +156,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     monitor->notify_function_compile_complete = function_compiled;
     monitor->dataflow.notify_dataflow = internal_dataflow;
     monitor->notify_zval_free = taint_var_free;
-    monitor->notify_database_fetch = db_fetch;
+    monitor->notify_database_fetch = db_fetch_trigger;
     monitor->notify_database_query = db_query;
   }
 

@@ -6,7 +6,7 @@
 #include "cfg.h"
 #include "taint.h"
 
-//#define PLOG_TAINT 1
+#define PLOG_TAINT 1
 #define PLOG_CFG 1
 //#define PLOG_DB 1
 //#define PLOG_DB_MOD 1
