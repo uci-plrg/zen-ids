@@ -128,9 +128,12 @@ typedef struct _pending_cfg_patch_t {
 
 struct _evo_taint_t {
   uint request_id;
-  const char *table_name;
-  const char *column_name;
-  unsigned long long table_key;
+  const char *table_name;   /* NULL for file taint */
+  union {
+    const char *column_name;
+    const char *file_path;
+  };
+  uint64 table_key;         /* undefined for file taint */
   struct _evo_taint_t *prev;
   struct _evo_taint_t *next;
   pending_cfg_patch_t *patch_list;
@@ -175,6 +178,7 @@ typedef struct _evo_query_t {
 } evo_query_t;
 
 static MYSQL *db_connection = NULL;
+static FILE *evo_taint_file = NULL;
 
 static const evo_query_t evo_next_request_id = EVO_QUERY(EVO_NEXT_REQUEST_ID);
 
@@ -262,14 +266,23 @@ static uint get_first_executable_index(zend_op *opcodes)
 }
 */
 
+static inline bool is_db_taint(evo_taint_t *taint)
+{
+  return taint->table_name != NULL;
+}
+
 static bool evo_taint_comparator(void *a, void *b)
 {
   evo_taint_t *first = (evo_taint_t *) a;
   evo_taint_t *second = (evo_taint_t *) b;
 
-  return (strcmp(first->table_name, second->table_name) == 0 &&
-          strcmp(first->column_name, second->column_name) == 0 &&
-          first->table_key == second->table_key);
+  if (is_db_taint(first) && is_db_taint(second)) {
+    return (strcmp(first->table_name, second->table_name) == 0 &&
+            strcmp(first->column_name, second->column_name) == 0 &&
+            first->table_key == second->table_key);
+  } else {
+    return (strcmp(first->column_name, second->column_name) == 0);
+  }
 }
 
 static void update_user_session()
@@ -376,14 +389,24 @@ static stack_frame_t *initialize_entry_point(application_t *app, uint entry_poin
   if (entry_frame->cfm.dataset == NULL)
     write_node(app, entry_point_hash, routine_cfg_get_opcode(entry_frame->cfm.cfg, 0), 0);
 
-  evo_file_state_synch(); // hack!
+  // evo_file_state_synch(); // sample: hack here
 
   return entry_frame;
 }
 
 void initialize_interp_app_context(application_t *app)
 {
+  char file_evo_taint_log[CONFIG_FILENAME_LENGTH] = { 0 };
+
   current_app = app;
+
+  snprintf(file_evo_taint_log, CONFIG_FILENAME_LENGTH,
+           "%s/%s.evo", OPMON_G(file_evo_log_dir), current_app->name);
+  evo_taint_file = fopen(file_evo_taint_log, current_app->dataset == NULL ? "w+" : "a+");
+  if (evo_taint_file == NULL) {
+    ERROR("Failed to open the evo taint file %s!\n", file_evo_taint_log);
+    perror(NULL);
+  }
 
   app->base_frame = (void *) initialize_entry_point(app, BASE_FRAME_HASH);
   app->system_frame = (void *) initialize_entry_point(app, SYSTEM_FRAME_HASH);
@@ -398,6 +421,9 @@ void destroy_interp_app_context(application_t *app)
 
   if (IS_CFI_DB())
     mysql_close(db_connection);
+
+  fflush(evo_taint_file);
+  fclose(evo_taint_file);
 }
 
 uint64 interp_request_boundary(bool is_request_start)
@@ -436,8 +462,9 @@ uint64 interp_request_boundary(bool is_request_start)
   if (is_request_start) {
     update_user_session();
   } else {
-      request_blocked = false;
-      flush_all_outputs(current_app);
+    request_blocked = false;
+    flush_all_outputs(current_app);
+    fflush(evo_taint_file);
   }
 
   return current_request_id;
@@ -1192,6 +1219,60 @@ static void configure_builtin_frame(stack_frame_t *frame, const char *builtin_na
   frame->cfm.cfg = cfg;
 }
 
+#ifdef TRANSACTIONAL_SUBPROCESS
+# define MBOX "mbox -- "
+# define MBOX_TAIL " | awk '/^Sandbox Root/ { exit } { print }'"
+static void sandbox_subprocess()
+{
+  zval *zcommand = ZEND_CALL_ARG(EX(call), 1);
+  const char *command = Z_STRVAL_P(zcommand);
+  uint len = strlen(command) + strlen(MBOX) + strlen(MBOX_TAIL) + 1;
+  char *mbox_command = REQUEST_ALLOC(len);
+
+  cur_frame.last_builtin_arg = zcommand;
+  cur_frame.last_builtin_original_arg = Z_STR_P(zcommand);
+  snprintf(mbox_command, len, MBOX"%s"MBOX_TAIL, command);
+  ZVAL_STR(zcommand, zend_string_init(mbox_command, len, 0));
+}
+#endif
+
+static inline void file_write_trigger(zend_execute_data *execute_data,
+                                      const zend_op **args, uint arg_count)
+{
+  const char *dst = NULL;
+
+  if (strcmp(cur_frame.last_builtin_name, "fwrite") == 0) {
+    dst = get_resource_filename(get_arg_zval(execute_data, args[0]));
+  } else if (strcmp(cur_frame.last_builtin_name, "file_put_contents") == 0) {
+    dst = Z_STRVAL_P(get_arg_zval(execute_data, args[0]));
+  } else if (strcmp(cur_frame.last_builtin_name, "rename") == 0) {
+    dst = Z_STRVAL_P(get_arg_zval(execute_data, args[1]));
+  } else if (strcmp(cur_frame.last_builtin_name, "copy") == 0) {
+    dst = Z_STRVAL_P(get_arg_zval(execute_data, args[1]));
+  } else if (strcmp(cur_frame.last_builtin_name, "touch") == 0) {
+    dst = Z_STRVAL_P(get_arg_zval(execute_data, args[0]));
+  }
+
+  if (dst != NULL) {
+    size_t request_id_str_len;
+    char request_id_buffer[32];
+
+    if (flock(fileno(evo_taint_file), LOCK_EX) != 0) {
+      ERROR("Failed to acquire exclusive lock on the evo taint log file!\n");
+      return;
+    }
+
+    request_id_str_len = snprintf(request_id_buffer, 32, "%d", current_request_id);
+    fwrite(request_id_buffer, sizeof(char), request_id_str_len, evo_taint_file);
+    fwrite("|", sizeof(char), 1, evo_taint_file);
+    fwrite(dst, sizeof(char), strlen(dst), evo_taint_file);
+    fwrite("\n", sizeof(char), 1, evo_taint_file);
+
+    if (flock(fileno(evo_taint_file), LOCK_UN) != 0)
+      ERROR("Failed to unlock the evo taint log file!\n");
+  }
+}
+
 static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_array, const zend_op *op)
 {
   const zend_op *args[0x20];
@@ -1220,26 +1301,13 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
     }
 
 #ifdef TRANSACTIONAL_SUBPROCESS
-    if (IS_CFI_DGC() && strcmp(callee_name, "proc_open") == 0) {
-#define MBOX "mbox -- "
-#define MBOX_TAIL " | awk '/^Sandbox Root/ { exit } { print }'"
-
-      zval *zcommand = ZEND_CALL_ARG(EX(call), 1); // (zval *) get_arg_zval(execute_data, args[5]);
-      const char *command = Z_STRVAL_P(zcommand);
-      uint len = strlen(command) + strlen(MBOX) + strlen(MBOX_TAIL) + 1;
-      char *mbox_command = REQUEST_ALLOC(len);
-
-      cur_frame.last_builtin_arg = zcommand;
-      cur_frame.last_builtin_original_arg = Z_STR_P(zcommand);
-      snprintf(mbox_command, len, MBOX"%s"MBOX_TAIL, command);
-      ZVAL_STR(zcommand, zend_string_init(mbox_command, len, 0));
-    }
+    if (IS_CFI_DGC() && strcmp(callee_name, "proc_open") == 0)
+      sandbox_subprocess();
 #endif
 
-#ifdef PLOG_FILE_OUTPUT
-    if (is_file_sink_function(cur_frame.last_builtin_name))
-      plog_call(execute_data, current_app, PLOG_TYPE_FILE_OUTPUT, callee_name, args, arg_count);
-#endif
+    if (current_session.user_level >= 2) // sample: hack here
+      file_write_trigger(execute_data, args, arg_count);
+
 #ifdef PLOG_SYS_WRITE
     if (is_stateful_syscall(cur_frame.last_builtin_name)) {
       plog_call(execute_data, current_app, PLOG_TYPE_SYS_WRITE, callee_name, args, arg_count);
@@ -1896,7 +1964,16 @@ static uint evo_commit_expiring_taint_patches(evo_taint_t *taint)
   return patch_count;
 }
 
-static void evo_expire_db_taint()
+static inline uint hash_evo_taint(evo_taint_t *taint)
+{
+  /* crowd the low bits for distribution--exact match goes field by field */
+  if (is_db_taint(taint))
+    return hash_string(taint->table_name) ^ hash_string(taint->column_name) ^ taint->table_key;
+  else
+    return hash_string(taint->file_path);
+}
+
+static void evo_expire_taint()
 {
   evo_taint_t *tail;
   uint64 hash;
@@ -1912,40 +1989,47 @@ static void evo_expire_db_taint()
     patch_count = evo_commit_expiring_taint_patches(tail);
 
     if (current_app != NULL) {
-      plog(current_app, PLOG_TYPE_DB_MOD,
-           "Expiring taint %s.%s[%lld] with %d patches\n",
-           tail->table_name, tail->column_name, tail->table_key, patch_count);
+      if (is_db_taint(tail)) {
+        plog(current_app, PLOG_TYPE_DB_MOD,
+             "Expiring taint %s.%s[%lld] with %d patches\n",
+             tail->table_name, tail->column_name, tail->table_key, patch_count);
+      } else {
+        plog(current_app, PLOG_TYPE_DB_MOD,
+             "Expiring taint %s with %d patches\n", tail->file_path, patch_count);
+      }
     }
 
-    hash = hash_string(tail->table_name) ^ hash_string(tail->column_name) ^ tail->table_key; /* evo: shared code! */
+    hash = hash_evo_taint(tail);
     sctable_remove_value(&evo_taint_table, hash, tail);
     scqueue_dequeue(&evo_taint_queue);
-    PROCESS_FREE((char *) tail->table_name);
+    PROCESS_FREE((char *) tail->table_name); // ok for file taint?
     PROCESS_FREE((char *) tail->column_name);
     PROCESS_FREE(tail);
   }
 }
 
-static void db_site_modification(uint request_id, const char *table_name,
-                                 const char *column_name, uint64 table_key)
+static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
 {
-  evo_taint_t lookup = { 0, table_name, column_name, table_key, NULL };
-  uint64 hash = hash_string(table_name) ^ hash_string(column_name) ^ table_key; // crowd low bits
+  uint64 hash = hash_evo_taint(taint_id);
 
-  if (!sctable_has_value(&evo_taint_table, hash, &lookup)) {
+  if (!sctable_has_value(&evo_taint_table, hash, taint_id)) {
     evo_taint_t *taint = PROCESS_NEW(evo_taint_t);
+    memcpy(taint, taint_id, sizeof(evo_taint_t));
     taint->request_id = request_id;
-    taint->table_key = table_key;
-    taint->table_name = strdup(table_name);
-    taint->column_name = strdup(column_name);
     taint->patch_list = NULL;
     sctable_add(&evo_taint_table, hash, taint);
 
     scqueue_enqueue(&evo_taint_queue, taint);
   } /* else evo: reset the request_id and remove/enqueue */
 
-  if (current_app != NULL)
-    plog(current_app, PLOG_TYPE_DB_MOD, "%s.%s[%lld]\n", table_name, column_name, table_key);
+  if (current_app != NULL) {
+    if (is_db_taint(taint_id)) {
+      plog(current_app, PLOG_TYPE_DB_MOD,
+           "%s.%s[%lld]\n", taint_id->table_name, taint_id->column_name, taint_id->table_key);
+    } else {
+      plog(current_app, PLOG_TYPE_FILE_MOD, "%s\n", taint_id->file_path);
+    }
+  }
 }
 
 static void evo_db_state_synch()
@@ -1955,7 +2039,7 @@ static void evo_db_state_synch()
   MYSQL_ROW row;
   uint request_id;
 
-  evo_expire_db_taint();
+  evo_expire_taint();
 
   if ((current_request_id - evo_last_synch_request_id) > EVO_TAINT_EXPIRATION) {
     if (current_request_id < EVO_TAINT_EXPIRATION)
@@ -1980,7 +2064,11 @@ static void evo_db_state_synch()
         request_id = strtoul(row[0], NULL, 10);
         if (request_id > evo_last_synch_request_id)
           evo_last_synch_request_id = request_id;
-        db_site_modification(request_id, row[1], row[2], strtoull(row[3], NULL, 10));
+
+        {
+          evo_taint_t taint_id = { 0, row[1], { row[2] }, strtoull(row[3], NULL, 10), NULL };
+          admin_site_modification(request_id, &taint_id);
+        }
       }
       mysql_free_result(result);
     }
@@ -1993,35 +2081,36 @@ static void evo_file_state_synch()
 {
   uint request_id;
   ssize_t line_len;
-  char *line = NULL, *sep, request_id_buffer[16];
-  FILE *taint_log = ((cfg_files_t *) current_app->cfg_files)->taint_log;
+  char *line = NULL, *sep, *file_path, request_id_buffer[16];
 
-  if (taint_log == NULL) {
-    ERROR("Failed to load the evo taint log file!\n");
+  if (flock(fileno(evo_taint_file), LOCK_SH) != 0) {
+    ERROR("Failed to acquire shared lock the evo taint log file!\n");
     return;
   }
 
-  if (flock(fileno(taint_log), LOCK_SH) != 0) {
-    ERROR("Failed to lock the evo taint log file!\n");
-    return;
-  }
+  evo_expire_taint();
 
-  evo_expire_db_taint();
-
-  while ((line_len = getline(&line, &taint_log_synch_pos, taint_log)) != -1) {
+  while ((line_len = getline(&line, &taint_log_synch_pos, evo_taint_file)) != -1) {
     sep = strchr(line, '|');
     if (sep != NULL) {
+      line[line_len-1] = '\0';
       memcpy(request_id_buffer, line, sep - line);
       request_id_buffer[sep - line] = '\0';
       request_id = atoi(request_id_buffer);
 
-      sep++; // now `sep` contains the file path
+      file_path = sep + 1; // now `sep` contains the file path
 
-      plog(current_app, PLOG_TYPE_CFG, "Found taint on file %s at request #%d\n", sep, request_id);
+      plog(current_app, PLOG_TYPE_CFG, "Found taint on file %s at request #%d\n",
+           file_path, request_id);
+
+      {
+        evo_taint_t taint_id = { 0, NULL, { file_path }, 0ULL, NULL };
+        admin_site_modification(request_id, &taint_id);
+      }
     }
   }
 
-  if (flock(fileno(taint_log), LOCK_UN) != 0)
+  if (flock(fileno(evo_taint_file), LOCK_UN) != 0)
     ERROR("Failed to unlock the evo taint log file!\n");
 
   free(line);
@@ -2143,8 +2232,8 @@ void db_fetch(uint32_t field_count, const char **table_names, const char **colum
 
     for (i = 0; i < field_count; i++) {
       if (!is_key_index(key_column_indexes, evo_key->column_count, i)) {
-        evo_taint_t *found, lookup = { 0, table_names[0], column_names[i], key, NULL };
-        field_hash = table_name_hash ^ hash_string(column_names[i]) ^ key;
+        evo_taint_t *found, lookup = { 0, table_names[0], { column_names[i] }, key, NULL };
+        field_hash = hash_evo_taint(&lookup);
 
         found = (evo_taint_t *) sctable_lookup_value(&evo_taint_table, field_hash, &lookup);
         if (found == NULL)

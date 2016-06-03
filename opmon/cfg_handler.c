@@ -21,7 +21,7 @@
 // #define URL_DECODE 1
 #define USER_LEVEL_SHIFT 26
 
-static char session_file_path[256] = {0}, cfg_file_path[256] = {0};
+static char session_file_path[CONFIG_FILENAME_LENGTH] = {0}, cfg_file_path[CONFIG_FILENAME_LENGTH] = {0};
 
 static bool is_standalone_app = false;
 static cfg_files_t standalone_cfg_files;
@@ -284,16 +284,12 @@ static void open_output_files_in_dir(cfg_files_t *cfg_files, char *cfg_file_path
     if (IS_REQUEST_EDGE_OUTPUT_ENABLED())
       OPEN_CFG_FILE("request-edge.run", request_edge);
   }
-  if (IS_CFI_FILE())
-    cfg_files->taint_log = fopen("/lab/temp/taint.log", "ra" /* hrm... */);
-    //OPEN_CFG_FILE("taint.log", taint_log);
-
 #undef OPEN_CFG_FILE
 }
 
 static void open_output_files(const char *script_path)
 {
-  char cfg_file_path[256] = {0}, run_id[24] = {0};
+  char standalone_cfg_file_path[CONFIG_FILENAME_LENGTH] = {0}, run_id[24] = {0};
   struct stat dirinfo;
   time_t timestamp;
   struct tm *calendar;
@@ -301,25 +297,25 @@ static void open_output_files(const char *script_path)
   time(&timestamp);
   calendar = localtime(&timestamp);
 
-  setup_base_path(cfg_file_path, "runs", script_path);
+  setup_base_path(standalone_cfg_file_path, "runs", script_path);
 
-  if (stat(cfg_file_path, &dirinfo) != 0) {
-    if (mkdir(cfg_file_path, 0777) != 0) {
-      ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
+  if (stat(standalone_cfg_file_path, &dirinfo) != 0) {
+    if (mkdir(standalone_cfg_file_path, 0777) != 0) {
+      ERROR("Failed to create the cfg file directory %s\n", standalone_cfg_file_path);
       return;
     }
   }
 
   sprintf(run_id, "/%d.%d-%d.%d/",
           calendar->tm_yday, calendar->tm_hour, calendar->tm_min, getpid());
-  strcat(cfg_file_path, run_id);
+  strcat(standalone_cfg_file_path, run_id);
 
-  if (mkdir(cfg_file_path, 0777) != 0) {
-    ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
+  if (mkdir(standalone_cfg_file_path, 0777) != 0) {
+    ERROR("Failed to create the cfg file directory %s\n", standalone_cfg_file_path);
     return;
   }
 
-  open_output_files_in_dir(&standalone_cfg_files, cfg_file_path, "w");
+  open_output_files_in_dir(&standalone_cfg_files, standalone_cfg_file_path, "w");
 }
 
 void starting_script(const char *script_path)
@@ -984,12 +980,11 @@ void plog_call(zend_execute_data *execute_data, application_t *app, plog_type_t 
         plog_append(app, type, "<obj>");
         break;
       case IS_RESOURCE: {
-        int res_type = Z_RES_TYPE_P(arg_value);
-        if (res_type == php_file_le_stream() || res_type == php_file_le_pstream()) {
-          php_stream *stream = (php_stream *) Z_RES_VAL_P(arg_value);
-          plog_append(app, type, "file:%s", stream->orig_path);
-        } else {
+        const char *filename = get_resource_filename(arg_value);
+        if (filename == NULL) {
           plog_append(app, type, "<res>");
+        } else {
+          plog_append(app, type, "file:%s", filename);
         }
       } break;
       case IS_REFERENCE:
@@ -1066,6 +1061,10 @@ static inline bool is_plog_type_enabled(plog_type_t type)
   if (type == PLOG_TYPE_DB_MOD)
     return true;
 #endif
+#ifdef PLOG_FILE_MOD
+  if (type == PLOG_TYPE_FILE_MOD)
+    return true;
+#endif
 #ifdef PLOG_FILE_OUTPUT
   if (type == PLOG_TYPE_FILE_OUTPUT)
     return true;
@@ -1099,6 +1098,9 @@ static inline void plog_type_tag(FILE *plog, plog_type_t type)
       break;
     case PLOG_TYPE_DB_MOD:
       fprintf(plog, "<db-mod> ");
+      break;
+    case PLOG_TYPE_FILE_MOD:
+      fprintf(plog, "<file-mod> ");
       break;
     case PLOG_TYPE_FILE_OUTPUT:
       fprintf(plog, "<file-out> ");

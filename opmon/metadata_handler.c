@@ -32,7 +32,7 @@ void metadata_start_request()
 
 void *load_dataset(const char *script_path)
 {
-  char dataset_path[256] = {0};
+  char dataset_path[CONFIG_FILENAME_LENGTH] = {0};
   struct stat fileinfo;
   int dataset_file;
   void *map, *dataset;

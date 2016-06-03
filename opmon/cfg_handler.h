@@ -10,6 +10,7 @@
 #define PLOG_CFG 1
 //#define PLOG_DB 1
 //#define PLOG_DB_MOD 1
+#define PLOG_FILE_MOD 1
 #define PLOG_FILE_OUTPUT 1
 #define PLOG_SYS_WRITE 1
 //#define PLOG_SYS_READ 1
@@ -31,7 +32,6 @@ typedef struct _cfg_files_t {
   FILE *routine_catalog;
   FILE *persistence;
   FILE *opcode_log;
-  FILE *taint_log;
 } cfg_files_t;
 
 typedef enum _plog_type_t {
@@ -39,6 +39,7 @@ typedef enum _plog_type_t {
   PLOG_TYPE_CFG,
   PLOG_TYPE_DB,
   PLOG_TYPE_DB_MOD,
+  PLOG_TYPE_FILE_MOD,
   PLOG_TYPE_FILE_OUTPUT,
   PLOG_TYPE_SYS_WRITE,
   PLOG_TYPE_WARN,

@@ -11,9 +11,14 @@
 
 #define EC(f) opcode_monitor_globals.execution_context.f
 
+/* N.B.: each field must be present in the struct `ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)`
+ * which is defined in script_cfi_utils.h.
+ */
 PHP_INI_BEGIN()
   STD_PHP_INI_ENTRY("opmon_dataset_dir", ".", PHP_INI_PERDIR, OnUpdateString,
                     dataset_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
+  STD_PHP_INI_ENTRY("opmon_file_evo_log_dir", ".", PHP_INI_PERDIR, OnUpdateString,
+                    file_evo_log_dir, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_verbose", ".", PHP_INI_PERDIR, OnUpdateLong,
                     verbose, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_cfi_mode", ".", PHP_INI_PERDIR, OnUpdateLong,
@@ -84,8 +89,14 @@ PHP_MINIT_FUNCTION(opcode_monitor)
   //PRINT("INI example: dataset dir is %s\n", INI_STR("opmon_dataset_dir"));
   //PRINT("INI example: dataset dir is %s\n", OPMON_G(dataset_dir));
 
-  if (strlen(OPMON_G(dataset_dir)) > 200)
-    ERROR("dataset dirname is too long. Please rebuild with a larger buffer.\n");
+  if (strlen(OPMON_G(dataset_dir)) > CONFIG_PATH_LENGTH) {
+    ERROR("Dataset dirname '%s' is too long. Please rebuild with a larger buffer.\n",
+          OPMON_G(dataset_dir));
+  }
+  if (strlen(OPMON_G(file_evo_log_dir)) > CONFIG_PATH_LENGTH) {
+    ERROR("File evo log dir '%s' is too long. Please rebuild with a larger buffer.\n",
+          OPMON_G(file_evo_log_dir));
+  }
 
   init_event_handler(&monitor_functions);
   register_opcode_monitor(&monitor_functions);

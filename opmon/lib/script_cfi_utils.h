@@ -167,6 +167,7 @@ typedef enum _scalloc_lifespan_t {
 ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   execution_context_t execution_context;
   const char *dataset_dir;
+  const char *file_evo_log_dir;
   int verbose;
   int cfi_mode;
   int request_edge_enabled;
@@ -183,6 +184,8 @@ ZEND_DECLARE_MODULE_GLOBALS(opcode_monitor)
 #endif
 
 #define ROUTINE_NAME_LENGTH 256
+#define CONFIG_FILENAME_LENGTH 256
+#define CONFIG_PATH_LENGTH 200
 
 #define TAINT_ALL false
 
@@ -201,6 +204,7 @@ char *request_strdup(const char *src);
 const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
 const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
 const zval *get_arg_zval(zend_execute_data *execute_data, const zend_op *arg /* ZEND_SEND_* */);
+const char *get_resource_filename(const zval *value);
 
 void tokenize_file(void);
 
