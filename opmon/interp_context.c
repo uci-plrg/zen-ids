@@ -42,7 +42,7 @@
 #define EVO_STATE_QUERY_MAX_LENGTH (sizeof(EVO_STATE_QUERY) + MAX_BIGINT_CHARS)
 #define EVO_STATE_QUERY_FIELD_COUNT 4
 
-#define EVO_TAINT_EXPIRATION 1000
+#define EVO_TAINT_EXPIRATION 2000
 
 /* N.B.: the evo triggers are using last_insert_id() as set by this query! */
 #define EVO_NEXT_REQUEST_ID "UPDATE opmon_request_sequence " \
@@ -178,7 +178,6 @@ typedef struct _evo_query_t {
 } evo_query_t;
 
 static MYSQL *db_connection = NULL;
-static FILE *evo_taint_file = NULL;
 
 static const evo_query_t evo_next_request_id = EVO_QUERY(EVO_NEXT_REQUEST_ID);
 
@@ -251,6 +250,7 @@ static size_t taint_log_synch_pos = 0;
 
 #define CONTEXT_ENTRY 0xffffffffU
 
+static bool increment_file_synch_request_id();
 static void evo_db_state_synch();
 static void evo_file_state_synch();
 static void evo_commit_request_patches();
@@ -340,7 +340,9 @@ void initialize_interp_context()
 
     for (i = 0; i < EVO_KEY_COUNT; i++)
       sctable_add(&evo_key_table, hash_string(evo_keys[i].table_name), &evo_keys[i]);
+  }
 
+  if (IS_REQUEST_ID_SYNCH_DB()) {
     db_connection = mysql_init(NULL);
     if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
       ERROR("Failed to connect to the database!\n");
@@ -384,17 +386,7 @@ static stack_frame_t *initialize_entry_point(application_t *app, uint entry_poin
 
 void initialize_interp_app_context(application_t *app)
 {
-  char file_evo_taint_log[CONFIG_FILENAME_LENGTH] = { 0 };
-
   current_app = app;
-
-  snprintf(file_evo_taint_log, CONFIG_FILENAME_LENGTH,
-           "%s/%s.evo", OPMON_G(file_evo_log_dir), current_app->name);
-  evo_taint_file = fopen(file_evo_taint_log, current_app->dataset == NULL ? "w+" : "a+");
-  if (evo_taint_file == NULL) {
-    ERROR("Failed to open the evo taint file %s!\n", file_evo_taint_log);
-    perror(NULL);
-  }
 
   app->base_frame = (void *) initialize_entry_point(app, BASE_FRAME_HASH);
   app->system_frame = (void *) initialize_entry_point(app, SYSTEM_FRAME_HASH);
@@ -407,25 +399,59 @@ void destroy_interp_app_context(application_t *app)
   routine_cfg_free(((stack_frame_t *) app->system_frame)->cfm.cfg);
   PROCESS_FREE(app->system_frame);
 
-  if (IS_CFI_DB())
+  if (IS_REQUEST_ID_SYNCH_DB())
     mysql_close(db_connection);
 
-  fflush(evo_taint_file);
-  fclose(evo_taint_file);
+  fflush(app->evo_taint_log);
+  fclose(app->evo_taint_log);
+  fclose(app->request_id_file);
 }
 
 uint64 interp_request_boundary(bool is_request_start)
 {
   if (is_request_start) {
+    char filename[CONFIG_FILENAME_LENGTH] = { 0 };
+    bool local_request_id = !HAS_REQUEST_ID_SYNCH();
     current_app = locate_application(((php_server_context_t *) SG(server_context))->r->filename);
 
-    if (!IS_CFI_DB())
+    if (current_app->evo_taint_log == NULL) {
+      const char *mode = (current_app->dataset == NULL) ? "w+" : "a+";
+
+      snprintf(filename, CONFIG_FILENAME_LENGTH,
+               "%s/%s.evo", OPMON_G(file_evo_log_dir), current_app->name);
+      current_app->evo_taint_log = fopen(filename, mode);
+      if (current_app->evo_taint_log == NULL) {
+        ERROR("Failed to open the evo taint file %s!\n", filename);
+        perror(NULL);
+      }
+    }
+
+    if (current_app->request_id_file == NULL) {
+      if (IS_REQUEST_ID_SYNCH_FILE()) {
+        snprintf(filename, CONFIG_FILENAME_LENGTH,
+                 "%s/%s.rid", OPMON_G(file_evo_log_dir), current_app->name);
+        current_app->request_id_file = fopen(filename, "r+");
+        if (current_app->request_id_file == NULL)
+          current_app->request_id_file = fopen(filename, "w+");
+        if (current_app->request_id_file == NULL) {
+          ERROR("Failed to open the request id file %s!\n", filename);
+          perror(NULL);
+        }
+      }
+    }
+
+    if (IS_REQUEST_ID_SYNCH_FILE()) {
+      if (!increment_file_synch_request_id())
+        local_request_id = true;
+    }
+
+    if (local_request_id)
       current_request_id++;
   }
 
   if (IS_CFI_DATA()) {
     if (is_request_start) {
-      if (IS_CFI_DB()) {
+      if (IS_REQUEST_ID_SYNCH_DB()) {
         if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
           ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
         else
@@ -452,7 +478,7 @@ uint64 interp_request_boundary(bool is_request_start)
   } else {
     request_blocked = false;
     flush_all_outputs(current_app);
-    fflush(evo_taint_file);
+    fflush(current_app->evo_taint_log);
   }
 
   return current_request_id;
@@ -1087,7 +1113,7 @@ static void inflate_call(zend_execute_data *execute_data,
   do {
     if (walk->opcode == ZEND_DO_FCALL) {
       init_count++;
-      break;
+      continue;
     }
     if (init_count > 0) {
       switch (walk->opcode) {
@@ -1912,21 +1938,19 @@ static inline void file_read_trigger(zend_execute_data *execute_data, const char
                                      zend_op_array *op_array, const zend_op *call_op,
                                      const zval *return_value, const zend_op **args, uint arg_count)
 {
-  const char *src = NULL;
+  char *src = NULL;
 
   if (MATCH_ANY(syscall, "fread", "fgets", "fgetss", "fgetcsv")) {
     src = get_resource_filename(get_arg_zval(execute_data, args[0]));
   } else if (MATCH_ANY(syscall,
                        "file_get_contents", "file_exists", "filectime", "filemtime")) {
-    src = Z_STRVAL_P(get_arg_zval(execute_data, args[0]));
+    src = Z_STRVAL_NP(get_arg_zval(execute_data, args[0]));
   }
 
   if (src != NULL) {
+    uint squashed = squash_trailing_slash(src);
     evo_taint_t *found = NULL, lookup = { 0, NULL, { src }, 0ULL, NULL };
     uint field_hash = hash_evo_taint(&lookup);
-
-    if (strcmp(syscall, "file_exists") == 0)
-      SPOT("wait\n");
 
     found = (evo_taint_t *) sctable_lookup_value(&evo_taint_table, field_hash, &lookup);
     if (found != NULL) {
@@ -1945,42 +1969,46 @@ static inline void file_read_trigger(zend_execute_data *execute_data, const char
            cur_frame.op_index, call_op->lineno, site_relative_path(current_app, op_array));
       taint_var_add(current_app, return_value, var);
     }
+
+    if (squashed > 0)
+      src[squashed] = '/';
   }
 }
 
 static inline void file_write_trigger(zend_execute_data *execute_data, const char *syscall,
                                       const zend_op **args, uint arg_count)
 {
-  const char *dst = NULL;
+  char *dst = NULL;
 
   if (MATCH_ANY(syscall, "fwrite", "fputs", "fputc", "fputcsv")) {
     dst = get_resource_filename(get_arg_zval(execute_data, args[0]));
   } else if (MATCH_ANY(syscall, "file_put_contents", "touch", "mkdir", "rmdir", "unlink")) {
-    dst = Z_STRVAL_P(get_arg_zval(execute_data, args[0]));
+    dst = Z_STRVAL_NP(get_arg_zval(execute_data, args[0]));
   } else if (MATCH_ANY(syscall, "rename", "copy")) {
-    dst = Z_STRVAL_P(get_arg_zval(execute_data, args[1]));
+    dst = Z_STRVAL_NP(get_arg_zval(execute_data, args[1]));
   }
 
   if (dst != NULL) {
-    size_t request_id_str_len, dst_len = strlen(dst);
+    uint squashed = squash_trailing_slash(dst);
+    size_t request_id_str_len;
     char request_id_buffer[32];
 
-    if (flock(fileno(evo_taint_file), LOCK_EX) != 0) {
+    if (flock(fileno(current_app->evo_taint_log), LOCK_EX) != 0) {
       ERROR("Failed to acquire exclusive lock on the evo taint log file!\n");
       return;
     }
 
-    if (dst[dst_len-1] == '/') /* normalize directory names */
-      dst_len--;
-
     request_id_str_len = snprintf(request_id_buffer, 32, "%d", current_request_id);
-    fwrite(request_id_buffer, sizeof(char), request_id_str_len, evo_taint_file);
-    fwrite("|", sizeof(char), 1, evo_taint_file);
-    fwrite(dst, sizeof(char), strlen(dst), evo_taint_file);
-    fwrite("\n", sizeof(char), 1, evo_taint_file);
+    fwrite(request_id_buffer, sizeof(char), request_id_str_len, current_app->evo_taint_log);
+    fwrite("|", sizeof(char), 1, current_app->evo_taint_log);
+    fwrite(dst, sizeof(char), strlen(dst), current_app->evo_taint_log);
+    fwrite("\n", sizeof(char), 1, current_app->evo_taint_log);
 
-    if (flock(fileno(evo_taint_file), LOCK_UN) != 0)
+    if (flock(fileno(current_app->evo_taint_log), LOCK_UN) != 0)
       ERROR("Failed to unlock the evo taint log file!\n");
+
+    if (squashed > 0)
+      dst[squashed] = '/';
   }
 }
 
@@ -2061,6 +2089,43 @@ static void evo_expire_taint()
   }
 }
 
+static bool increment_file_synch_request_id()
+{
+  size_t size;
+  char buffer[32];
+  FILE *rid = current_app->request_id_file;
+
+  if (flock(fileno(rid), LOCK_EX) != 0) {
+    ERROR("Failed to acquire exclusive lock on the request id file!\n");
+    return false;
+  }
+
+  fseek(rid, 0, SEEK_END);
+  size = ftell(rid);
+
+  if (size > 0) {
+    rewind(rid);
+    if (fread(buffer, sizeof(char), size, rid) < size) {
+      ERROR("Failed to read the request id file!\n");
+      return false;
+    } else {
+      current_request_id = atoi(buffer) + 1;
+    }
+  } else {
+    current_request_id = 0;
+  }
+
+  rewind(rid);
+  size = snprintf(buffer, 32, "%d", current_request_id);
+  fwrite(buffer, sizeof(char), size + 1, rid);
+  fflush(rid);
+
+  if (flock(fileno(rid), LOCK_UN) != 0)
+    ERROR("Failed to release exclusive lock on the request id file!\n");
+
+  return true;
+}
+
 static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
 {
   uint64 hash = hash_evo_taint(taint_id);
@@ -2071,10 +2136,10 @@ static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
     memset(taint, 0, sizeof(evo_taint_t));
     if (is_db_taint(taint_id)) {
       taint->table_key = taint_id->table_key;
-      taint->table_name = request_strdup(taint_id->table_name);
-      taint->column_name = request_strdup(taint_id->column_name);
+      taint->table_name = strdup(taint_id->table_name);  /* alloc process scope: until expiration */
+      taint->column_name = strdup(taint_id->column_name);
     } else {
-      taint->file_path = request_strdup(taint_id->file_path);
+      taint->file_path = strdup(taint_id->file_path);
     }
     taint->request_id = request_id;
     taint->patch_list = NULL;
@@ -2140,24 +2205,34 @@ static void evo_db_state_synch()
 
 static void evo_file_state_synch()
 {
-  uint request_id;
+  uint request_id, evo_taint_window_start;
+  size_t line_mark = 0;
   ssize_t line_len;
   char *line = NULL, *sep, *file_path, request_id_buffer[16];
 
-  if (flock(fileno(evo_taint_file), LOCK_SH) != 0) {
+  if (flock(fileno(current_app->evo_taint_log), LOCK_SH) != 0) {
     ERROR("Failed to acquire shared lock the evo taint log file!\n");
     return;
   }
 
+  if (current_request_id >= EVO_TAINT_EXPIRATION)
+    evo_taint_window_start = (current_request_id - EVO_TAINT_EXPIRATION);
+  else
+    evo_taint_window_start = 0;
+
   evo_expire_taint();
 
-  while ((line_len = getline(&line, &taint_log_synch_pos, evo_taint_file)) != -1) {
+  fseek(current_app->evo_taint_log, taint_log_synch_pos, SEEK_SET);
+  while ((line_len = getline(&line, &line_mark, current_app->evo_taint_log)) != -1) {
     sep = strchr(line, '|');
     if (sep != NULL) {
       line[line_len-1] = '\0';
       memcpy(request_id_buffer, line, sep - line);
       request_id_buffer[sep - line] = '\0';
       request_id = atoi(request_id_buffer);
+
+      if (request_id < evo_taint_window_start)
+        continue;
 
       file_path = sep + 1; // now `sep` contains the file path
 
@@ -2172,7 +2247,8 @@ static void evo_file_state_synch()
   }
 
   free(line);
-  if (flock(fileno(evo_taint_file), LOCK_UN) != 0)
+  taint_log_synch_pos = ftell(current_app->evo_taint_log);
+  if (flock(fileno(current_app->evo_taint_log), LOCK_UN) != 0)
     ERROR("Failed to unlock the evo taint log file!\n");
 
   request_has_taint = (evo_taint_queue.head != NULL);

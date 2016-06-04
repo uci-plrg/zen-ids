@@ -152,15 +152,16 @@ const zval *get_arg_zval(zend_execute_data *execute_data, const zend_op *arg /* 
   return get_zval(execute_data, &arg->op1, arg->op1_type);
 }
 
-const char *get_resource_filename(const zval *value)
+char *get_resource_filename(const zval *value)
 {
-  int res_type = Z_RES_TYPE_P(value);
-  if (res_type == php_file_le_stream() || res_type == php_file_le_pstream()) {
-    php_stream *stream = (php_stream *) Z_RES_VAL_P(value);
-    return stream->orig_path;
-  } else {
-    return NULL;
+  if (value != NULL) {
+    int res_type = Z_RES_TYPE_P(value);
+    if (res_type == php_file_le_stream() || res_type == php_file_le_pstream()) {
+      php_stream *stream = (php_stream *) Z_RES_VAL_P(value);
+      return stream->orig_path;
+    }
   }
+  return NULL;
 }
 
 void tokenize_file(void)

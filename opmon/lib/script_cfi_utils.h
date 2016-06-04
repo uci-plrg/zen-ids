@@ -74,11 +74,27 @@ typedef enum _cfi_mode_t {
 #define IS_CFI_DATA() \
   (CFI_MODE == CFI_MODE_DB || CFI_MODE == CFI_MODE_FILE)
 
+typedef enum _request_id_synch_t {
+  REQUEST_ID_SYNCH_NONE = 0,
+  REQUEST_ID_SYNCH_DB   = 1,
+  REQUEST_ID_SYNCH_FILE = 2,
+} request_id_synch_t;
+
+#define REQUEST_ID_SYNCH (OPMON_G(request_id_synch))
+#define HAS_REQUEST_ID_SYNCH() (REQUEST_ID_SYNCH != REQUEST_ID_SYNCH_NONE)
+#define IS_REQUEST_ID_SYNCH_DB() (REQUEST_ID_SYNCH == REQUEST_ID_SYNCH_DB)
+#define IS_REQUEST_ID_SYNCH_FILE() (REQUEST_ID_SYNCH == REQUEST_ID_SYNCH_FILE)
+
 #define IS_REQUEST_EDGE_OUTPUT_ENABLED() (OPMON_G(request_edge_enabled != 0))
 #define IS_OPCODE_DUMP_ENABLED() (OPMON_G(opcode_dump_enabled != 0))
 #define IS_CFI_BAILOUT_ENABLED() (OPMON_G(cfi_bailout != 0))
 
 #define TEST(match, in) (((in) & (match)) == (match))
+
+#define MATCH_ANY_ARG_COUNT(...) (sizeof((const char *[]){__VA_ARGS__})/sizeof(const char *))
+#define MATCH_ANY(match, ...) match_any((match), MATCH_ANY_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+
+#define Z_STRVAL_NP(zv) ((Z_TYPE_P(zv) == IS_NULL) ? NULL : Z_STRVAL_P(zv))
 
 #define PX "0x%llx"
 
@@ -99,9 +115,6 @@ typedef enum _cfi_mode_t {
 
 #define p2int(p) ((uint_ptr_t) (p))
 #define int2p(p) ((byte *) (p))
-
-#define MATCH_ANY_ARG_COUNT(...) (sizeof((const char *[]){__VA_ARGS__})/sizeof(const char *))
-#define MATCH_ANY(match, ...) match_any((match), MATCH_ANY_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
 
 typedef unsigned char bool;
 typedef unsigned long long uint64;
@@ -173,6 +186,7 @@ ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   const char *file_evo_log_dir;
   int verbose;
   int cfi_mode;
+  int request_id_synch;
   int request_edge_enabled;
   int opcode_dump_enabled;
   int cfi_bailout;
@@ -207,7 +221,7 @@ char *request_strdup(const char *src);
 const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
 const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type);
 const zval *get_arg_zval(zend_execute_data *execute_data, const zend_op *arg /* ZEND_SEND_* */);
-const char *get_resource_filename(const zval *value);
+char *get_resource_filename(const zval *value);
 
 void tokenize_file(void);
 
@@ -267,6 +281,21 @@ static inline bool match_any(const char *match, uint count, ...)
   va_end(candidates);
 
   return found;
+}
+
+static inline uint squash_trailing_slash(char *str)
+{
+  uint len = strlen(str), last_char;
+
+  if (len == 0)
+    return 0;
+
+  last_char = len-1;
+  if (str[last_char] == '/') {
+    str[last_char] = '\0';
+    return last_char;
+  }
+  return 0;
 }
 
 #endif

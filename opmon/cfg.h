@@ -60,6 +60,8 @@ typedef struct _application_t {
   void *dataset;
   void *base_frame;
   void *system_frame;
+  FILE *evo_taint_log;
+  FILE *request_id_file;
 } application_t;
 
 static inline bool

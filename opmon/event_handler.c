@@ -123,6 +123,15 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 {
   // scarray_unit_test();
 
+  if (IS_CFI_DB() && !IS_REQUEST_ID_SYNCH_DB()) {
+    ERROR("The cfi mode is incompatible with the request id synch!\n");
+    return;
+  }
+  if (IS_CFI_FILE() && !IS_REQUEST_ID_SYNCH_FILE()) {
+    ERROR("The cfi mode is incompatible with the request id synch!\n");
+    return;
+  }
+
   static_analysis = getenv(ENV_STATIC_ANALYSIS);
   SPOT("static_analysis: %s\n", static_analysis);
   if (static_analysis != NULL)

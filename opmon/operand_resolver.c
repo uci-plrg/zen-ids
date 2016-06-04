@@ -106,6 +106,7 @@ static application_t *new_site_app(char *buffer)
   char *new_app_name;
 
   new_app = PROCESS_NEW(application_list_t);
+  memset(new_app, 0, sizeof(application_list_t));
 
   app_name = strrchr(buffer, '/');
   if (app_name == NULL)

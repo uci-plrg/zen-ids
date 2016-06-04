@@ -1,6 +1,7 @@
 #!/bin/bash
 
 c="opmon_cfi_mode"
+r="opmon_request_id_synch"
 o="opmon_opcode_dump_enabled"
 e="opmon_request_edge_enabled"
 v="opmon_verbose"
@@ -12,6 +13,7 @@ function usage() {
   echo "opmon-config"
   echo "   -s show current config (after making changes)"
   echo "   -c <$c>"
+  echo "   -r <$r>"
   echo "   -o <$o>"
   echo "   -e <$e>"
   echo "   -v <$v>"
@@ -28,10 +30,11 @@ function add_expression() {
 [ "$1" == "--help" ] && usage && exit
 [ -z "$PHP_HOME" ] && echo "This script requires variable \$PHP_HOME. Exiting now." && exit
 
-while getopts "c:o:e:v:b:s" option
+while getopts "c:r:o:e:v:b:s" option
 do
   case $option in
     c) add_expression $c $OPTARG;;
+    r) add_expression $r $OPTARG;;
     o) add_expression $o $OPTARG;;
     e) add_expression $e $OPTARG;;
     v) add_expression $v $OPTARG;;
@@ -44,6 +47,7 @@ shift $(( $OPTIND-1 ))
 if [ ! -z "$show" ]
 then
   grep "$c" $config
+  grep "$r" $config
   grep "$o" $config
   grep "$e" $config
   grep "$v" $config
