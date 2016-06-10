@@ -378,7 +378,7 @@ static stack_frame_t *initialize_entry_point(application_t *app, uint entry_poin
   if (entry_frame->cfm.dataset == NULL)
     write_node(app, entry_point_hash, routine_cfg_get_opcode(entry_frame->cfm.cfg, 0), 0);
 
-  if (is_standalone_mode())
+  if (is_standalone_mode() && current_app->evo_taint_log != NULL)
     evo_file_state_synch();
 
   return entry_frame;
@@ -402,9 +402,11 @@ void destroy_interp_app_context(application_t *app)
   if (IS_REQUEST_ID_SYNCH_DB())
     mysql_close(db_connection);
 
-  fflush(app->evo_taint_log);
-  fclose(app->evo_taint_log);
-  fclose(app->request_id_file);
+  if (app->evo_taint_log != NULL) {
+    fflush(app->evo_taint_log);
+    fclose(app->evo_taint_log);
+    fclose(app->request_id_file);
+  }
 }
 
 uint64 interp_request_boundary(bool is_request_start)
