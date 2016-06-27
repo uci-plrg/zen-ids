@@ -170,6 +170,9 @@ static evo_key_t evo_keys[] = {
   { "wp_terms", 1, { "term_id", NULL }, false },
   { "wp_usermeta", 1, { "umeta_id", NULL }, false },
   { "wp_users", 1, { "ID", NULL }, false },
+  { "wp_rg_form", 1, { "id", NULL }, false },
+  { "wp_rg_form_meta", 1, { "form_id", NULL }, false },
+  { "wp_rg_form_view", 1, { "form_id", NULL }, false },
 };
 
 typedef struct _evo_query_t {
