@@ -69,7 +69,9 @@ then
   script_basename=$(basename $script)
   script_basename=${script_basename%.*}
   run_output_dir=$rundir/$script_basename
+  mkdir -p "$run_output_dir"
   run_data_dir=$(ls -td $run_output_dir/* 2> /dev/null | head -1)
+  [ -z "$run_data_dir" ] && echo "Cannot find any directory in '$run_output_dir'. Exiting now." && exit
 else
   script_basename=$(echo $script | sed "s/\//_/g")
   script_basename=${script_basename%.*}

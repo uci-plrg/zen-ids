@@ -12,6 +12,7 @@ config="$PHP_HOME/conf.d/ext/opmon.ini"
 function usage() {
   echo "opmon-config"
   echo "   -s show current config (after making changes)"
+  echo "   -d dump the whole config file"
   echo "   -c <$c>"
   echo "   -r <$r>"
   echo "   -o <$o>"
@@ -30,7 +31,7 @@ function add_expression() {
 [ "$1" == "--help" ] && usage && exit
 [ -z "$PHP_HOME" ] && echo "This script requires variable \$PHP_HOME. Exiting now." && exit
 
-while getopts "c:r:o:e:v:b:s" option
+while getopts "c:r:o:e:v:b:sd" option
 do
   case $option in
     c) add_expression $c $OPTARG;;
@@ -40,11 +41,15 @@ do
     v) add_expression $v $OPTARG;;
     b) add_expression $b $OPTARG;;
     s) show=true;;
+    d) dump=true;;
   esac
 done
 shift $(( $OPTIND-1 ))
 
-if [ ! -z "$show" ]
+if [ ! -z "$dump" ]
+then
+  cat $config
+elif [ ! -z "$show" ]
 then
   grep "$c" $config
   grep "$r" $config

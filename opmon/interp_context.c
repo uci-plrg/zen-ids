@@ -405,7 +405,8 @@ void destroy_interp_app_context(application_t *app)
   if (app->evo_taint_log != NULL) {
     fflush(app->evo_taint_log);
     fclose(app->evo_taint_log);
-    fclose(app->request_id_file);
+    if (app->request_id_file != NULL)
+      fclose(app->request_id_file);
   }
 }
 
@@ -413,7 +414,7 @@ uint64 interp_request_boundary(bool is_request_start)
 {
   if (is_request_start) {
     char filename[CONFIG_FILENAME_LENGTH] = { 0 };
-    bool local_request_id = !HAS_REQUEST_ID_SYNCH();
+    bool local_request_id = (!HAS_REQUEST_ID_SYNCH() || IS_CFI_TRAINING());
     current_app = locate_application(((php_server_context_t *) SG(server_context))->r->filename);
 
     if (current_app->evo_taint_log == NULL) {
