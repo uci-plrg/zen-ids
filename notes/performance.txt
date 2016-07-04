@@ -1,0 +1,55 @@
+
+
+Opcodes that must always be monitored:
+
+  ZEND_DO_FCALL
+  ZEND_INCLUDE_OR_EVAL
+  ZEND_RETURN
+  ZEND_RETURN_BY_REF
+  ZEND_FAST_RET
+  ZEND_CATCH
+  ZEND_HANDLE_EXCEPTION
+
+  So it can go fast when there is no taint in the entire request. But as soon as one zval has taint,
+  we are stuck monitoring every opocde to transfer the taint along.
+
+
+
+Opcodes that require taint transfer:
+
+    case ZEND_ADD:
+    case ZEND_SUB:
+    case ZEND_MUL:
+    case ZEND_DIV:
+    case ZEND_MOD:
+    case ZEND_POW:
+    case ZEND_SL:
+    case ZEND_SR:
+    case ZEND_BW_OR:
+    case ZEND_BW_AND:
+    case ZEND_BW_XOR:
+    case ZEND_BW_NOT:
+    case ZEND_CONCAT:
+    case ZEND_BOOL_XOR:
+    case ZEND_INSTANCEOF:
+    case ZEND_IS_IDENTICAL:
+    case ZEND_IS_NOT_IDENTICAL:
+    case ZEND_IS_EQUAL:
+    case ZEND_IS_NOT_EQUAL:
+    case ZEND_IS_SMALLER:
+    case ZEND_IS_SMALLER_OR_EQUAL:
+    case ZEND_CASE:
+
+
+
+-------------------------
+
+
+
+  ZEND_DO_FCALL
+  ZEND_INCLUDE_OR_EVAL
+  ZEND_RETURN
+  ZEND_RETURN_BY_REF
+  ZEND_FAST_RET
+  ZEND_CATCH
+  ZEND_HANDLE_EXCEPTION
