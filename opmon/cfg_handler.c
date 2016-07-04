@@ -1053,6 +1053,14 @@ static inline bool is_plog_type_enabled(plog_type_t type)
   if (type == PLOG_TYPE_CFG)
     return true;
 #endif
+#ifdef PLOG_CFG_BLOCK
+  if (type == PLOG_TYPE_CFG_BLOCK)
+    return true;
+#endif
+#ifdef PLOG_CFG_DETAIL
+  if (type == PLOG_TYPE_CFG_DETAIL)
+    return true;
+#endif
 #ifdef PLOG_DB
   if (type == PLOG_TYPE_DB)
     return true;
@@ -1091,6 +1099,12 @@ static inline void plog_type_tag(FILE *plog, plog_type_t type)
       fprintf(plog, "<taint> ");
       break;
     case PLOG_TYPE_CFG:
+      fprintf(plog, "<cfg> ");
+      break;
+    case PLOG_TYPE_CFG_BLOCK:
+      fprintf(plog, "<cfg> ");
+      break;
+    case PLOG_TYPE_CFG_DETAIL:
       fprintf(plog, "<cfg> ");
       break;
     case PLOG_TYPE_DB:

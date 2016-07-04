@@ -21,6 +21,7 @@
 
 // # define OPMON_LOG_SELECT 1
 // # defne TRANSACTIONAL_SUBPROCESS 1
+#define OPT 1
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
@@ -557,11 +558,12 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
     if (verified) {
       if (implicit_taint_call_chain.start_frame != NULL &&
           implicit_taint_call_chain.suspension_frame == NULL) {
-        // implicit_taint_call_chain.suspension_frame = from_frame->execute_data;
+        implicit_taint_call_chain.suspension_frame = from_frame->execute_data;
 
-        // plog(from_cfm->app, PLOG_TYPE_CFG, "call chain would be suspended at %04d(L%04d) %s -> %s\n",
-        //     from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
-        // plog_stacktrace(current_app, PLOG_TYPE_CFG, from_frame->execute_data);
+        plog(from_cfm->app, PLOG_TYPE_CFG_DETAIL,
+             "call chain would be suspended at %04d(L%04d) %s -> %s\n", from_frame->op_index,
+             from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+        plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_frame->execute_data);
       }
     } else {
       if (implicit_taint_call_chain.start_frame == NULL) {
@@ -578,9 +580,9 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
       } else if (implicit_taint_call_chain.suspension_frame == NULL) {
         verified = true;
 
-        //plog(from_cfm->app, PLOG_TYPE_CFG, "call chain allows %04d(L%04d) %s -> %s\n",
-        //     from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
-        // plog_stacktrace(current_app, PLOG_TYPE_CFG, from_frame->execute_data);
+        plog(from_cfm->app, PLOG_TYPE_CFG_DETAIL, "call chain allows %04d(L%04d) %s -> %s\n",
+             from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
+         plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_frame->execute_data);
       }
     }
   }
@@ -646,7 +648,7 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
           request_blocked = true;
           address = get_current_request_address();
 
-          plog(from_cfm->app, PLOG_TYPE_CFG, "block request %08lld 0x%llx: %s\n",
+          plog(from_cfm->app, PLOG_TYPE_CFG_BLOCK, "block request %08lld 0x%llx: %s\n",
                current_request_id, get_current_request_start_time(), address);
         }
         if (to_index == 0) {
@@ -656,7 +658,7 @@ evaluate_routine_edge(stack_frame_t *from_frame, stack_frame_t *to_frame, uint t
           plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
                from_frame->op_index, from_op->lineno, from_cfm->routine_name, to_frame->cfm.routine_name);
         }
-        //plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG, to_frame->execute_data);
+        plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG_DETAIL, to_frame->execute_data);
 
         if (block_now && IS_CFI_BAILOUT_ENABLED()) {
           zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
@@ -1396,7 +1398,22 @@ void opcode_executing(const zend_op *op)
   zend_op_array *op_array = &execute_data->func->op_array;
   bool stack_pointer_moved;
 
-  #ifdef OPMON_DEBUG
+#ifdef OPT
+  switch (op->opcode) {
+    case ZEND_DO_FCALL:
+    case ZEND_INCLUDE_OR_EVAL:
+    case ZEND_RETURN:
+    case ZEND_RETURN_BY_REF:
+    case ZEND_FAST_RET:
+    case ZEND_CATCH:
+    case ZEND_HANDLE_EXCEPTION:
+      break;
+    default:
+      return;
+  }
+#endif
+
+#ifdef OPMON_DEBUG
   if (pthread_self() != first_thread_id) {
     ERROR("Multiple threads are not supported (started on 0x%x, current is 0x%x)\n",
           (uint) first_thread_id, (uint) pthread_self());
@@ -1837,10 +1854,10 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
         }
       } else {
         if (verified_jump != NULL) {
-          //plog(current_app, PLOG_TYPE_CFG,
-          //     "jump with DGC escort into untrusted territory at %04d(L%04d)%s\n",
-          //     OP_INDEX(op_array, verified_jump), verified_jump->lineno,
-          //     site_relative_path(current_app, op_array));
+          plog(current_app, PLOG_TYPE_CFG_DETAIL,
+               "jump with DGC escort into untrusted territory at %04d(L%04d)%s\n",
+               OP_INDEX(op_array, verified_jump), verified_jump->lineno,
+               site_relative_path(current_app, op_array));
         }
       }
     } else {
