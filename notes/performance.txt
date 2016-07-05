@@ -40,6 +40,63 @@ Opcodes that require taint transfer:
     case ZEND_IS_SMALLER_OR_EQUAL:
     case ZEND_CASE:
 
+-------------------------
+
+Switching PHP modes:
+
+  · wp-config.php:74
+  · ext/opcache/ZendAccelerator.h:50
+  · ./current-config[-plain]
+
+-------------------------
+
+ === Native
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real    0m56.440s
+user    0m0.309s
+sys     0m0.200s
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real    0m56.110s
+user    0m0.302s
+sys     0m0.214s
+
+
+  · Losing 12% overhead at the top of compile_context.c:function_compiled()
+
+ === With opcache: ~11s
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real    0m11.455s
+user    0m0.314s
+sys     0m0.126s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real    0m10.613s
+user    0m0.298s
+sys     0m0.143s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real    0m10.455s
+user    0m0.277s
+sys     0m0.163s
+
+
+
 
 
 -------------------------
@@ -53,3 +110,47 @@ Opcodes that require taint transfer:
   ZEND_FAST_RET
   ZEND_CATCH
   ZEND_HANDLE_EXCEPTION
+
+
+$1 = (HashTable *) 0x7fffee115a60 <accel_globals>
+(gdb) p dst
++p dst
+$2 = (HashTable *) 0x7fffee8800d8
+
+
++p op_array
+$5 = (zend_op_array *) 0x7fffee881100
+
++p &new_persistent_script->main_op_array
+$4 = (zend_op_array *) 0x7fffee880008
+
++p &((zend_function*)script->function_table->arData->val.value.ptr)->op_array
+$18 = (zend_op_array *) 0x7fffee8030e8 a()
+
+0x7fffe116e570
+
++p p->val
+$19 = {value = {lval = 0x7fffee88a1b8, dval = 6.9533413299531027e-310, counted = 0x7fffee88a1b8, str = 0x7fffee88a1b8,
+    arr = 0x7fffee88a1b8, obj = 0x7fffee88a1b8, res = 0x7fffee88a1b8, ref = 0x7fffee88a1b8, ast = 0x7fffee88a1b8,
+    zv = 0x7fffee88a1b8, ptr = 0x7fffee88a1b8, ce = 0x7fffee88a1b8, func = 0x7fffee88a1b8}, u1 = {v = {type = 0x0,
+      type_flags = 0x20, const_flags = 0x89, reserved = 0xee}, type_info = 0xee892000}, u2 = {var_flags = 0x7fff,
+    next = 0x7fff, cache_slot = 0x7fff, lineno = 0x7fff}}
+
+
++p *script
+$9 = {full_path = 0x7fffe116e530, main_op_array = {type = 0x2, fn_flags = 0x8000000, function_name = 0x0, scope = 0x0,
+    prototype = 0x0, num_args = 0x0, required_num_args = 0x0, arg_info = 0x0, refcount = 0x7fffee865028,
+    this_var = 0xffffffff, last = 0x1, opcodes = 0x7fffee8795a0, last_var = 0x0, T = 0x0, vars = 0x0,
+    last_brk_cont = 0x0, last_try_catch = 0x0, brk_cont_array = 0x0, try_catch_array = 0x0, static_variables = 0x0,
+    filename = 0x7fffee87c1e0, line_start = 0x0, line_end = 0x0, doc_comment = 0x0, early_binding = 0xffffffff,
+    last_literal = 0x1, literals = 0x7fffee8640c0, last_cache_slot = 0x0, run_time_cache = 0x0, reserved = {0x0, 0x0,
+      0x0, 0x0}}, function_table = {nTableSize = 0x80, nTableMask = 0x7f, nNumUsed = 0x1, nNumOfElements = 0x1,
+    nNextFreeElement = 0x0, arData = 0x7fffee88a000, arHash = 0x7fffee88b000,
+    pDestructor = 0x9d3c92 <zend_function_dtor>, nInternalPointer = 0x0, u = {v = {flags = 0x2, nApplyCount = 0x0,
+        reserve = 0x0}, flags = 0x2}}, class_table = {nTableSize = 0x10, nTableMask = 0x0, nNumUsed = 0x0,
+    nNumOfElements = 0x0, nNextFreeElement = 0x0, arData = 0x0, arHash = 0xfad8f0 <uninitialized_bucket>,
+    pDestructor = 0x9d433d <destroy_zend_class>, nInternalPointer = 0xffffffff, u = {v = {flags = 0x2,
+        nApplyCount = 0x0, reserve = 0x0}, flags = 0x2}}, compiler_halt_offset = 0x0, ping_auto_globals_mask = 0x1,
+  timestamp = 0x573aa4c4, corrupted = 0x0, mem = 0x7fffe116e350, size = 0x690, arena_mem = 0x7fffe116e570,
+  arena_size = 0xd0, dynamic_members = {last_used = 0x0, hits = 0x0, memory_consumption = 0x0, checksum = 0x0,
+    revalidate = 0x577b7c91}}

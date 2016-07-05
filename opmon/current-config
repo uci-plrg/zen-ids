@@ -1,6 +1,15 @@
 #!/bin/bash
 
-CFLAGS="$CFLAGS -g -O2 -Wall -Werror" ./configure \
+opt="-O3"
+
+while getopts "d" option
+do
+  case $option in
+    d) opt="-g";;
+  esac
+done
+
+CFLAGS="$CFLAGS $opt -Wall -Werror" ./configure \
     --enable-opcode-monitor \
     --prefix=$PHP_HOME \
     --with-php-config=$PHP_HOME/bin/php-config

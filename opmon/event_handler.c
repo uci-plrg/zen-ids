@@ -159,10 +159,18 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     monitor->notify_zval_free = nop_notify_zval_free;
     monitor->notify_database_fetch = nop_notify_database_fetch;
     monitor->notify_database_query = nop_notify_database_query;
+  } else if (true) {
+    monitor->has_taint = nop_has_taint;
+    monitor->notify_opcode_interp = nop_notify_opcode_interp;
+    monitor->notify_function_compile_complete = function_compiled;
+    monitor->dataflow.notify_dataflow = nop_notify_dataflow;
+    monitor->notify_zval_free = nop_notify_zval_free;
+    monitor->notify_database_fetch = nop_notify_database_fetch;
+    monitor->notify_database_query = nop_notify_database_query;
   } else {
     monitor->has_taint = zval_has_taint;
     monitor->notify_opcode_interp = opcode_executing;
-    monitor->notify_function_compile_complete = function_compiled;
+    monitor->notify_function_compile_complete = function_compiled; // nop_notify_function_compile_complete;
     monitor->dataflow.notify_dataflow = internal_dataflow;
     monitor->notify_zval_free = taint_var_free;
     monitor->notify_database_fetch = db_fetch_trigger;

@@ -140,6 +140,11 @@ void function_compiled(zend_op_array *op_array)
   bool spot = false;
 #endif
 
+  /******************************** 60s ************************************/
+
+  if (op_array == NULL)
+    return;
+
   if (op_array->type == ZEND_EVAL_CODE) { // lambda or plain eval?
     is_eval = true;
     eval_id = get_next_eval_id();
@@ -210,6 +215,8 @@ void function_compiled(zend_op_array *op_array)
     has_routine_name = true;
   }
 
+  /******************************** 62s ************************************/
+
   if (strlen(routine_caller_name) == 0)
     strcat(routine_caller_name, routine_name);
 
@@ -274,6 +281,8 @@ void function_compiled(zend_op_array *op_array)
     }
   }
 
+  /******************************** 66s ************************************/
+
   buffer = REQUEST_ALLOC(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
@@ -299,17 +308,24 @@ void function_compiled(zend_op_array *op_array)
           fqn->function.callee_hash);
   }
 
+  /******************************** 66s ************************************/
+
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
   PRINT("Installing hashcodes for %s (0x%x) under hash 0x%llx\n", routine_name,
        fqn->function.caller_hash, hash_addr(op_array->opcodes));
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn); // mem: clear this at request boundary
 
   if (is_already_compiled) {
-    PRINT("(skipping existing routine 0x%x at "PX")\n", fqn->function.callee_hash,
-          p2int(op_array->opcodes));
+    //SPOT("<compile> skipping existing routine %s (0x%x at "PX")\n", cfm.routine_name,
+    //      fqn->function.callee_hash, p2int(op_array->opcodes));
     fflush(stderr);
     return; // verify equal?
   }
+
+  /*************************** 68s (as written) ******************************/
+
+  //SPOT("<compile> compiling routine %s (0x%x at "PX")\n", cfm.routine_name,
+  //     fqn->function.callee_hash, p2int(op_array->opcodes));
 
   if (IS_OPCODE_DUMP_ENABLED()) {
     if (is_script_body)

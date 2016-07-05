@@ -775,7 +775,7 @@ static void lookup_cfm(zend_execute_data *execute_data, zend_op_array *op_array,
 {
   control_flow_metadata_t *monitored_cfm = get_cfm_by_opcodes_address(op_array->opcodes);
   if (monitored_cfm == NULL) {
-    WARN("Failed to find opcodes for hash 0x%llx\n", hash_addr(op_array->opcodes));
+    ERROR("Failed to find opcodes for hash 0x%llx\n", hash_addr(op_array->opcodes));
     lookup_cfm_by_name(execute_data, op_array, cfm);
   } else {
     *cfm = *monitored_cfm;

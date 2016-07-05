@@ -1024,25 +1024,6 @@ static inline void plog_internal_frame(application_t *app, plog_type_t type, zen
   plog_append(app, type, "\t%s\n", frame->func->op_array.function_name->val);
 }
 
-void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame)
-{
-  zend_execute_data *walk = start_frame;
-
-  plog(app, type, "Stacktrace:\n");
-
-  do {
-    if (walk->func == NULL) {
-      plog_append(app, type, "\t(empty)\n");
-    } else {
-      if (walk->func->op_array.type == ZEND_INTERNAL_FUNCTION)
-        plog_internal_frame(app, type, walk);
-      else
-        plog_user_frame(app, type, walk);
-    }
-    walk = walk->prev_execute_data;
-  } while (walk != NULL);
-}
-
 static inline bool is_plog_type_enabled(plog_type_t type)
 {
 #ifdef PLOG_TAINT
@@ -1090,6 +1071,27 @@ static inline bool is_plog_type_enabled(plog_type_t type)
     return true;
 #endif
   return false;
+}
+
+void plog_stacktrace(application_t *app, plog_type_t type, zend_execute_data *start_frame)
+{
+  zend_execute_data *walk = start_frame;
+
+  if (is_plog_type_enabled(type)) {
+    plog(app, type, "Stacktrace:\n");
+
+    do {
+      if (walk->func == NULL) {
+        plog_append(app, type, "\t(empty)\n");
+      } else {
+        if (walk->func->op_array.type == ZEND_INTERNAL_FUNCTION)
+          plog_internal_frame(app, type, walk);
+        else
+          plog_user_frame(app, type, walk);
+      }
+      walk = walk->prev_execute_data;
+    } while (walk != NULL);
+  }
 }
 
 static inline void plog_type_tag(FILE *plog, plog_type_t type)
