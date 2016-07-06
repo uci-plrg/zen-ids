@@ -5,6 +5,13 @@
 #include "metadata_handler.h"
 #include "cfg.h"
 
+typedef enum _stack_motion_t {
+  STACK_MOTION_RETURN = -1;
+  STACK_MOTION_NONE = 0;
+  STACK_MOTION_CALL = 1;
+  STACK_MOTION_LEAVE = 2;
+} stack_motion_t;
+
 void initialize_interp_context();
 void initialize_interp_app_context(application_t *app);
 void destroy_interp_app_context(application_t *app);
@@ -13,7 +20,7 @@ void set_opmon_user_level(long user_level);
 
 void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm);
 void pop_interp_context();
-void opcode_executing(const zend_op *op);
+void opcode_executing(const zend_op *op, uint32_t stack_motion);
 
 void db_fetch_trigger(uint32_t field_count, const char **table_names, const char **column_names,
                       const zval **values);

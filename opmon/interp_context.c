@@ -212,6 +212,9 @@ static stack_frame_t void_frame;
 static stack_frame_t prev_frame;
 static stack_frame_t cur_frame;
 
+static const zend_op *intra_module_prev_op = NULL;
+static bool is_call_continuation = false;
+
 static application_t *current_app = NULL;
 
 static stack_event_t stack_event;
@@ -260,7 +263,7 @@ static void evo_file_state_synch();
 static void evo_commit_request_patches();
 static bool evo_taint_comparator(void *a, void *b);
 static void intra_opcode_executing(zend_execute_data *execute_data, zend_op_array *op_array,
-                                   const zend_op *op, bool stack_pointer_moved);
+                                   const zend_op *op, uint32_t stack_motion);
 static void file_read_trigger(zend_execute_data *execute_data, const char *syscall,
                               zend_op_array *op_array, const zend_op *call_op,
                               const zval *return_value, const zend_op **args, uint arg_count);
@@ -1392,11 +1395,10 @@ static void create_request_input(zend_op_array *op_array, const zend_op *op, con
   taint_var_add(current_app, value, taint_var);
 }
 
-void opcode_executing(const zend_op *op)
+void opcode_executing(const zend_op *op, uint32_t stack_motion)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array = &execute_data->func->op_array;
-  bool stack_pointer_moved;
 
 #ifdef OPT
   switch (op->opcode) {
@@ -1432,11 +1434,37 @@ void opcode_executing(const zend_op *op)
            cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
            cur_frame.cfm.cfg->routine_hash);
     }
+    intra_module_prev_op = NULL;
+    is_call_continuation = false;
     return;
   }
 
-  // if definitely not under a builtin, and there is no stack motion pending, could skip this
-  stack_pointer_moved = update_stack_frame(execute_data, op_array, op);
+  update_stack_frame(execute_data, op_array, op);
+
+  if (stack_motion == STACK_MOTION_RETURN || stack_motion == STACK_MOTION_LEAVE) {
+    intra_module_prev_op = op-1;
+    is_call_continuation = true;
+
+    if (IS_CFI_EVO()) {
+      if ((op-1)->opcode == ZEND_DO_FCALL && cur_frame.last_builtin_name != NULL)
+        post_propagate_builtin(op_array, op-1);
+
+      if (execute_data == implicit_taint_call_chain.start_frame) {
+        implicit_taint_call_chain.start_frame = NULL;
+
+        plog(current_app, PLOG_TYPE_CFG, "call chain returned to %04d(L%04d)\n",
+             cur_frame.op_index, op->lineno);
+      } else if (execute_data == implicit_taint_call_chain.suspension_frame) {
+        implicit_taint_call_chain.suspension_frame = NULL;
+
+        plog(current_app, PLOG_TYPE_CFG, "call chain resumed at %04d(L%04d)\n",
+             cur_frame.op_index, op->lineno);
+      }
+    }
+
+    if (stack_motion == STACK_MOTION_RETURN)
+      return; // will get a second call with the same `op` and `stack_motion == _NONE`
+  }
 
   switch (op->opcode) {
     case ZEND_DO_FCALL:
@@ -1559,15 +1587,15 @@ void opcode_executing(const zend_op *op)
 #endif
 
   if (IS_CFI_TRAINING() || IS_CFI_DGC() || request_has_taint) /* N.B.: taint post-propagates! */
-    intra_opcode_executing(execute_data, op_array, op, stack_pointer_moved);
+    intra_opcode_executing(execute_data, op_array, op, stack_motion);
 }
 
 static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_op_array *op_array,
-                                          const zend_op *op, bool stack_pointer_moved)
+                                          const zend_op *op, uint32_t stack_motion)
 {
-  const zend_op *last_executed_op, *cur_frame_previous_op = NULL, *jump_target = NULL;
+  const zend_op *jump_target = NULL;
   const zval *jump_predicate = NULL;
-  bool is_loopback, opcode_verified = false, opcode_edge_needs_update = false, is_fcall_return;
+  bool is_loopback, opcode_verified = false, opcode_edge_needs_update = false;
   taint_variable_t *taint_lowers_op_user_level = NULL;
   uint op_user_level = USER_LEVEL_TOP;
   cfg_opcode_t *expected_opcode = NULL;
@@ -1590,77 +1618,33 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
   //if (cur_frame.cfm.cfg->routine_hash == 0x356d7234)
   //  SPOT("hang here...\n");
 
-  if (cur_frame.op_index > 0)
-    cur_frame_previous_op = &cur_frame.opcodes[get_previous_executable_index(cur_frame.op_index)];
-  if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved) {
-    last_executed_op = &prev_frame.opcodes[prev_frame.op_index];
-  } else {
-    last_executed_op = cur_frame_previous_op; /* works for CC, but NULL in the callee (fix?) */
-
-    if (last_executed_op == NULL && cur_frame.op_index > 0)
-      ERROR("Failed to identify the last executed op within a stack frame!\n");
-  }
-  is_loopback = (IS_SAME_FRAME(cur_frame, prev_frame) && prev_frame.op_index > cur_frame.op_index);
-  is_fcall_return = stack_pointer_moved && last_executed_op != NULL &&
-                    last_executed_op->opcode == ZEND_DO_FCALL;
-
-  if (IS_CFI_DATA()) {
-    if (is_fcall_return) {
-      taint_propagate_return(current_app, execute_data, op_array, last_executed_op);
-
-      if (execute_data == implicit_taint_call_chain.start_frame)
-        implicit_taint_call_chain.start_frame = NULL;
-    }
-  } else if (IS_CFI_DGC()) {
-    if (is_fcall_return) {
-      taint_propagate_return(current_app, execute_data, op_array, last_executed_op);
-
-      if (execute_data == implicit_taint_call_chain.start_frame) {
-        implicit_taint_call_chain.start_frame = NULL;
-
-        plog(current_app, PLOG_TYPE_CFG, "call chain returned at %04d(L%04d)\n",
-             cur_frame.op_index, op->lineno);
-      } else if (execute_data == implicit_taint_call_chain.suspension_frame) {
-        implicit_taint_call_chain.suspension_frame = NULL;
-
-        plog(current_app, PLOG_TYPE_CFG, "call chain resumed at %04d(L%04d)\n",
-             cur_frame.op_index, op->lineno);
-      }
-    }
-  }
+  is_loopback = (intra_module_prev_op != NULL && intra_module_prev_op > op);
 
   if (IS_CFI_EVO()) {
-    if (!is_loopback && (cur_frame_previous_op == NULL || IS_FIRST_AFTER_ARGS(op)))
+    if (stack_motion == STACK_MOTION_CALL) {
       taint_propagate_into_arg_receivers(current_app, execute_data, op_array, (zend_op *) op);
-
-    if (last_executed_op != NULL) {
+    } else if (intra_module_prev_op != NULL) {
       // todo: cur_frame.last_builtin_name clobbered on nested builtins (callback calling a builtin)
-      if (!is_loopback && cur_frame.last_builtin_name != NULL &&
-          last_executed_op->opcode == ZEND_DO_FCALL) {
+      PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, intra_module_prev_op), intra_module_prev_op->lineno,
+            site_relative_path(current_app, op_array), cur_frame.cfm.routine_name);
 
-        post_propagate_builtin(op_array,  last_executed_op);
-      } else {
-        PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, last_executed_op), last_executed_op->lineno,
-              site_relative_path(current_app, op_array), cur_frame.cfm.routine_name);
-
-        propagate_taint(current_app, execute_data, op_array, last_executed_op);
-      }
+      propagate_taint(current_app, execute_data, op_array, intra_module_prev_op);
     }
   }
 
-  if (!is_loopback && last_executed_op != NULL && last_executed_op->opcode == ZEND_DO_FCALL &&
+#ifdef OPMON_DEBUG
+  if (!is_loopback && intra_module_prev_op != NULL && intra_module_prev_op->opcode == ZEND_DO_FCALL &&
       cur_frame.last_builtin_name != NULL && strcmp(cur_frame.last_builtin_name, "file_put_contents") == 0) {
     const zval *filepath;
     const zend_op *args[0x20];
     uint arg_count;
 
-    inflate_call(execute_data, op_array, last_executed_op, args, &arg_count);
+    inflate_call(execute_data, op_array, intra_module_prev_op, args, &arg_count);
     filepath = get_arg_zval(execute_data, args[0]);
     plog(current_app, PLOG_TYPE_CFG, "file_put_contents(%s)\n", Z_STRVAL_P(filepath));
     plog_stacktrace(current_app, PLOG_TYPE_CFG, execute_data);
   }
 
-#ifdef OPMON_DEBUG
   if (!current_session.active) {
     PRINT("<session> Inactive session while executing %s. User level is %d.\n",
           cur_frame.cfm.routine_name, current_session.user_level);
@@ -1692,6 +1676,8 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
       ERROR("attempt to execute foobar op %u in opcodes "PX"|"PX" of routine 0x%x\n",
             cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
             cur_frame.cfm.cfg->routine_hash);
+      intra_module_prev_op = NULL;
+      is_call_continuation = false;
       return;
     }
 
@@ -1701,7 +1687,7 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
 #endif
 
     // slightly weak for returns: not checking continuation pc
-    if (stack_event.state == STACK_STATE_RETURNED || stack_pointer_moved || is_loopback/*safe w/o goto*/ ||
+    if (stack_motion == STACK_MOTION_CALL || is_call_continuation || is_loopback/*safe w/o goto*/ ||
         is_unconditional_fallthrough() || current_session.user_level >= op_user_level) {
       if (is_unconditional_fallthrough()) {
         PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
@@ -1784,9 +1770,8 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
 
         taint_lowers_op_user_level = cur_frame.implicit_taint->taint;
       } else {
-        if (IS_SAME_FRAME(prev_frame, cur_frame) && !stack_pointer_moved &&
-            last_executed_op->opcode == ZEND_JMP &&
-            last_executed_op < cur_frame.implicit_taint->end_op) {
+        if (intra_module_prev_op->opcode != NULL && intra_module_prev_op->opcode == ZEND_JMP &&
+            intra_module_prev_op < cur_frame.implicit_taint->end_op) {
           taint_lowers_op_user_level = cur_frame.implicit_taint->taint; /* extend to bottom of branch diamond */
         }
         remove_implicit_taint();
@@ -1925,6 +1910,9 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
     }
   }
   */
+
+  intra_module_prev_op = op;
+  is_call_continuation = false;
 }
 
 /************* Evo Functions *************/

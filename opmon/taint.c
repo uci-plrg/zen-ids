@@ -801,21 +801,6 @@ void taint_propagate_into_arg_receivers(application_t *app, zend_execute_data *e
   }
 }
 
-void taint_propagate_return(application_t *app, zend_execute_data *execute_data,
-                            zend_op_array *stack_frame, const zend_op *call_op)
-{
-  if (pending_return_taint != NULL) {
-    const zval *call_result = get_operand_zval(execute_data, call_op, TAINT_OPERAND_RESULT);
-    if (call_result != NULL) {
-      taint_var_add(app, call_result, pending_return_taint);
-      plog(app, PLOG_TYPE_TAINT, "write call result (0x%llx) at %04d(L%04d)%s\n",
-           (uint64) call_result, OP_INDEX(stack_frame, call_op), call_op->lineno,
-           site_relative_path(app, stack_frame));
-    }
-    pending_return_taint = NULL;
-  }
-}
-
 /******************************************************************************************
  * Public Taint API
  */

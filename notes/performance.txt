@@ -3,8 +3,11 @@
 =======================
 
   · new_cur_frame.implicit_taint // never used outside IS_CFI_DATA()
-  · validate_return() // can we ignore returns?
+  · looks like we can substitute the return tracking with a simple stack level and (existing) frame match
 
+
+The one thing I need to know for a return is whether a stack step is a return or not. So could I just
+keep the last user-space stack frame?
 
 =======================
 
