@@ -9,8 +9,6 @@
 
 static sctable_t taint_table;
 
-static taint_variable_t *pending_return_taint = NULL;
-
 #define MAX_TAINT_ARGS 0x10
 
 typedef enum _taint_operand_index_t {
