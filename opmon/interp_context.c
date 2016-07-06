@@ -19,8 +19,8 @@
 #include "compile_context.h"
 #include "interp_context.h"
 
-// # define OPMON_LOG_SELECT 1
-// # defne TRANSACTIONAL_SUBPROCESS 1
+// #define OPMON_LOG_SELECT 1
+// #defne TRANSACTIONAL_SUBPROCESS 1
 #define OPT 1
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
@@ -839,14 +839,14 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
   if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
     new_cur_frame.cfm = get_last_eval_cfm();
   } else {
-    lookup_cfm(execute_data, op_array, &new_cur_frame.cfm);
+    lookup_cfm(execute_data, op_array, &new_cur_frame.cfm); // 2 x hash lookup
   }
 
   if (IS_CFI_DATA()) {
     new_cur_frame.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
                                                                        hash_addr(execute_data));
   } else {
-    new_cur_frame.implicit_taint = NULL;
+    new_cur_frame.implicit_taint /* never used outside IS_CFI_DATA() */ = NULL;
   }
 
   if (IS_SAME_FRAME(cur_frame, void_frame))

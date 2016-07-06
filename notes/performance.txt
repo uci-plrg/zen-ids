@@ -1,5 +1,14 @@
 
 
+=======================
+
+  · new_cur_frame.implicit_taint // never used outside IS_CFI_DATA()
+  · validate_return() // can we ignore returns?
+
+
+=======================
+
+
 Opcodes that must always be monitored:
 
   ZEND_DO_FCALL
@@ -47,8 +56,14 @@ Switching PHP modes:
   · wp-config.php:74
   · ext/opcache/ZendAccelerator.h:50
   · ./current-config[-plain]
+  · opmon-config: -c <cfi> -r <request-synch> (disable other stuff)
 
 -------------------------
+
+================== WordPress ===================
+
+
+Testing log.8.gor after training logs 1-7
 
  === Native
 
@@ -71,7 +86,7 @@ sys     0m0.214s
 
   · Losing 12% overhead at the top of compile_context.c:function_compiled()
 
- === With opcache: ~11s
+ === Native with opcache: ~11s
 
 dc-5:replay| time replay-wordpress gor-logs/log.8.gor
 Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
@@ -96,7 +111,247 @@ user    0m0.277s
 sys     0m0.163s
 
 
+ === Opmon with opcache (compile only, all other hooks nop, strict CFI): ~12s (9%)
 
+ dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m12.117s
+user	0m0.299s
+sys	0m0.141s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m12.530s
+user	0m0.314s
+sys	0m0.145s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m11.668s
+user	0m0.290s
+sys	0m0.159s
+
+
+ === Opmon with opcache (no interp optimization, strict CFI): ~18.5s (68%)
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m18.853s
+user	0m0.308s
+sys	0m0.141s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m18.683s
+user	0m0.323s
+sys	0m0.120s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m18.091s
+user	0m0.276s
+sys	0m0.161s
+
+
+ === Opmon with opcache (interp inter branches only, strict CFI): ~17.5s (60%)
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m18.259s
+user	0m0.302s
+sys	0m0.146s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m17.887s
+user	0m0.260s
+sys	0m0.172s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m16.828s
+user	0m0.260s
+sys	0m0.178s
+
+
+ === Opmon with opcache (interp nop, strict CFI): ~13.5s (23%)
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m13.654s
+user	0m0.273s
+sys	0m0.194s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m13.136s
+user	0m0.310s
+sys	0m0.150s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m14.551s
+user	0m0.306s
+sys	0m0.162s
+
+
+ === Opmon with opcache (all enabled, DB CFI, no taint): ~19.5s (77%)
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m20.371s
+user	0m0.273s
+sys	0m0.172s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m19.403s
+user	0m0.310s
+sys	0m0.131s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m19.517s
+user	0m0.294s
+sys	0m0.150s
+
+
+ === Opmon with opcache (return from interp, strict CFI): ~19.5s (77%)
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m10.861s
+user	0m0.224s
+sys	0m0.176s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m11.395s
+user	0m0.263s
+sys	0m0.139s
+
+
+ === Opmon with opcache (return from interp, DB CFI, no taint): ~12.5s (14%)
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m12.817s
+user	0m0.248s
+sys	0m0.188s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m12.634s
+user	0m0.262s
+sys	0m0.176s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m12.577s
+user	0m0.305s
+sys	0m0.125s
+
+
+ === Opmon with opcache (inter-ops only, DB CFI, no taint): ~19.5s (77%)
+
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m20.398s
+user	0m0.295s
+sys	0m0.147s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m19.598s
+user	0m0.298s
+sys	0m0.140s
+dc-5:replay| time replay-wordpress gor-logs/log.8.gor
+Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/log.8.gor
+
+real	0m19.377s
+user	0m0.218s
+sys	0m0.210s
+
+
+
+================== GitList ===================
+
+ === Native with opcache: ~87s
+
+dc-5:replay| time replay-gitlist gor-logs/log.19.gor
+Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.19.gor
+
+real	1m26.664s
+user	0m0.891s
+sys	0m0.392s
+dc-5:replay| time replay-gitlist gor-logs/log.19.gor
+Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.19.gor
+
+real	1m27.133s
+user	0m0.824s
+sys	0m0.462s
+
+
+ === Opmon with opcache (all enabled, training mode): ~107s (23%)
+
+dc-5:replay| time replay-gitlist gor-logs/log.19.gor
+Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.19.gor
+
+real	1m47.069s
+user	0m0.740s
+sys	0m0.460s
+
+
+ === Opmon with opcache (all enabled, DGC mode): ~119s (37%)
+
+dc-5:replay| time replay-gitlist gor-logs/log.19.gor
+Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.19.gor
+
+real	1m58.519s
+user	0m0.721s
+sys	0m0.428s
+dc-5:replay| time replay-gitlist gor-logs/log.19.gor
+Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.19.gor
+
+real	1m59.641s
+user	0m0.772s
+sys	0m0.410s
 
 
 -------------------------
@@ -154,3 +409,39 @@ $9 = {full_path = 0x7fffe116e530, main_op_array = {type = 0x2, fn_flags = 0x8000
   timestamp = 0x573aa4c4, corrupted = 0x0, mem = 0x7fffe116e350, size = 0x690, arena_mem = 0x7fffe116e570,
   arena_size = 0xd0, dynamic_members = {last_used = 0x0, hits = 0x0, memory_consumption = 0x0, checksum = 0x0,
     revalidate = 0x577b7c91}}
+
+
+------------------------
+
+index.php:<script-body>
+0x7fffe1fccd20
+#0  register_new_function (op_array=0x7fffea06e000) at /hd/script-safe/php-cfi/opmon/compile_context.c:324
+#1  0x00007fffe9ba9269 in function_created (src=0x0, f=0x7fffea06e000)
+    at /hd/script-safe/php-cfi/opmon/compile_context.c:679
+#2  0x00007ffff3dbdd16 in zend_execute_scripts (type=type@entry=0x8, retval=retval@entry=0x0,
+    file_count=file_count@entry=0x3) at /hd/script-safe/php/Zend/zend.c:1279
+#3  0x00007ffff3d61b85 in php_execute_script (primary_file=primary_file@entry=0x7fffffffd3b0)
+    at /hd/script-safe/php/main/main.c:2575
+
+
+wordpress/wp-blog-header.php:<script-body>
+0x7fffea06e1c0
+#0  register_new_function (op_array=0x7fffea06e1c0) at /hd/script-safe/php-cfi/opmon/compile_context.c:324
+#1  0x00007fffe9ba9269 in function_created (src=0x0, f=0x7fffea06e1c0)
+    at /hd/script-safe/php-cfi/opmon/compile_context.c:679
+#2  0x00007ffff3d897d4 in compile_filename (type=type@entry=0x8, filename=filename@entry=0x7fffe1fccd10)
+    at Zend/zend_language_scanner.l:639
+#3  0x00007ffff3e57ddd in ZEND_INCLUDE_OR_EVAL_SPEC_CONST_HANDLER (execute_data=0x7fffea012030)
+    at /hd/script-safe/php/Zend/zend_vm_execute.h:3041
+
+
+wordpress/wp-blog-header.php:<script-body>
+0x7fffea06e1c0
+#0  register_new_function (op_array=0x7fffea06e1c0) at /hd/script-safe/php-cfi/opmon/compile_context.c:316
+#1  0x00007fffe9ba9269 in function_created (src=0x0, f=0x7fffea06e1c0)
+    at /hd/script-safe/php-cfi/opmon/compile_context.c:679
+#2  0x00007ffff3e57b3f in ZEND_INCLUDE_OR_EVAL_SPEC_CONST_HANDLER (execute_data=0x7fffea012030)
+    at /hd/script-safe/php/Zend/zend_vm_execute.h:3065
+
+
+

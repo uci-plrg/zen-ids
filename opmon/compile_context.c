@@ -125,12 +125,12 @@ void init_compile_context()
   memset(fcall_stack, 0, sizeof(fcall_init_t));
 }
 
-void function_compiled(zend_op_array *op_array)
+static function_fqn_t *register_new_function(zend_op_array *op_array)
 {
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
-  function_fqn_t *fqn = REQUEST_NEW(function_fqn_t);
+  function_fqn_t *fqn = PROCESS_NEW(function_fqn_t); /* can use REQUEST_NEW w/o opcache */
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
   char *buffer, *filename, *site_filename;
@@ -141,9 +141,6 @@ void function_compiled(zend_op_array *op_array)
 #endif
 
   /******************************** 60s ************************************/
-
-  if (op_array == NULL)
-    return;
 
   if (op_array->type == ZEND_EVAL_CODE) { // lambda or plain eval?
     is_eval = true;
@@ -174,7 +171,7 @@ void function_compiled(zend_op_array *op_array)
   } else {
     PRINT("Warning: skipping unrecognized op_array of type %d\n", op_array->type);
     // PROCESS_FREE(fqn);
-    return;
+    return NULL;
   }
 
   if (has_routine_name) {
@@ -190,7 +187,7 @@ void function_compiled(zend_op_array *op_array)
       if (filename == NULL) {
         ERROR("Cannot resolve compilation unit filename %s for op_array->type = %d\n",
               op_array->filename->val, op_array->type);
-        return;
+        return NULL;
       }
       free_filename = true;
     }
@@ -313,18 +310,18 @@ void function_compiled(zend_op_array *op_array)
   sctable_add_or_replace(&routines_by_callee_hash, fqn->function.callee_hash, fqn);
   PRINT("Installing hashcodes for %s (0x%x) under hash 0x%llx\n", routine_name,
        fqn->function.caller_hash, hash_addr(op_array->opcodes));
-  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn); // mem: clear this at request boundary
+  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(op_array->opcodes), fqn);
 
   if (is_already_compiled) {
     //SPOT("<compile> skipping existing routine %s (0x%x at "PX")\n", cfm.routine_name,
-    //      fqn->function.callee_hash, p2int(op_array->opcodes));
+    //     fqn->function.callee_hash, p2int(op_array->opcodes));
     fflush(stderr);
-    return; // verify equal?
+    return fqn; // verify equal?
   }
 
   /*************************** 68s (as written) ******************************/
 
-  //SPOT("<compile> compiling routine %s (0x%x at "PX")\n", cfm.routine_name,
+  // SPOT("<compile> compiling routine %s (0x%x at "PX")\n", cfm.routine_name,
   //     fqn->function.callee_hash, p2int(op_array->opcodes));
 
   if (IS_OPCODE_DUMP_ENABLED()) {
@@ -670,6 +667,25 @@ void function_compiled(zend_op_array *op_array)
   }
 
   flush_all_outputs(cfm.app);
+  return fqn;
+}
+
+void function_created(zend_op_array *src, zend_op_array *f)
+{
+  if (f == NULL)
+    return;
+
+  if (src == NULL) {
+    register_new_function(f);
+  } else {
+    function_fqn_t *fqn;
+
+    fqn = (function_fqn_t *) sctable_lookup(&routines_by_opcode_address, hash_addr(src->opcodes));
+    if (fqn == NULL)
+      fqn = register_new_function(src);
+    if (fqn != NULL)
+      sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
+  }
 }
 
 // (can never find an eval this way)

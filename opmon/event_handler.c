@@ -95,11 +95,11 @@ zend_bool nop_has_taint(const zval *value)
   return false;
 }
 
-void nop_notify_opcode_interp(const zend_op *op)
+void nop_opcode_executing(const zend_op *op)
 {
 }
 
-void nop_notify_function_compile_complete(zend_op_array *op_array)
+void nop_notify_function_created(zend_op_array *src, zend_op_array *dst)
 {
 }
 
@@ -153,24 +153,24 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_http_request = request_boundary;
   if (false) {
     monitor->has_taint = nop_has_taint;
-    monitor->notify_opcode_interp = nop_notify_opcode_interp;
-    monitor->notify_function_compile_complete = nop_notify_function_compile_complete;
+    monitor->notify_opcode_interp = nop_opcode_executing;
+    monitor->notify_function_created = nop_notify_function_created;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
     monitor->notify_zval_free = nop_notify_zval_free;
     monitor->notify_database_fetch = nop_notify_database_fetch;
     monitor->notify_database_query = nop_notify_database_query;
-  } else if (true) {
-    monitor->has_taint = nop_has_taint;
-    monitor->notify_opcode_interp = nop_notify_opcode_interp;
-    monitor->notify_function_compile_complete = function_compiled;
-    monitor->dataflow.notify_dataflow = nop_notify_dataflow;
-    monitor->notify_zval_free = nop_notify_zval_free;
-    monitor->notify_database_fetch = nop_notify_database_fetch;
-    monitor->notify_database_query = nop_notify_database_query;
+  } else if (false) {
+    monitor->has_taint = zval_has_taint;
+    monitor->notify_opcode_interp = nop_opcode_executing;
+    monitor->notify_function_created = function_created;
+    monitor->dataflow.notify_dataflow = internal_dataflow;
+    monitor->notify_zval_free = taint_var_free;
+    monitor->notify_database_fetch = db_fetch_trigger;
+    monitor->notify_database_query = db_query;
   } else {
     monitor->has_taint = zval_has_taint;
     monitor->notify_opcode_interp = opcode_executing;
-    monitor->notify_function_compile_complete = function_compiled; // nop_notify_function_compile_complete;
+    monitor->notify_function_created = function_created;
     monitor->dataflow.notify_dataflow = internal_dataflow;
     monitor->notify_zval_free = taint_var_free;
     monitor->notify_database_fetch = db_fetch_trigger;
