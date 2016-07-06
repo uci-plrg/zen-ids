@@ -95,7 +95,7 @@ zend_bool nop_has_taint(const zval *value)
   return false;
 }
 
-void nop_opcode_executing(const zend_op *op)
+void nop_opcode_executing(const zend_op *op, uint32_t stack_motion)
 {
 }
 

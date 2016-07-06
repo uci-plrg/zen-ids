@@ -3,7 +3,8 @@
 =======================
 
   · new_cur_frame.implicit_taint // never used outside IS_CFI_DATA()
-  · looks like we can substitute the return tracking with a simple stack level and (existing) frame match
+  · identify builtins by something faster than name (lazy cache)
+  · unplugging exception handling for now
 
 
 The one thing I need to know for a return is whether a stack step is a return or not. So could I just

@@ -711,9 +711,9 @@ control_flow_metadata_t *get_cfm_by_opcodes_address(zend_op *opcodes)
     return &fqn->function.cfm;
 }
 
-control_flow_metadata_t get_last_eval_cfm()
+control_flow_metadata_t *get_last_eval_cfm()
 {
-  return last_eval_cfm;
+  return &last_eval_cfm;
 }
 
 compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
