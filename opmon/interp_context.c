@@ -21,7 +21,7 @@
 
 // #define OPMON_LOG_SELECT 1
 // #defne TRANSACTIONAL_SUBPROCESS 1
-// #define OPT 1
+#define OPT 1
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
@@ -73,8 +73,8 @@ typedef struct _op_context_t {
   zend_execute_data *execute_data;
   // zend_op *opcodes; // try to avoid this
   control_flow_metadata_t *cfm;
-  op_t prev; // updated on entry to `opcode_executing()` for call/continuation, otherwise exit
-  op_t cur;  // updated on entry to `opcode_executing()`
+  op_t prev; // updated on entry to `monitor_opcode()` for call/continuation, otherwise exit
+  op_t cur;  // updated on entry to `monitor_opcode()`
   bool is_unconditional_fallthrough; // set similarly to is_call_continuation
   bool is_call_continuation;
   const char *last_builtin_name; // todo: really need a stack of these, or associate to frame
@@ -209,6 +209,8 @@ static op_context_t op_context;
 
 static application_t *current_app = NULL;
 
+static int stack_motion = STACK_MOTION_CALL;
+
 static user_session_t current_session;
 
 static uint64 current_request_id = 0;
@@ -252,8 +254,8 @@ static void evo_db_state_synch();
 static void evo_file_state_synch();
 static void evo_commit_request_patches();
 static bool evo_taint_comparator(void *a, void *b);
-static void intra_opcode_executing(zend_execute_data *execute_data, zend_op_array *op_array,
-                                   const zend_op *op, uint32_t stack_motion);
+static void intra_monitor_opcode(zend_execute_data *execute_data, zend_op_array *op_array,
+                                   const zend_op *op);
 static void file_read_trigger(zend_execute_data *execute_data, const char *syscall,
                               zend_op_array *op_array, const zend_op *call_op,
                               const zval *return_value, const zend_op **args, uint arg_count);
@@ -528,8 +530,10 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
   bool verified = false, add = false;
 
   if (current_session.user_level >= 2) {
-    write_request_edge(false, from_cfm->app, from_cfm->cfg->routine_hash, from_op->index,
-                       to_cfm->cfg->routine_hash, to_index, current_session.user_level);
+    if (IS_REQUEST_EDGE_OUTPUT_ENABLED()) {
+      write_request_edge(false, from_cfm->app, from_cfm->cfg->routine_hash, from_op->index,
+                         to_cfm->cfg->routine_hash, to_index, current_session.user_level);
+    }
     return;
   }
 
@@ -582,6 +586,8 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
   if (IS_CFI_DATA() && !verified) {
     verified = cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_op->index,
                                     to_cfm->cfg, to_index, current_session.user_level);
+    if (verified && !IS_REQUEST_EDGE_OUTPUT_ENABLED())
+      return;
   }
 
   if (IS_CFI_DATA() && !verified) {
@@ -1031,7 +1037,7 @@ static void post_propagate_builtin(zend_op_array *op_array, const zend_op *op)
 
   inflate_call(execute_data, op_array, op, args, &arg_count);
 
-  if (current_session.user_level < 2 && request_has_taint) { // but don't clobber with untrusted user taint!
+  if (IS_CFI_FILE() && current_session.user_level < 2 && request_has_taint) { // but don't clobber with untrusted user taint!
     const zval *return_value = get_zval(execute_data, &op->result, op->result_type);
     file_read_trigger(execute_data, op_context.last_builtin_name, op_array, op,
                       return_value, args, arg_count);
@@ -1119,6 +1125,7 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
   inflate_call(execute_data, op_array, op, args, &arg_count);
 
   if (EX(call)->func->type == ZEND_INTERNAL_FUNCTION) {
+    // hot!
     op_context.last_builtin_name = callee_name; // careful about use after free!
 
     if (op_context.cfm->cfg != NULL) {
@@ -1223,14 +1230,20 @@ static void create_request_input(zend_op_array *op_array, const zend_op *op, con
   taint_var_add(current_app, value, taint_var);
 }
 
-void opcode_executing(const zend_op *op, uint32_t stack_motion)
+static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
 {
-  zend_execute_data *execute_data = EG(current_execute_data);
   zend_op_array *op_array;
+  // static uint count = 0;
 
-  if (execute_data == NULL)
-    return; // nothing to do
+  /*
+  if (true) {
+    if (++count % 10000000 == 0)
+      SPOT("Count: %d at "PX"\n", count, p2int(execute_data->opline));
+    return;
+  }
+  */
 
+  // op = execute_data->opline;
   op_array = &execute_data->func->op_array;
 
   if (op_array == NULL || op_array->opcodes == NULL || op_array->type == ZEND_INTERNAL_FUNCTION) {
@@ -1310,8 +1323,9 @@ void opcode_executing(const zend_op *op, uint32_t stack_motion)
       else
         break;
     case STACK_MOTION_CALL: // post-indicator: `op` is already the callee entry point
+    case STACK_MOTION_INCLUDE:
       stack_step(execute_data, op_array);
-      edge_executing(execute_data, op_array);
+      edge_executing(execute_data, op_array); // hot!
 
       op_context.prev.op = NULL;
       op_context.is_call_continuation = false;
@@ -1319,7 +1333,10 @@ void opcode_executing(const zend_op *op, uint32_t stack_motion)
 
       remove_implicit_taint();
       pending_implicit_taint.end_op = NULL;
-      break;
+      if (stack_motion == STACK_MOTION_INCLUDE)
+        return; // will get a second call with the same `op` and `stack_motion == _NONE`
+      else
+        break;
   }
 
   switch (op->opcode) {
@@ -1398,11 +1415,11 @@ void opcode_executing(const zend_op *op, uint32_t stack_motion)
 #endif
 
   if (IS_CFI_TRAINING() || IS_CFI_DGC() || request_has_taint) /* N.B.: taint post-propagates! */
-    intra_opcode_executing(execute_data, op_array, op, stack_motion);
+    intra_monitor_opcode(execute_data, op_array, op);
 }
 
-static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_op_array *op_array,
-                                          const zend_op *op, uint32_t stack_motion)
+static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op_array *op_array,
+                                          const zend_op *op)
 {
   const zend_op *jump_target = NULL;
   const zval *jump_predicate = NULL;
@@ -1724,6 +1741,23 @@ static inline void intra_opcode_executing(zend_execute_data *execute_data, zend_
   op_context.is_unconditional_fallthrough = is_unconditional_fallthrough(op_context.cur.op);
 }
 
+int execute_opcode(zend_execute_data *execute_data, opcode_handler_t original_handler TSRMLS_DC)
+{
+  if (execute_data != NULL)
+    monitor_opcode(execute_data, EX(opline));
+
+  stack_motion = original_handler(execute_data TSRMLS_DC);
+  return stack_motion;
+}
+
+void top_stack_motion(zend_execute_data *execute_data, const zend_op *op, int top_stack_motion)
+{
+  SPOT("Top stack motion: %d\n", top_stack_motion);
+
+  stack_motion = top_stack_motion;
+  monitor_opcode(execute_data, op);
+}
+
 /************* Evo Functions *************/
 
 static inline bool is_db_taint(evo_taint_t *taint)
@@ -1764,6 +1798,10 @@ static inline void file_read_trigger(zend_execute_data *execute_data, const char
     src = get_resource_filename(get_arg_zval(execute_data, args[0]));
   } else if (MATCH_ANY(syscall,
                        "file_get_contents", "file_exists", "filectime", "filemtime")) {
+    if (arg_count < 1) {
+      ERROR("Missing expected arg to %s(). Cannot trigger.\n", syscall);
+      return;
+    }
     src = Z_STRVAL_NP(get_arg_zval(execute_data, args[0]));
   }
 

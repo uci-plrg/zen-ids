@@ -5,10 +5,13 @@
   · new_cur_frame.implicit_taint // never used outside IS_CFI_DATA()
   · identify builtins by something faster than name (lazy cache)
   · unplugging exception handling for now
+  · check for ZEND_NULL_HANDLER instead of zend_get_opcode_name(), though have to make it visible from zend_vm_execute.h
 
 
 The one thing I need to know for a return is whether a stack step is a return or not. So could I just
 keep the last user-space stack frame?
+
+~100,000 opcodes per request
 
 =======================
 

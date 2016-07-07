@@ -8,6 +8,7 @@
 #include "metadata_handler.h"
 #include "operand_resolver.h"
 #include "dataflow.h"
+#include "interp_handler_x.h"
 #include "compile_context.h"
 
 #define CLOSURE_NAME "{closure}"
@@ -51,6 +52,9 @@ fcall_init_t *fcall_frame;
 static sctable_t routines_by_callee_hash;
 static sctable_t routines_by_opcode_address;
 static uint closure_count = 0;
+
+static sctable_t handler_table;
+static uint handler_index = 0;
 
 #define BUILTIN_ROUTINE_HASH_PLACEHOLDER 1
 
@@ -122,11 +126,15 @@ void init_compile_context()
   routines_by_opcode_address.hash_bits = 9;
   sctable_init(&routines_by_opcode_address);
 
+  handler_table.hash_bits = 9;
+  sctable_init(&handler_table);
+
   memset(fcall_stack, 0, sizeof(fcall_init_t));
 }
 
 static function_fqn_t *register_new_function(zend_op_array *op_array)
 {
+  zend_op *op, *end;
   uint i, eval_id;
   bool is_script_body = false, is_eval = false;
   bool has_routine_name = false, is_already_compiled = false;
@@ -255,15 +263,33 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
       cfg_add_routine(cfm.app->cfg, cfm.cfg);
       write_routine_catalog_entry(cfm.app, fqn->function.callee_hash, fqn->unit.path, routine_name);
     } else {
-      zend_op *op;
       cfg_opcode_t *cfg_opcode;
       bool recompile = false;
+      opcode_handler_t handler;
+      uint i;
       //cfg_opcode_edge_t *cfg_edge; // skipping edges for now
       //compiled_edge_target_t target;
-      for (i = 0; i < op_array->last; i++) {
-        op = &op_array->opcodes[i];
+      end = &op_array->opcodes[op_array->last];
+      for (i = 0, op = op_array->opcodes; op < end; i++, op++) {
         if (zend_get_opcode_name(op->opcode) == NULL)
           continue;
+
+        if (op->handler < interp_handlers[0] || op->handler >= interp_handlers[2000]) {
+          handler = sctable_lookup(&handler_table, p2int(op->handler));
+          if (handler == NULL) {
+            uint index = handler_index++;
+
+            if (index >= 2000)
+              ERROR("Too many distinct handlers: %d\n", index);
+
+            sctable_add(&handler_table, p2int(op->handler), interp_handlers[index]);
+            original_handler[index] = op->handler;
+            op->handler = interp_handlers[index];
+          } else {
+            op->handler = handler;
+          }
+        }
+
         cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
         //cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
 
@@ -338,9 +364,9 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
                          !(is_script_body || is_eval));
   }
 
-  for (i = 0; i < op_array->last; i++) {
+  end = &op_array->opcodes[op_array->last];
+  for (i = 0, op = op_array->opcodes; op < end; i++, op++) {
     compiled_edge_target_t target;
-    zend_op *op = &op_array->opcodes[i];
     //cfg_node_t from_node = { op->opcode, i };
     sink_identifier_t sink_id = {NULL};
 

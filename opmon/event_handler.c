@@ -95,7 +95,7 @@ zend_bool nop_has_taint(const zval *value)
   return false;
 }
 
-void nop_opcode_executing(const zend_op *op, uint32_t stack_motion)
+void nop_top_stack_motion(zend_execute_data *execute_data, const zend_op *op, int stack_motion)
 {
 }
 
@@ -153,7 +153,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_http_request = request_boundary;
   if (false) {
     monitor->has_taint = nop_has_taint;
-    monitor->notify_opcode_interp = nop_opcode_executing;
+    monitor->notify_top_stack_motion = nop_top_stack_motion;
     monitor->notify_function_created = nop_notify_function_created;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
     monitor->notify_zval_free = nop_notify_zval_free;
@@ -161,7 +161,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     monitor->notify_database_query = nop_notify_database_query;
   } else if (false) {
     monitor->has_taint = zval_has_taint;
-    monitor->notify_opcode_interp = nop_opcode_executing;
+    monitor->notify_top_stack_motion = nop_top_stack_motion;
     monitor->notify_function_created = function_created;
     monitor->dataflow.notify_dataflow = internal_dataflow;
     monitor->notify_zval_free = taint_var_free;
@@ -169,7 +169,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     monitor->notify_database_query = db_query;
   } else {
     monitor->has_taint = zval_has_taint;
-    monitor->notify_opcode_interp = opcode_executing;
+    monitor->notify_top_stack_motion = top_stack_motion;
     monitor->notify_function_created = function_created;
     monitor->dataflow.notify_dataflow = internal_dataflow;
     monitor->notify_zval_free = taint_var_free;
