@@ -796,10 +796,6 @@ static inline zend_execute_data *find_return_target(zend_execute_data *execute_d
 
 static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op_array)
 {
-  zend_execute_data *prev_execute_data;
-  control_flow_metadata_t *from_cfm;
-  op_t prev = { 0 };
-
 #ifdef TRANSACTIONAL_SUBPROCESS
   op_context.last_builtin_arg = NULL;
   op_context.last_builtin_original_arg = NULL;
@@ -809,6 +805,14 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
   } else {
     op_context.cfm = lookup_cfm(execute_data, op_array); // hash lookup
   }
+}
+
+static inline void edge_executing(zend_execute_data *execute_data, zend_op_array *op_array)
+{
+  zend_execute_data *prev_execute_data;
+  control_flow_metadata_t *from_cfm;
+  op_t prev = { 0 };
+
 
   if (IS_CFI_DATA()) {
     op_context.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
@@ -844,8 +848,7 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
     if (IS_CFI_MONITOR()) {
       evaluate_routine_edge(prev_execute_data, from_cfm, &prev, op_context.cfm, 0/*routine entry*/);
     } else {
-      if (generate_routine_edge(from_cfm, op_context.prev.index,
-                                op_context.cfm->cfg, 0/*routine entry*/)) {
+      if (generate_routine_edge(from_cfm, prev.index, op_context.cfm->cfg, 0/*routine entry*/)) {
 #ifdef OPMON_DEBUG
         if (execute_data->prev_execute_data != NULL &&
             execute_data->prev_execute_data->func != NULL &&
@@ -1244,25 +1247,15 @@ static void create_request_input(zend_op_array *op_array, const zend_op *op, con
 void opcode_executing(const zend_op *op, uint32_t stack_motion)
 {
   zend_execute_data *execute_data = EG(current_execute_data);
-  zend_op_array *op_array = &execute_data->func->op_array;
+  zend_op_array *op_array;
+
+  if (execute_data == NULL)
+    return; // nothing to do
+
+  op_array = &execute_data->func->op_array;
 
   if (op_array == NULL || op_array->opcodes == NULL)
     return; // nothing to do
-
-#ifdef OPT
-  switch (op->opcode) {
-    case ZEND_DO_FCALL:
-    case ZEND_INCLUDE_OR_EVAL:
-    case ZEND_RETURN:
-    case ZEND_RETURN_BY_REF:
-    case ZEND_FAST_RET:
-    case ZEND_CATCH:
-    case ZEND_HANDLE_EXCEPTION:
-      break;
-    default:
-      return;
-  }
-#endif
 
 #ifdef OPMON_DEBUG
   if (pthread_self() != first_thread_id) {
@@ -1292,11 +1285,11 @@ void opcode_executing(const zend_op *op, uint32_t stack_motion)
   op_context.execute_data = execute_data;
   op_context.cur.op = op;
   op_context.cur.index = (op - op_array->opcodes);
-  stack_step(execute_data, op_array);
 
   switch (stack_motion) {
     case STACK_MOTION_RETURN: // post-indicators: `op` is already the call continuation
     case STACK_MOTION_LEAVE:
+      stack_step(execute_data, op_array);
       op_context.prev.op = op-1;
       op_context.prev.index = op_context.cur.index-1; // todo: could there be a magic call from a 2-op instruction?
       op_context.is_call_continuation = true;
@@ -1327,6 +1320,9 @@ void opcode_executing(const zend_op *op, uint32_t stack_motion)
       else
         break;
     case STACK_MOTION_CALL: // post-indicator: `op` is already the callee entry point
+      stack_step(execute_data, op_array);
+      edge_executing(execute_data, op_array);
+
       op_context.prev.op = NULL;
       op_context.is_call_continuation = false;
       op_context.is_unconditional_fallthrough = true;
@@ -1372,6 +1368,16 @@ void opcode_executing(const zend_op *op, uint32_t stack_motion)
       DECREMENT_STACK(exception_stack, exception_frame);
       // what to do with implicit taint here?
     } break;
+#ifdef OPT
+    case ZEND_INCLUDE_OR_EVAL:
+    case ZEND_RETURN:
+    case ZEND_RETURN_BY_REF:
+    case ZEND_FAST_RET:
+    case ZEND_HANDLE_EXCEPTION:
+      break;
+    default:
+      return;
+#endif
   }
 
 #ifdef TAINT_REQUEST_INPUT
