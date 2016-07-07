@@ -21,7 +21,7 @@
 
 // #define OPMON_LOG_SELECT 1
 // #defne TRANSACTIONAL_SUBPROCESS 1
-#define OPT 1
+// #define OPT 1
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
@@ -774,26 +774,6 @@ static control_flow_metadata_t *lookup_cfm(zend_execute_data *execute_data, zend
   return monitored_cfm;
 }
 
-static inline zend_execute_data *find_return_target(zend_execute_data *execute_data)
-{
-  zend_execute_data *return_target = execute_data;
-
-  do {
-    if (IS_DESTRUCTOR(return_target)) {
-      if (return_target->prev_execute_data->prev_execute_data == NULL)
-        return NULL;
-      else
-        return_target = return_target->prev_execute_data->prev_execute_data->prev_execute_data;
-    } else {
-      return_target = return_target->prev_execute_data;
-    }
-  } while (return_target != NULL &&
-           (return_target->func == NULL ||
-            return_target->func->op_array.type == ZEND_INTERNAL_FUNCTION));
-
-  return return_target;
-}
-
 static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op_array)
 {
 #ifdef TRANSACTIONAL_SUBPROCESS
@@ -812,7 +792,6 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
   zend_execute_data *prev_execute_data;
   control_flow_metadata_t *from_cfm;
   op_t prev = { 0 };
-
 
   if (IS_CFI_DATA()) {
     op_context.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
@@ -1254,8 +1233,19 @@ void opcode_executing(const zend_op *op, uint32_t stack_motion)
 
   op_array = &execute_data->func->op_array;
 
-  if (op_array == NULL || op_array->opcodes == NULL)
-    return; // nothing to do
+  if (op_array == NULL || op_array->opcodes == NULL || op_array->type == ZEND_INTERNAL_FUNCTION) {
+    zend_execute_data *prev_execute_data = execute_data->prev_execute_data;
+    if (stack_motion == STACK_MOTION_RETURN && prev_execute_data != NULL &&
+        prev_execute_data->func != NULL) {
+      op_array = &prev_execute_data->func->op_array;
+      stack_step(prev_execute_data, op_array);
+      op_context.prev.op = prev_execute_data->opline;
+      op_context.prev.index = prev_execute_data->opline - op_array->opcodes; // todo: could there be a magic call from a 2-op instruction?
+      op_context.is_call_continuation = true;
+      op_context.is_unconditional_fallthrough = false;
+    }
+    return;
+  }
 
 #ifdef OPMON_DEBUG
   if (pthread_self() != first_thread_id) {
