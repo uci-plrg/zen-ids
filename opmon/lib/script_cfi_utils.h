@@ -11,7 +11,8 @@
 #define WARN_LEVEL 2
 #define MESSAGE_LEVEL 3
 
-#define SPOT(...) fprintf(stderr, "\t> #debug# "__VA_ARGS__)
+//#define SPOT(...) fprintf(stderr, "\t> #debug# "__VA_ARGS__)
+#define SPOT(...)
 #define STATUS(...) fprintf(stderr, "\t> #status# "__VA_ARGS__)
 
 #define MON(...) \
@@ -85,6 +86,7 @@ typedef enum _request_id_synch_t {
 #define IS_REQUEST_ID_SYNCH_DB() (REQUEST_ID_SYNCH == REQUEST_ID_SYNCH_DB)
 #define IS_REQUEST_ID_SYNCH_FILE() (REQUEST_ID_SYNCH == REQUEST_ID_SYNCH_FILE)
 
+#define IS_REQUEST_LOG_ENABLED() (OPMON_G(request_log_enabled != 0))
 #define IS_REQUEST_EDGE_OUTPUT_ENABLED() (OPMON_G(request_edge_enabled != 0))
 #define IS_OPCODE_DUMP_ENABLED() (OPMON_G(opcode_dump_enabled != 0))
 #define IS_CFI_BAILOUT_ENABLED() (OPMON_G(cfi_bailout != 0))
@@ -187,6 +189,7 @@ ZEND_BEGIN_MODULE_GLOBALS(opcode_monitor)
   int verbose;
   int cfi_mode;
   int request_id_synch;
+  int request_log_enabled;
   int request_edge_enabled;
   int opcode_dump_enabled;
   int cfi_bailout;

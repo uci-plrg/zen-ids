@@ -45,9 +45,8 @@
 
 #define EVO_TAINT_EXPIRATION 2000
 
-/* N.B.: the evo triggers are using last_insert_id() as set by this query! */
-#define EVO_NEXT_REQUEST_ID "UPDATE opmon_request_sequence " \
-                            "SET request_id = last_insert_id(request_id + 1)"
+#define EVO_UPDATE_REQUEST_ID "UPDATE opmon_request_sequence SET request_id = %ld"
+#define EVO_UPDATE_REQUEST_ID_BUFFER_LEN sizeof(EVO_UPDATE_REQUEST_ID) + 20
 
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
@@ -178,8 +177,6 @@ typedef struct _evo_query_t {
 } evo_query_t;
 
 static MYSQL *db_connection = NULL;
-
-static const evo_query_t evo_next_request_id = EVO_QUERY(EVO_NEXT_REQUEST_ID);
 
 static const evo_query_t command_insert = EVO_QUERY("insert");
 static const evo_query_t command_update = EVO_QUERY("update");
@@ -433,8 +430,8 @@ uint64 interp_request_boundary(bool is_request_start)
       }
     }
 
-    if (current_app->request_id_file == NULL) {
-      if (IS_REQUEST_ID_SYNCH_FILE()) {
+    if (IS_REQUEST_ID_SYNCH_FILE() || IS_REQUEST_ID_SYNCH_DB()) {
+      if (current_app->request_id_file == NULL) {
         snprintf(filename, CONFIG_FILENAME_LENGTH,
                  "%s/%s.rid", OPMON_G(file_evo_log_dir), current_app->name);
         current_app->request_id_file = fopen(filename, "r+");
@@ -445,9 +442,7 @@ uint64 interp_request_boundary(bool is_request_start)
           perror(NULL);
         }
       }
-    }
 
-    if (IS_REQUEST_ID_SYNCH_FILE()) {
       if (!increment_file_synch_request_id())
         local_request_id = true;
     }
@@ -459,10 +454,15 @@ uint64 interp_request_boundary(bool is_request_start)
   if (IS_CFI_DATA()) {
     if (is_request_start) {
       if (IS_REQUEST_ID_SYNCH_DB()) {
-        if (mysql_real_query(db_connection, evo_next_request_id.query, evo_next_request_id.len) != 0)
-          ERROR("Failed to get the next request id: %s.\n", mysql_sqlstate(db_connection));
-        else
-          current_request_id = mysql_insert_id(db_connection);
+        if (current_request_id % 50 == 0) {
+          int len;
+          char buffer[EVO_UPDATE_REQUEST_ID_BUFFER_LEN];
+
+          len = snprintf(buffer, EVO_UPDATE_REQUEST_ID_BUFFER_LEN, EVO_UPDATE_REQUEST_ID,
+                         current_request_id);
+          if (mysql_real_query(db_connection, buffer, len) != 0)
+            ERROR("Failed to update the evo request id: %s.\n", mysql_sqlstate(db_connection));
+        }
 
         evo_db_state_synch();
       } else {
@@ -551,12 +551,12 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
                                     to_cfm->cfg->routine_hash, current_session.user_level)) {
       verified = true;
     }
-#ifdef OPMON_DEBUG
+//#ifdef OPMON_DEBUG
     else {
       dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_op->index, to_index,
                                   to_cfm->cfg->routine_hash, current_session.user_level);
     }
-#endif
+//#endif
   }
 
   if (IS_CFI_DGC()) {
@@ -1770,20 +1770,12 @@ static int chaperone_opcode(zend_execute_data *execute_data, zend_op *op, int st
     monitor_opcode(execute_data, op, stack_motion);
 
   original_handler = (opcode_handler_t) int2p(p2int(op->handler) & ~1); // This seems ok for performance
-  //if (op->opcode != ZEND_DO_FCALL)
+
+  if (!IS_CFI_TRAINING())
     ((zend_op *)op)->handler = original_handler;
+
   return original_handler(execute_data TSRMLS_DC);
 }
-
-/*
-static void top_stack_motion(zend_execute_data *execute_data, const zend_op *op, int top_stack_motion)
-{
-  SPOT("Top stack motion: %d\n", top_stack_motion);
-
-  stack_motion = top_stack_motion;
-  monitor_opcode(execute_data, op);
-}
-*/
 
 static uint chaperone_count = 0;
 
@@ -1801,9 +1793,6 @@ void execute_opcode_monitor(zend_execute_data *execute_data TSRMLS_DC)
         SPOT("Chaperoned %d opcodes\n", chaperone_count);
     } else {
       stack_motion = op->handler(execute_data TSRMLS_CC);
-
-      //if (stack_motion != STACK_MOTION_NONE)
-      //  op_context.cfm = NULL;
     }
 
     if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
@@ -1811,7 +1800,6 @@ void execute_opcode_monitor(zend_execute_data *execute_data TSRMLS_DC)
       if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
         execute_data = EG(current_execute_data);
       } else {
-        //op_context.cfm = NULL;
         return;
       }
     }
@@ -2221,6 +2209,7 @@ static void evo_file_state_synch()
     ERROR("Failed to unlock the evo taint log file!\n");
 
   request_has_taint = (evo_taint_queue.head != NULL);
+  enable_request_taint_tracking(request_has_taint);
 }
 
 static void evo_commit_request_patches()

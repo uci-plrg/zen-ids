@@ -25,6 +25,8 @@ PHP_INI_BEGIN()
                     cfi_mode, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_request_id_synch", ".", PHP_INI_PERDIR, OnUpdateLong,
                     request_id_synch, zend_opcode_monitor_globals, opcode_monitor_globals)
+  STD_PHP_INI_ENTRY("opmon_request_log_enabled", ".", PHP_INI_PERDIR, OnUpdateLong,
+                    request_log_enabled, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_request_edge_enabled", ".", PHP_INI_PERDIR, OnUpdateLong,
                     request_edge_enabled, zend_opcode_monitor_globals, opcode_monitor_globals)
   STD_PHP_INI_ENTRY("opmon_opcode_dump_enabled", ".", PHP_INI_PERDIR, OnUpdateLong,

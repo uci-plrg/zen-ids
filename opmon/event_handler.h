@@ -9,6 +9,6 @@ void destroy_event_handler();
 const char *get_static_analysis();
 bool is_static_analysis();
 bool is_dataflow_analysis();
-void set_interp_routine(execute_opcode_t loop);
+void enable_request_taint_tracking(bool enabled);
 
 #endif

@@ -40,7 +40,7 @@ static void init_worker()
   worker_startup();
 }
 
-static void request_boundary(bool is_request_start)
+void request_boundary(bool is_request_start)
 {
   uint64 request_id = interp_request_boundary(is_request_start);
   cfg_request_boundary(is_request_start, request_id);
@@ -82,6 +82,12 @@ bool is_dataflow_analysis()
 static zend_bool zval_has_taint(const zval *value)
 {
   return taint_var_get(value) != NULL;
+}
+
+/************************ NOP handlers ************************/
+
+void nop_request_boundary(bool is_request_start)
+{
 }
 
 zend_bool nop_notify_dataflow(const zval *src, const char *src_name,
@@ -153,30 +159,32 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;
   monitor->opmon_dataflow = start_dataflow_analysis;
-  monitor->notify_http_request = request_boundary;
   if (false) {
-    monitor->has_taint = nop_has_taint;
-    //monitor->notify_top_stack_motion = nop_top_stack_motion;
-    monitor->opmon_interp = NULL;
+    monitor->notify_http_request = nop_request_boundary;
+    monitor->opmon_interp = execute_opcode_direct;
     monitor->notify_function_created = nop_notify_function_created;
+
+    monitor->has_taint = nop_has_taint;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
     monitor->notify_zval_free = nop_notify_zval_free;
     monitor->notify_database_fetch = nop_notify_database_fetch;
     monitor->notify_database_query = nop_notify_database_query;
   } else if (false) {
-    monitor->has_taint = zval_has_taint;
-    //monitor->notify_top_stack_motion = nop_top_stack_motion;
+    monitor->notify_http_request = request_boundary;
     monitor->opmon_interp = execute_opcode_monitor;
     monitor->notify_function_created = function_created;
+
+    monitor->has_taint = zval_has_taint;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
-    monitor->notify_zval_free = taint_var_free;
-    monitor->notify_database_fetch = db_fetch_trigger;
-    monitor->notify_database_query = db_query;
+    monitor->notify_zval_free = nop_notify_zval_free;
+    monitor->notify_database_fetch = nop_notify_database_fetch;
+    monitor->notify_database_query = nop_notify_database_query;
   } else {
+    monitor->notify_http_request = request_boundary;        // < 3%
+    monitor->opmon_interp = execute_opcode_monitor;         // < 1%
+    monitor->notify_function_created = function_created;    // < 4%
+
     monitor->has_taint = zval_has_taint;
-    //monitor->notify_top_stack_motion = top_stack_motion;
-    monitor->opmon_interp = execute_opcode_monitor;
-    monitor->notify_function_created = function_created;
     monitor->dataflow.notify_dataflow = internal_dataflow;
     monitor->notify_zval_free = taint_var_free;
     monitor->notify_database_fetch = db_fetch_trigger;
@@ -189,9 +197,21 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     server_startup();
 }
 
-void set_interp_routine(execute_opcode_t routine)
+void enable_request_taint_tracking(bool enabled)
 {
-  vm_hooks->opmon_interp = routine;
+  if (enabled) {
+    vm_hooks->has_taint = zval_has_taint;
+    vm_hooks->dataflow.notify_dataflow = internal_dataflow;
+    vm_hooks->notify_zval_free = taint_var_free;
+    vm_hooks->notify_database_fetch = db_fetch_trigger;
+    vm_hooks->notify_database_query = db_query;
+  } else {
+    vm_hooks->has_taint = nop_has_taint;
+    vm_hooks->dataflow.notify_dataflow = nop_notify_dataflow;
+    vm_hooks->notify_zval_free = nop_notify_zval_free;
+    vm_hooks->notify_database_fetch = nop_notify_database_fetch;
+    vm_hooks->notify_database_query = nop_notify_database_query;
+  }
 }
 
 void destroy_event_handler()
