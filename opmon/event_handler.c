@@ -28,6 +28,7 @@ typedef enum _opmon_run_type {
 
 static const char *static_analysis = NULL;
 static opmon_run_type run_type = OPMON_RUN_EXECUTION;
+static zend_opcode_monitor_t *vm_hooks = NULL;
 
 static void init_top_level_script(const char *script_path)
 {
@@ -146,6 +147,8 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   if (IS_OPCODE_DUMP_ENABLED())
     init_dataflow_analysis();
 
+  vm_hooks = monitor;
+
   monitor->set_top_level_script = init_top_level_script;
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;
@@ -153,7 +156,8 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_http_request = request_boundary;
   if (false) {
     monitor->has_taint = nop_has_taint;
-    monitor->notify_top_stack_motion = nop_top_stack_motion;
+    //monitor->notify_top_stack_motion = nop_top_stack_motion;
+    monitor->opmon_interp = NULL;
     monitor->notify_function_created = nop_notify_function_created;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
     monitor->notify_zval_free = nop_notify_zval_free;
@@ -161,15 +165,17 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     monitor->notify_database_query = nop_notify_database_query;
   } else if (false) {
     monitor->has_taint = zval_has_taint;
-    monitor->notify_top_stack_motion = nop_top_stack_motion;
+    //monitor->notify_top_stack_motion = nop_top_stack_motion;
+    monitor->opmon_interp = execute_opcode_monitor;
     monitor->notify_function_created = function_created;
-    monitor->dataflow.notify_dataflow = internal_dataflow;
+    monitor->dataflow.notify_dataflow = nop_notify_dataflow;
     monitor->notify_zval_free = taint_var_free;
     monitor->notify_database_fetch = db_fetch_trigger;
     monitor->notify_database_query = db_query;
   } else {
     monitor->has_taint = zval_has_taint;
-    monitor->notify_top_stack_motion = top_stack_motion;
+    //monitor->notify_top_stack_motion = top_stack_motion;
+    monitor->opmon_interp = execute_opcode_monitor;
     monitor->notify_function_created = function_created;
     monitor->dataflow.notify_dataflow = internal_dataflow;
     monitor->notify_zval_free = taint_var_free;
@@ -181,6 +187,11 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 
   if (strcmp(EG(sapi_type), "apache2handler") == 0)
     server_startup();
+}
+
+void set_interp_routine(execute_opcode_t routine)
+{
+  vm_hooks->opmon_interp = routine;
 }
 
 void destroy_event_handler()

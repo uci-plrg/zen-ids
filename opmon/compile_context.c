@@ -8,7 +8,7 @@
 #include "metadata_handler.h"
 #include "operand_resolver.h"
 #include "dataflow.h"
-#include "interp_handler_x.h"
+#include "interp_context.h"
 #include "compile_context.h"
 
 #define CLOSURE_NAME "{closure}"
@@ -54,7 +54,7 @@ static sctable_t routines_by_opcode_address;
 static uint closure_count = 0;
 
 static sctable_t handler_table;
-static uint handler_index = 0;
+//static uint handler_index = 0;
 
 #define BUILTIN_ROUTINE_HASH_PLACEHOLDER 1
 
@@ -265,15 +265,18 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
     } else {
       cfg_opcode_t *cfg_opcode;
       bool recompile = false;
-      opcode_handler_t handler;
+      //opcode_handler_t handler;
+      // void *handler;
       uint i;
       //cfg_opcode_edge_t *cfg_edge; // skipping edges for now
       //compiled_edge_target_t target;
+
       end = &op_array->opcodes[op_array->last];
       for (i = 0, op = op_array->opcodes; op < end; i++, op++) {
         if (zend_get_opcode_name(op->opcode) == NULL)
           continue;
 
+        /*
         if (op->handler < interp_handlers[0] || op->handler >= interp_handlers[2000]) {
           handler = sctable_lookup(&handler_table, p2int(op->handler));
           if (handler == NULL) {
@@ -289,6 +292,10 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
             op->handler = handler;
           }
         }
+        */
+
+        //if (get_current_user_level() < 2)
+        //  op->handler = (opcode_handler_t) int2p(p2int(op->handler) | 1); // mark as unverified
 
         cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
         //cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
@@ -700,6 +707,15 @@ void function_created(zend_op_array *src, zend_op_array *f)
 {
   if (f == NULL)
     return;
+
+  if (true) {
+    function_fqn_t *fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(f->opcodes));
+    if (fqn == NULL) {
+      fqn = register_new_function(f);
+      sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
+    }
+    return;
+  }
 
   if (src == NULL) {
     register_new_function(f);

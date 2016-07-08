@@ -6,6 +6,9 @@
   · identify builtins by something faster than name (lazy cache)
   · unplugging exception handling for now
   · check for ZEND_NULL_HANDLER instead of zend_get_opcode_name(), though have to make it visible from zend_vm_execute.h
+  · handle or disable the opcache JIT
+  · how to un-optimize when taint appears during a query? I guess it can't, b/c admin is logged in...
+  · in compile_context.c:function_created(), f->opcodes and src->opcodes seem to always be the same...
 
 
 The one thing I need to know for a return is whether a stack step is a return or not. So could I just
@@ -452,3 +455,134 @@ wordpress/wp-blog-header.php:<script-body>
 
 
 
+-----------------------
+
+ === Native with opcache on log.9.top8500.gor: ~17s
+
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m16.937s
+user	0m0.507s
+sys	0m0.280s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m16.952s
+user	0m0.528s
+sys	0m0.259s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m17.603s
+user	0m0.493s
+sys	0m0.287s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m17.610s
+user	0m0.540s
+sys	0m0.232s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m17.672s
+user	0m0.497s
+sys	0m0.286s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m16.712s
+user	0m0.499s
+sys	0m0.276s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m17.648s
+user	0m0.484s
+sys	0m0.289s
+
+
+ === Opmon + opcache with monitor unplugged: ~25.5s
+
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m25.131s
+user	0m0.537s
+sys	0m0.316s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m25.367s
+user	0m0.597s
+sys	0m0.265s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m25.615s
+user	0m0.550s
+sys	0m0.295s
+
+
+ === Opmon + opcache: ~29s
+
+real	0m25.615s
+user	0m0.550s
+sys	0m0.295s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m28.994s
+user	0m0.567s
+sys	0m0.297s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m28.788s
+user	0m0.557s
+sys	0m0.308s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m28.657s
+user	0m0.612s
+sys	0m0.241s
+
+
+ === Opmon + opcache, naive trusting of verified ops: ~26s
+
+ dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m26.293s
+user	0m0.574s
+sys	0m0.307s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m26.034s
+user	0m0.588s
+sys	0m0.297s
+dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
+Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
+Starting log gor-logs/gitlist/log.9.top8500.gor
+
+real	0m26.132s
+user	0m0.606s
+sys	0m0.266s

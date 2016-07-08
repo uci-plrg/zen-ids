@@ -209,7 +209,7 @@ static op_context_t op_context;
 
 static application_t *current_app = NULL;
 
-static int stack_motion = STACK_MOTION_CALL;
+// static int stack_motion = STACK_MOTION_CALL;
 
 static user_session_t current_session;
 
@@ -255,7 +255,7 @@ static void evo_file_state_synch();
 static void evo_commit_request_patches();
 static bool evo_taint_comparator(void *a, void *b);
 static void intra_monitor_opcode(zend_execute_data *execute_data, zend_op_array *op_array,
-                                   const zend_op *op);
+                                   const zend_op *op, int stack_motion);
 static void file_read_trigger(zend_execute_data *execute_data, const char *syscall,
                               zend_op_array *op_array, const zend_op *call_op,
                               const zval *return_value, const zend_op **args, uint arg_count);
@@ -292,6 +292,13 @@ static void update_user_session()
   } else {
     current_session.active = false;
     // TODO: why is the session sometimes inactive??
+  }
+
+  if (current_session.user_level < 2 || !current_session.active) {
+    op_context.cfm = NULL;
+    zend_execute_ex = execute_opcode_monitor;
+  } else {
+    zend_execute_ex = execute_opcode_direct;
   }
 }
 
@@ -360,12 +367,14 @@ void initialize_interp_context()
   }
 }
 
-static control_flow_metadata_t *initialize_entry_point(application_t *app, uint entry_point_hash)
+static control_flow_metadata_t *initialize_entry_point(application_t *app, uint entry_point_hash,
+                                                       const char *routine_name)
 {
   control_flow_metadata_t *entry_cfm = PROCESS_NEW(control_flow_metadata_t);
   memset(entry_cfm, 0, sizeof(control_flow_metadata_t));
   entry_cfm->cfg = routine_cfg_new(entry_point_hash);
   entry_cfm->app = app;
+  entry_cfm->routine_name = routine_name;
   routine_cfg_assign_opcode(entry_cfm->cfg, ENTRY_POINT_OPCODE,
                             ENTRY_POINT_EXTENDED_VALUE, 0, 0, USER_LEVEL_TOP);
 
@@ -380,8 +389,8 @@ void initialize_interp_app_context(application_t *app)
 {
   current_app = app;
 
-  app->base_frame = (void *) initialize_entry_point(app, BASE_FRAME_HASH);
-  app->system_frame = (void *) initialize_entry_point(app, SYSTEM_FRAME_HASH);
+  app->base_frame = (void *) initialize_entry_point(app, BASE_FRAME_HASH, "<app_base_frame>");
+  app->system_frame = (void *) initialize_entry_point(app, SYSTEM_FRAME_HASH, "<system_frame>");
 
   if (is_standalone_mode() && current_app->evo_taint_log != NULL)
     evo_file_state_synch();
@@ -651,10 +660,12 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
         }
         if (to_index == 0) {
           plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
-               from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+               from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
+               from_cfm->routine_name, to_cfm->routine_name);
         } else {
           plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
-               from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+               from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
+               from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
         }
         plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
 
@@ -789,6 +800,12 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
   if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
     op_context.cfm = get_last_eval_cfm();
   } else {
+    /*
+    if (execute_data->func->type == ZEND_INTERNAL_FUNCTION || op_array == NULL) {
+      execute_data = execute_data->prev_execute_data;
+      op_array = &execute_data->func->op_array;
+    }
+    */
     op_context.cfm = lookup_cfm(execute_data, op_array); // hash lookup
   }
 }
@@ -1230,7 +1247,7 @@ static void create_request_input(zend_op_array *op_array, const zend_op *op, con
   taint_var_add(current_app, value, taint_var);
 }
 
-static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
+static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, int stack_motion)
 {
   zend_op_array *op_array;
   // static uint count = 0;
@@ -1243,9 +1260,17 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
   }
   */
 
-  // op = execute_data->opline;
-  op_array = &execute_data->func->op_array;
+  if (execute_data->func != NULL && execute_data->func->type == ZEND_INTERNAL_FUNCTION) {
+    ERROR("Cannot monitor an internal stack frame! Rewinding to the previous frame.\n");
+    execute_data = execute_data->prev_execute_data;
+  }
 
+  op_array = &execute_data->func->op_array;
+  op_context.execute_data = execute_data;
+  op_context.cur.op = op;
+  op_context.cur.index = (op - op_array->opcodes);
+
+  /*
   if (op_array == NULL || op_array->opcodes == NULL || op_array->type == ZEND_INTERNAL_FUNCTION) {
     zend_execute_data *prev_execute_data = execute_data->prev_execute_data;
     if (stack_motion == STACK_MOTION_RETURN && prev_execute_data != NULL &&
@@ -1259,6 +1284,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
     }
     return;
   }
+  */
 
 #ifdef OPMON_DEBUG
   if (pthread_self() != first_thread_id) {
@@ -1285,13 +1311,12 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
     return;
   }
 
-  op_context.execute_data = execute_data;
-  op_context.cur.op = op;
-  op_context.cur.index = (op - op_array->opcodes);
+  if (op_context.cfm == NULL && stack_motion == STACK_MOTION_NONE)
+    stack_motion = STACK_MOTION_LEAVE;
 
   switch (stack_motion) {
-    case STACK_MOTION_RETURN: // post-indicators: `op` is already the call continuation
-    case STACK_MOTION_LEAVE:
+    //case STACK_MOTION_RETURN: // post-indicators: `op` is already the call continuation
+    case STACK_MOTION_LEAVE: /* FT */
       stack_step(execute_data, op_array);
       op_context.prev.op = op-1;
       op_context.prev.index = op_context.cur.index-1; // todo: could there be a magic call from a 2-op instruction?
@@ -1318,12 +1343,11 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
         }
       }
 
-      if (stack_motion == STACK_MOTION_RETURN)
-        return; // will get a second call with the same `op` and `stack_motion == _NONE`
-      else
+      //if (stack_motion == STACK_MOTION_RETURN)
+      //  return; // will get a second call with the same `op` and `stack_motion == _NONE`
+      //else
         break;
     case STACK_MOTION_CALL: // post-indicator: `op` is already the callee entry point
-    case STACK_MOTION_INCLUDE:
       stack_step(execute_data, op_array);
       edge_executing(execute_data, op_array); // hot!
 
@@ -1333,10 +1357,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
 
       remove_implicit_taint();
       pending_implicit_taint.end_op = NULL;
-      if (stack_motion == STACK_MOTION_INCLUDE)
-        return; // will get a second call with the same `op` and `stack_motion == _NONE`
-      else
-        break;
+      break;
   }
 
   switch (op->opcode) {
@@ -1415,11 +1436,11 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op)
 #endif
 
   if (IS_CFI_TRAINING() || IS_CFI_DGC() || request_has_taint) /* N.B.: taint post-propagates! */
-    intra_monitor_opcode(execute_data, op_array, op);
+    intra_monitor_opcode(execute_data, op_array, op, stack_motion);
 }
 
 static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op_array *op_array,
-                                          const zend_op *op)
+                                          const zend_op *op, int stack_motion)
 {
   const zend_op *jump_target = NULL;
   const zval *jump_predicate = NULL;
@@ -1741,22 +1762,112 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   op_context.is_unconditional_fallthrough = is_unconditional_fallthrough(op_context.cur.op);
 }
 
-int execute_opcode(zend_execute_data *execute_data, opcode_handler_t original_handler TSRMLS_DC)
+static int chaperone_opcode(zend_execute_data *execute_data, zend_op *op, int stack_motion)
 {
-  if (execute_data != NULL)
-    monitor_opcode(execute_data, EX(opline));
+  opcode_handler_t original_handler;
 
-  stack_motion = original_handler(execute_data TSRMLS_DC);
-  return stack_motion;
+  if (execute_data != NULL)
+    monitor_opcode(execute_data, op, stack_motion);
+
+  original_handler = (opcode_handler_t) int2p(p2int(op->handler) & ~1); // This seems ok for performance
+  //if (op->opcode != ZEND_DO_FCALL)
+    ((zend_op *)op)->handler = original_handler;
+  return original_handler(execute_data TSRMLS_DC);
 }
 
-void top_stack_motion(zend_execute_data *execute_data, const zend_op *op, int top_stack_motion)
+/*
+static void top_stack_motion(zend_execute_data *execute_data, const zend_op *op, int top_stack_motion)
 {
   SPOT("Top stack motion: %d\n", top_stack_motion);
 
   stack_motion = top_stack_motion;
   monitor_opcode(execute_data, op);
 }
+*/
+
+static uint chaperone_count = 0;
+
+/* plugged */
+void execute_opcode_monitor(zend_execute_data *execute_data TSRMLS_DC)
+{
+  int stack_motion = STACK_MOTION_CALL;
+
+  while (1) {
+    zend_op *op = (zend_op *) EX(opline);
+
+    if ((p2int(op->handler) & 1) == 1) {
+      stack_motion = chaperone_opcode(execute_data, op, stack_motion);
+      if ((++chaperone_count % 10000) == 0)
+        SPOT("Chaperoned %d opcodes\n", chaperone_count);
+    } else {
+      stack_motion = op->handler(execute_data TSRMLS_CC);
+
+      //if (stack_motion != STACK_MOTION_NONE)
+      //  op_context.cfm = NULL;
+    }
+
+    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
+      op_context.cfm = NULL;
+      if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
+        execute_data = EG(current_execute_data);
+      } else {
+        //op_context.cfm = NULL;
+        return;
+      }
+    }
+
+  }
+  zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
+}
+
+/* unplugged */
+void execute_opcode_direct(zend_execute_data *execute_data TSRMLS_DC)
+{
+  while (1) {
+    int stack_motion = 0;
+    opcode_handler_t original_handler = (opcode_handler_t) int2p(p2int(EX(opline)->handler) & ~1);
+
+    stack_motion = original_handler(execute_data TSRMLS_CC);
+
+    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
+      if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
+        execute_data = EG(current_execute_data);
+      } else {
+        return;
+      }
+    }
+
+  }
+  zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
+}
+
+/* wrapper way:
+void execute_opcode(zend_execute_data *execute_data TSRMLS_DC)
+{
+  opcode_monitor->notify_top_stack_motion(execute_data, EX(opline), 3);
+
+  while (1) {
+    int stack_motion;
+#ifdef ZEND_WIN32
+    if (EG(timed_out)) {
+      zend_timeout(0);
+    }
+#endif
+
+    stack_motion = EX(opline)->handler(execute_data TSRMLS_CC);
+    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
+      if (EXPECTED(stack_motion > STACK_MOTION_NONE)) {
+        execute_data = EG(current_execute_data);
+      } else {
+        notify_top_stack_motion(execute_data, EX(opline), -1);
+        return;
+      }
+    }
+
+  }
+  zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
+}
+*/
 
 /************* Evo Functions *************/
 
@@ -2175,8 +2286,9 @@ void db_fetch_trigger(uint32_t field_count, const char **table_names, const char
     taint_variable_t *var;
     site_modification_t *mod;
 
-    const zend_op *op = op_context.cur.op;
-    zend_op_array *op_array = &op_context.execute_data->func->op_array;
+    zend_execute_data *execute_data = EG(current_execute_data)->prev_execute_data;
+    zend_op_array *op_array = &EX(func)->op_array;
+    const zend_op *op = EX(opline);
 
     uint table_name_hash = hash_string(table_names[0]); /* assuming single-table updates */
     evo_key_t *evo_key = sctable_lookup(&evo_key_table, table_name_hash);
@@ -2276,10 +2388,13 @@ monitor_query_flags_t db_query(const char *query)
 
   if (IS_CFI_DB() && is_admin) { // && TAINT_ALL) {
     if (is_write) {
-      zend_op_array *op_array = &op_context.execute_data->func->op_array;
+      /* N.B.: op_context may be stale if the call is already verified */
+      zend_execute_data *execute_data = EG(current_execute_data)->prev_execute_data; // db is builtin
+      zend_op_array *op_array = &execute_data->func->op_array;
+      uint index = execute_data->opline - op_array->opcodes;
 
-      plog(current_app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query, op_context.cur.index,
-           op_context.cur.op->lineno, site_relative_path(current_app, op_array));
+      plog(current_app, PLOG_TYPE_DB, "query {%s} at %04d(L%04d)%s\n", query, index,
+           execute_data->opline->lineno, site_relative_path(current_app, op_array));
     }
   }
 
@@ -2298,7 +2413,7 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
 {
   zend_bool has_taint = false;
 
-  if (!IS_CFI_EVO() || op_context.execute_data == NULL)
+  if (!IS_CFI_EVO() || op_context.execute_data == NULL || !request_has_taint)
     return has_taint;
 
   if (is_return(op_context.cur.op->opcode)) {
