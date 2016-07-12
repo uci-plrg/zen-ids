@@ -293,7 +293,8 @@ static void update_user_session()
 
   if (current_session.user_level < 2 || !current_session.active) {
     op_context.cfm = NULL;
-    zend_execute_ex = execute_opcode_monitor;
+    zend_execute_ex = execute_opcode_monitor_all;
+    // zend_execute_ex = execute_opcode_direct;
   } else {
     zend_execute_ex = execute_opcode_direct;
   }
@@ -522,13 +523,14 @@ void set_opmon_user_level(long user_level)
   }
 }
 
-static void push_exception_frame()
+static void push_exception_frame(zend_op_array *op_array)
 {
   INCREMENT_STACK(exception_stack, exception_frame);
 
   exception_frame->execute_data = op_context.execute_data;
-  // exception_frame.opcodes = NULL;
-  exception_frame->op = op_context.cur;
+  // exception_frame.opcodes = op_context.execute_data->opcodes;
+  exception_frame->op.op = EG(opline_before_exception);
+  exception_frame->op.index = (exception_frame->op.op - op_array->opcodes);
   exception_frame->cfm = op_context.cfm;
 }
 
@@ -551,12 +553,12 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
                                     to_cfm->cfg->routine_hash, current_session.user_level)) {
       verified = true;
     }
-//#ifdef OPMON_DEBUG
+#ifdef OPMON_DEBUG
     else {
       dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_op->index, to_index,
                                   to_cfm->cfg->routine_hash, current_session.user_level);
     }
-//#endif
+#endif
   }
 
   if (IS_CFI_DGC()) {
@@ -1303,7 +1305,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
          cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
          op_context.cfm->cfg->routine_hash);
     */
-    push_exception_frame();
+    push_exception_frame(op_array);
 
     op_context.prev.op = NULL;
     op_context.is_call_continuation = false;
@@ -1777,10 +1779,10 @@ static int chaperone_opcode(zend_execute_data *execute_data, zend_op *op, int st
   return original_handler(execute_data TSRMLS_DC);
 }
 
-static uint chaperone_count = 0;
+// static uint chaperone_count = 0;
 
 /* plugged */
-void execute_opcode_monitor(zend_execute_data *execute_data TSRMLS_DC)
+void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC)
 {
   int stack_motion = STACK_MOTION_CALL;
 
@@ -1789,8 +1791,8 @@ void execute_opcode_monitor(zend_execute_data *execute_data TSRMLS_DC)
 
     if ((p2int(op->handler) & 1) == 1) {
       stack_motion = chaperone_opcode(execute_data, op, stack_motion);
-      if ((++chaperone_count % 10000) == 0)
-        SPOT("Chaperoned %d opcodes\n", chaperone_count);
+//      if ((++chaperone_count % 10000) == 0)
+//        SPOT("Chaperoned %d opcodes\n", chaperone_count);
     } else {
       stack_motion = op->handler(execute_data TSRMLS_CC);
     }
@@ -1806,6 +1808,10 @@ void execute_opcode_monitor(zend_execute_data *execute_data TSRMLS_DC)
 
   }
   zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
+}
+
+void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
+{
 }
 
 /* unplugged */

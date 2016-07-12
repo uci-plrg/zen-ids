@@ -12,9 +12,7 @@
   · Bailout mode is not working--after a block, the next request has wonko edges that print garble in the plog
 
 
-    monitor->notify_http_request = request_boundary;        < 3%
     monitor->opmon_interp = execute_opcode_monitor;         < 1%
-    monitor->notify_function_created = function_created;    < 4%
     zval_copy_value() and zend_hash_do_resize()             < .5%
 
 
@@ -111,420 +109,7 @@ Switching PHP modes:
 
 ================== WordPress ===================
 
-
-Testing log.8.gor after training logs 1-7
-
- === Native
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real    0m56.440s
-user    0m0.309s
-sys     0m0.200s
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real    0m56.110s
-user    0m0.302s
-sys     0m0.214s
-
-
-  · Losing 12% overhead at the top of compile_context.c:function_compiled()
-
- === Native with opcache: ~11s
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real    0m11.455s
-user    0m0.314s
-sys     0m0.126s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real    0m10.613s
-user    0m0.298s
-sys     0m0.143s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real    0m10.455s
-user    0m0.277s
-sys     0m0.163s
-
-
- === Opmon with opcache (compile only, all other hooks nop, strict CFI): ~12s (9%)
-
- dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m12.117s
-user	0m0.299s
-sys	0m0.141s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m12.530s
-user	0m0.314s
-sys	0m0.145s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m11.668s
-user	0m0.290s
-sys	0m0.159s
-
-
- === Opmon with opcache (no interp optimization, strict CFI): ~18.5s (68%)
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m18.853s
-user	0m0.308s
-sys	0m0.141s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m18.683s
-user	0m0.323s
-sys	0m0.120s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m18.091s
-user	0m0.276s
-sys	0m0.161s
-
-
- === Opmon with opcache (interp inter branches only, strict CFI): ~17.5s (60%)
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m18.259s
-user	0m0.302s
-sys	0m0.146s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m17.887s
-user	0m0.260s
-sys	0m0.172s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m16.828s
-user	0m0.260s
-sys	0m0.178s
-
-
- === Opmon with opcache (interp nop, strict CFI): ~13.5s (23%)
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m13.654s
-user	0m0.273s
-sys	0m0.194s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m13.136s
-user	0m0.310s
-sys	0m0.150s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m14.551s
-user	0m0.306s
-sys	0m0.162s
-
-
- === Opmon with opcache (all enabled, DB CFI, no taint): ~19.5s (77%)
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m20.371s
-user	0m0.273s
-sys	0m0.172s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m19.403s
-user	0m0.310s
-sys	0m0.131s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m19.517s
-user	0m0.294s
-sys	0m0.150s
-
-
- === Opmon with opcache (return from interp, strict CFI): ~19.5s (77%)
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m10.861s
-user	0m0.224s
-sys	0m0.176s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m11.395s
-user	0m0.263s
-sys	0m0.139s
-
-
- === Opmon with opcache (return from interp, DB CFI, no taint): ~12.5s (14%)
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m12.817s
-user	0m0.248s
-sys	0m0.188s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m12.634s
-user	0m0.262s
-sys	0m0.176s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m12.577s
-user	0m0.305s
-sys	0m0.125s
-
-
- === Opmon with opcache (inter-ops only, DB CFI, no taint): ~19.5s (77%)
-
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m20.398s
-user	0m0.295s
-sys	0m0.147s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m19.598s
-user	0m0.298s
-sys	0m0.140s
-dc-5:replay| time replay-wordpress gor-logs/log.8.gor
-Replay gor-logs/log.8.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/log.8.gor
-
-real	0m19.377s
-user	0m0.218s
-sys	0m0.210s
-
-
-
-================== GitList ===================
-
- === Native with opcache: ~87s
-
-dc-5:replay| time replay-gitlist gor-logs/log.19.gor
-Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.19.gor
-
-real	1m26.664s
-user	0m0.891s
-sys	0m0.392s
-dc-5:replay| time replay-gitlist gor-logs/log.19.gor
-Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.19.gor
-
-real	1m27.133s
-user	0m0.824s
-sys	0m0.462s
-
-
- === Opmon with opcache (all enabled, training mode): ~107s (23%)
-
-dc-5:replay| time replay-gitlist gor-logs/log.19.gor
-Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.19.gor
-
-real	1m47.069s
-user	0m0.740s
-sys	0m0.460s
-
-
- === Opmon with opcache (all enabled, DGC mode): ~119s (37%)
-
-dc-5:replay| time replay-gitlist gor-logs/log.19.gor
-Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.19.gor
-
-real	1m58.519s
-user	0m0.721s
-sys	0m0.428s
-dc-5:replay| time replay-gitlist gor-logs/log.19.gor
-Replay gor-logs/log.19.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.19.gor
-
-real	1m59.641s
-user	0m0.772s
-sys	0m0.410s
-
-
--------------------------
-
- === Native with opcache: ~16s
-
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
-real    0m16.392s
-user    0m0.196s
-sys     0m0.095s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
-real    0m16.473s
-user    0m0.171s
-sys     0m0.108s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
-real    0m15.340s
-user    0m0.177s
-sys     0m0.089s
-
-
-
--------------------------
-
-
-
-  ZEND_DO_FCALL
-  ZEND_INCLUDE_OR_EVAL
-  ZEND_RETURN
-  ZEND_RETURN_BY_REF
-  ZEND_FAST_RET
-  ZEND_CATCH
-  ZEND_HANDLE_EXCEPTION
-
-
-$1 = (HashTable *) 0x7fffee115a60 <accel_globals>
-(gdb) p dst
-+p dst
-$2 = (HashTable *) 0x7fffee8800d8
-
-
-+p op_array
-$5 = (zend_op_array *) 0x7fffee881100
-
-+p &new_persistent_script->main_op_array
-$4 = (zend_op_array *) 0x7fffee880008
-
-+p &((zend_function*)script->function_table->arData->val.value.ptr)->op_array
-$18 = (zend_op_array *) 0x7fffee8030e8 a()
-
-0x7fffe116e570
-
-+p p->val
-$19 = {value = {lval = 0x7fffee88a1b8, dval = 6.9533413299531027e-310, counted = 0x7fffee88a1b8, str = 0x7fffee88a1b8,
-    arr = 0x7fffee88a1b8, obj = 0x7fffee88a1b8, res = 0x7fffee88a1b8, ref = 0x7fffee88a1b8, ast = 0x7fffee88a1b8,
-    zv = 0x7fffee88a1b8, ptr = 0x7fffee88a1b8, ce = 0x7fffee88a1b8, func = 0x7fffee88a1b8}, u1 = {v = {type = 0x0,
-      type_flags = 0x20, const_flags = 0x89, reserved = 0xee}, type_info = 0xee892000}, u2 = {var_flags = 0x7fff,
-    next = 0x7fff, cache_slot = 0x7fff, lineno = 0x7fff}}
-
-
-+p *script
-$9 = {full_path = 0x7fffe116e530, main_op_array = {type = 0x2, fn_flags = 0x8000000, function_name = 0x0, scope = 0x0,
-    prototype = 0x0, num_args = 0x0, required_num_args = 0x0, arg_info = 0x0, refcount = 0x7fffee865028,
-    this_var = 0xffffffff, last = 0x1, opcodes = 0x7fffee8795a0, last_var = 0x0, T = 0x0, vars = 0x0,
-    last_brk_cont = 0x0, last_try_catch = 0x0, brk_cont_array = 0x0, try_catch_array = 0x0, static_variables = 0x0,
-    filename = 0x7fffee87c1e0, line_start = 0x0, line_end = 0x0, doc_comment = 0x0, early_binding = 0xffffffff,
-    last_literal = 0x1, literals = 0x7fffee8640c0, last_cache_slot = 0x0, run_time_cache = 0x0, reserved = {0x0, 0x0,
-      0x0, 0x0}}, function_table = {nTableSize = 0x80, nTableMask = 0x7f, nNumUsed = 0x1, nNumOfElements = 0x1,
-    nNextFreeElement = 0x0, arData = 0x7fffee88a000, arHash = 0x7fffee88b000,
-    pDestructor = 0x9d3c92 <zend_function_dtor>, nInternalPointer = 0x0, u = {v = {flags = 0x2, nApplyCount = 0x0,
-        reserve = 0x0}, flags = 0x2}}, class_table = {nTableSize = 0x10, nTableMask = 0x0, nNumUsed = 0x0,
-    nNumOfElements = 0x0, nNextFreeElement = 0x0, arData = 0x0, arHash = 0xfad8f0 <uninitialized_bucket>,
-    pDestructor = 0x9d433d <destroy_zend_class>, nInternalPointer = 0xffffffff, u = {v = {flags = 0x2,
-        nApplyCount = 0x0, reserve = 0x0}, flags = 0x2}}, compiler_halt_offset = 0x0, ping_auto_globals_mask = 0x1,
-  timestamp = 0x573aa4c4, corrupted = 0x0, mem = 0x7fffe116e350, size = 0x690, arena_mem = 0x7fffe116e570,
-  arena_size = 0xd0, dynamic_members = {last_used = 0x0, hits = 0x0, memory_consumption = 0x0, checksum = 0x0,
-    revalidate = 0x577b7c91}}
-
-
-------------------------
-
-index.php:<script-body>
-0x7fffe1fccd20
-#0  register_new_function (op_array=0x7fffea06e000) at /hd/script-safe/php-cfi/opmon/compile_context.c:324
-#1  0x00007fffe9ba9269 in function_created (src=0x0, f=0x7fffea06e000)
-    at /hd/script-safe/php-cfi/opmon/compile_context.c:679
-#2  0x00007ffff3dbdd16 in zend_execute_scripts (type=type@entry=0x8, retval=retval@entry=0x0,
-    file_count=file_count@entry=0x3) at /hd/script-safe/php/Zend/zend.c:1279
-#3  0x00007ffff3d61b85 in php_execute_script (primary_file=primary_file@entry=0x7fffffffd3b0)
-    at /hd/script-safe/php/main/main.c:2575
-
-
-wordpress/wp-blog-header.php:<script-body>
-0x7fffea06e1c0
-#0  register_new_function (op_array=0x7fffea06e1c0) at /hd/script-safe/php-cfi/opmon/compile_context.c:324
-#1  0x00007fffe9ba9269 in function_created (src=0x0, f=0x7fffea06e1c0)
-    at /hd/script-safe/php-cfi/opmon/compile_context.c:679
-#2  0x00007ffff3d897d4 in compile_filename (type=type@entry=0x8, filename=filename@entry=0x7fffe1fccd10)
-    at Zend/zend_language_scanner.l:639
-#3  0x00007ffff3e57ddd in ZEND_INCLUDE_OR_EVAL_SPEC_CONST_HANDLER (execute_data=0x7fffea012030)
-    at /hd/script-safe/php/Zend/zend_vm_execute.h:3041
-
-
-wordpress/wp-blog-header.php:<script-body>
-0x7fffea06e1c0
-#0  register_new_function (op_array=0x7fffea06e1c0) at /hd/script-safe/php-cfi/opmon/compile_context.c:316
-#1  0x00007fffe9ba9269 in function_created (src=0x0, f=0x7fffea06e1c0)
-    at /hd/script-safe/php-cfi/opmon/compile_context.c:679
-#2  0x00007ffff3e57b3f in ZEND_INCLUDE_OR_EVAL_SPEC_CONST_HANDLER (execute_data=0x7fffea012030)
-    at /hd/script-safe/php/Zend/zend_vm_execute.h:3065
-
-
-
------------------------
-
- === Native with opcache on log.9.top8500.gor: ~17s
+ === Native on log.9.top8500.gor: ~17.3s
 
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
@@ -577,79 +162,169 @@ user	0m0.484s
 sys	0m0.289s
 
 
- === Opmon + opcache with monitor unplugged: ~25.5s
+ === Opmon (no verification): 18.3s (6%)
 
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
 Starting log gor-logs/gitlist/log.9.top8500.gor
 
-real	0m25.131s
-user	0m0.537s
-sys	0m0.316s
+real	0m18.474s
+user	0m0.523s
+sys	0m0.267s
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
 Starting log gor-logs/gitlist/log.9.top8500.gor
 
-real	0m25.367s
-user	0m0.597s
-sys	0m0.265s
+real	0m18.182s
+user	0m0.536s
+sys	0m0.244s
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
 Starting log gor-logs/gitlist/log.9.top8500.gor
 
-real	0m25.615s
-user	0m0.550s
-sys	0m0.295s
-
-
- === Opmon + opcache: ~29s
-
-real	0m25.615s
-user	0m0.550s
-sys	0m0.295s
+real	0m18.272s
+user	0m0.459s
+sys	0m0.335s
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
 Starting log gor-logs/gitlist/log.9.top8500.gor
 
-real	0m28.994s
-user	0m0.567s
-sys	0m0.297s
+
+ === Opmon (naive verification): 21s (21%)
+
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
 Starting log gor-logs/gitlist/log.9.top8500.gor
 
-real	0m28.788s
-user	0m0.557s
-sys	0m0.308s
+real	0m21.500s
+user	0m0.495s
+sys	0m0.293s
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
 Starting log gor-logs/gitlist/log.9.top8500.gor
 
-real	0m28.657s
-user	0m0.612s
-sys	0m0.241s
-
-
- === Opmon + opcache, naive trusting of verified ops: ~26s
-
- dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
-real	0m26.293s
-user	0m0.574s
-sys	0m0.307s
+real	0m20.915s
+user	0m0.520s
+sys	0m0.272s
 dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
 Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
 Starting log gor-logs/gitlist/log.9.top8500.gor
 
-real	0m26.034s
-user	0m0.588s
-sys	0m0.297s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
+real	0m20.856s
+user	0m0.573s
+sys	0m0.210s
 
-real	0m26.132s
-user	0m0.606s
-sys	0m0.266s
+
+================== GitList ===================
+
+ === Native: ~15.8s
+
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real    0m16.392s
+user    0m0.196s
+sys     0m0.095s
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real    0m16.473s
+user    0m0.171s
+sys     0m0.108s
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real    0m15.340s
+user    0m0.177s
+sys     0m0.089s
+
+
+ === Opmon (naive verification): ~18.5s (17%)
+
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real	0m17.738s
+user	0m0.188s
+sys	0m0.100s
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real	0m18.278s
+user	0m0.189s
+sys	0m0.108s
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real	0m19.361s
+user	0m0.188s
+sys	0m0.097s
+
+ === Opmon (no verification): ~16.4s (2%)
+
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real	0m16.377s
+user	0m0.226s
+sys	0m0.052s
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real	0m16.682s
+user	0m0.202s
+sys	0m0.088s
+dc-5:replay| time replay-gitlist gor-logs/log.16.gor
+Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
+Starting log gor-logs/log.16.gor
+
+real	0m15.928s
+user	0m0.175s
+sys	0m0.108s
+
+
+-------------------------
+
+XXXX7fff0123456X
+
+tail bit:
+
+
+-------------------------
+
+ === zval_copy off
+
+17.49
+18.62
+17.89
+17.78
+
+
+ === HT and zval_copy off
+
+17.64
+17.61
+17.63
+
+
+ === HT and zval_copy on (5% vs. off)
+
+18.59
+18.43
+18.27
+
+
+ === Opmon, HT and zval_copy on (10% vs. all off)
+
+19.38
+19.37
+19.29
+

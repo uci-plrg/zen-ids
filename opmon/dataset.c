@@ -225,13 +225,74 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
     } else if (TEST(DATASET_NODE_TYPE_EVAL, node->type_flags)) {
       dataset_eval_targets_t *targets = RESOLVE_PTR(dataset, node->eval_targets,
                                                     dataset_eval_targets_t);
-      for (i = 0; i < targets->target_count; i++) {
+      for (i = 0; i < targets->target_count; i++) { // shouldn't we check the eval id?
         if (targets->targets[i].index == to_index &&
             MASK_USER_LEVEL(targets->targets[i].index) <= user_level)
           return true;
       }
       return false; // for debug stopping
     }
+  }
+  return false;
+}
+
+dataset_target_routines_t *
+dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, uint from_index)
+{
+  if (app->dataset != NULL) {
+    dataset_node_t *node = &routine->nodes[from_index];
+    dataset_app_t *dataset = (dataset_app_t *) app->dataset;
+
+    if (TEST(DATASET_NODE_TYPE_CALL, node->type_flags)) {
+      dataset_call_targets_t *targets;
+      targets = (dataset_call_targets_t *) RESOLVE_PTR(dataset, node->call_targets,
+                                                       dataset_call_targets_t);
+      if (targets->target_count == 1)
+        return (dataset_target_routines_t *) // bit pack the only target
+      else if (targets->target_count > 0)
+        return (dataset_target_routines_t *) targets;
+    } else if (TEST(DATASET_NODE_TYPE_EVAL, node->type_flags)) {
+      dataset_eval_targets_t *targets;
+      targets = (dataset_eval_targets_t *) RESOLVE_PTR(dataset, node->eval_targets,
+                                                       dataset_eval_targets_t);
+      if (targets->target_count == 1)
+        return (dataset_target_routines_t *) // bit pack the only target
+      else if (targets->target_count > 0)
+        return (dataset_target_routines_t *) targets;
+    }
+  }
+  return NULL;
+}
+
+bool dataset_verify_routine_target(dataset_target_routines_t *targets, uint target_id,
+                                   uint to_index, uint user_level, bool is_eval)
+{
+  uint i;
+
+  if (is_eval) {
+    dataset_eval_targets_t *eval_targets = (dataset_eval_targets_t *) targets;
+
+    for (i = 0; i < eval_targets->target_count; i++) { // shouldn't we check the eval id?
+      if (eval_targets->targets[i].index == to_index &&
+          MASK_USER_LEVEL(eval_targets->targets[i].index) <= user_level)
+        return true;
+    }
+  } else {
+    dataset_call_targets_t *call_targets = (dataset_call_targets_t *) targets;
+    dataset_call_target_t *first = &call_targets->targets[0]; // fast path for common case
+
+    if (first->routine_hash == target_id &&
+          MASK_TARGET_INDEX(first->index) == to_index &&
+          MASK_USER_LEVEL(first->index) <= user_level)
+      return true;
+
+    for (i = 1; i < call_targets->target_count; i++) {
+      if (call_targets->targets[i].routine_hash == target_id &&
+          MASK_TARGET_INDEX(call_targets->targets[i].index) == to_index &&
+          MASK_USER_LEVEL(call_targets->targets[i].index) <= user_level)
+        return true;
+    }
+    return false; // for debug stopping
   }
   return false;
 }
