@@ -1814,9 +1814,10 @@ static scarray_t routine_edge_targets; // init large
 
 void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
 {
-  int stack_motion = STACK_MOTION_CALL;
 
   while (1) {
+    uint routine_edges_index;
+    int stack_motion = STACK_MOTION_CALL;
     uint64 original_handler_addr = p2int(EX(opline)->handler) & ORIGINAL_HANDLER_BITS;
     opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
@@ -1824,12 +1825,12 @@ void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
 
     if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
       if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
-        uint routine_edges_index = (p2int(EX(opline)->handler) & ROUTINE_EDGE_INDEX_BITS) >> ROUTINE_EDGE_INDEX_SHIFT;
+
+        execute_data = EG(current_execute_data);
+
+        routine_edges_index = (p2int(EX(opline)->handler) & ROUTINE_EDGE_INDEX_BITS) >> ROUTINE_EDGE_INDEX_SHIFT;
         if (routine_edges_index > 0) {
           dataset_target_routines_t *targets = routine_edge_targets.data[routine_edges_index];
-
-          execute_data = EG(current_execute_data);
-
           if (targets != (dataset_target_routines_t *) execute_data) // foobar here
             SPOT("block it!\n");
         }
