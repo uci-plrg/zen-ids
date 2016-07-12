@@ -236,6 +236,37 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
   return false;
 }
 
+#define TARGET_ROUTINE_ID_MASK 0xffffffff
+#define TARGET_INDEX_SHIFT 0x20
+#define TARGET_INDEX_MASK 0x1ffffff
+#define TARGET_USER_LEVEL_SHIFT 0x39
+#define TARGET_USER_LEVEL_MASK 0x3f
+#define TARGET_SINGLETON_FLAG 0x8000000000000000
+
+static dataset_target_routines_t *pack_singleton_call_target(dataset_call_target_t *target)
+{
+  uint64 metadata = target->routine_hash;
+  uint64 user_level = MASK_USER_LEVEL(target->index);
+  uint64 index = MASK_TARGET_INDEX(target->index & TARGET_INDEX_MASK);
+
+  metadata |= TARGET_SINGLETON_FLAG;
+  metadata |= (index << TARGET_INDEX_SHIFT);
+  metadata |= (user_level << TARGET_USER_LEVEL_SHIFT);
+  return (dataset_target_routines_t *) (void *) metadata;
+}
+
+static dataset_target_routines_t *pack_singleton_eval_target(dataset_eval_target_t *target)
+{
+  uint64 metadata = target->eval_id;
+  uint64 user_level = MASK_USER_LEVEL(target->index);
+  uint64 index = MASK_TARGET_INDEX(target->index & TARGET_INDEX_MASK);
+
+  metadata |= TARGET_SINGLETON_FLAG;
+  metadata |= (index << TARGET_INDEX_SHIFT);
+  metadata |= (user_level << TARGET_USER_LEVEL_SHIFT);
+  return (dataset_target_routines_t *) (void *) metadata;
+}
+
 dataset_target_routines_t *
 dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, uint from_index)
 {
@@ -248,7 +279,7 @@ dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, u
       targets = (dataset_call_targets_t *) RESOLVE_PTR(dataset, node->call_targets,
                                                        dataset_call_targets_t);
       if (targets->target_count == 1)
-        return (dataset_target_routines_t *) NULL; // bit pack the only target
+        return pack_singleton_call_target(&targets->targets[0]);
       else if (targets->target_count > 0)
         return (dataset_target_routines_t *) targets;
     } else if (TEST(DATASET_NODE_TYPE_EVAL, node->type_flags)) {
@@ -256,7 +287,7 @@ dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, u
       targets = (dataset_eval_targets_t *) RESOLVE_PTR(dataset, node->eval_targets,
                                                        dataset_eval_targets_t);
       if (targets->target_count == 1)
-        return (dataset_target_routines_t *) NULL; // bit pack the only target
+        return pack_singleton_eval_target(&targets->targets[0]);
       else if (targets->target_count > 0)
         return (dataset_target_routines_t *) targets;
     }
@@ -268,31 +299,34 @@ bool dataset_verify_routine_target(dataset_target_routines_t *targets, uint targ
                                    uint to_index, uint user_level, bool is_eval)
 {
   uint i;
+  uint64 metadata = p2int(targets);
 
-  if (is_eval) {
-    dataset_eval_targets_t *eval_targets = (dataset_eval_targets_t *) targets;
+  if ((metadata & TARGET_SINGLETON_FLAG) == 0) {
+    if (is_eval) {
+      dataset_eval_targets_t *eval_targets = (dataset_eval_targets_t *) targets;
 
-    for (i = 0; i < eval_targets->target_count; i++) { // shouldn't we check the eval id?
-      if (eval_targets->targets[i].index == to_index &&
-          MASK_USER_LEVEL(eval_targets->targets[i].index) <= user_level)
-        return true;
+      for (i = 0; i < eval_targets->target_count; i++) { // shouldn't we check the eval id?
+        if (MASK_TARGET_INDEX(eval_targets->targets[i].index) == to_index &&
+            MASK_USER_LEVEL(eval_targets->targets[i].index) <= user_level)
+          return true;
+      }
+    } else {
+      dataset_call_targets_t *call_targets = (dataset_call_targets_t *) targets;
+
+      for (i = 0; i < call_targets->target_count; i++) {
+        if (call_targets->targets[i].routine_hash == target_id &&
+            MASK_TARGET_INDEX(call_targets->targets[i].index) == to_index &&
+            MASK_USER_LEVEL(call_targets->targets[i].index) <= user_level)
+          return true;
+      }
+      return false; // for debug stopping
     }
   } else {
-    dataset_call_targets_t *call_targets = (dataset_call_targets_t *) targets;
-    dataset_call_target_t *first = &call_targets->targets[0]; // fast path for common case
+    uint index = (metadata >> TARGET_INDEX_SHIFT) & TARGET_INDEX_MASK;
+    uint min_trusted_user_level = (metadata >> TARGET_USER_LEVEL_SHIFT) & TARGET_USER_LEVEL_MASK;
+    uint routine_id = metadata & TARGET_ROUTINE_ID_MASK;
 
-    if (first->routine_hash == target_id &&
-          MASK_TARGET_INDEX(first->index) == to_index &&
-          MASK_USER_LEVEL(first->index) <= user_level)
-      return true;
-
-    for (i = 1; i < call_targets->target_count; i++) {
-      if (call_targets->targets[i].routine_hash == target_id &&
-          MASK_TARGET_INDEX(call_targets->targets[i].index) == to_index &&
-          MASK_USER_LEVEL(call_targets->targets[i].index) <= user_level)
-        return true;
-    }
-    return false; // for debug stopping
+    return (routine_id == target_id && index == to_index && min_trusted_user_level <= user_level);
   }
   return false;
 }

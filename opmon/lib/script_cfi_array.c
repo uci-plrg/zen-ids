@@ -17,12 +17,23 @@ static void expand(scarray_t *a)
   a->capacity *= 2;
 }
 
-void scarray_init(scarray_t *a)
+static void init(scarray_t *a)
 {
-  a->capacity = BASE_CAPACITY;
   a->size = 0;
   a->data = PROCESS_ALLOC(a->capacity * sizeof(void *));
   memset(a->data, 0, a->capacity * sizeof(void *));
+}
+
+void scarray_init(scarray_t *a)
+{
+  a->capacity = BASE_CAPACITY;
+  init(a);
+}
+
+void scarray_init_ex(scarray_t *a, uint capacity)
+{
+  a->capacity = capacity;
+  init(a);
 }
 
 void scarray_destroy(scarray_t *a)

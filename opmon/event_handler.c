@@ -159,16 +159,14 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   monitor->notify_worker_startup = init_worker;
   monitor->opmon_tokenize = NULL; //tokenize_file;
   monitor->opmon_dataflow = start_dataflow_analysis;
+
+  /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
+  enable_request_taint_tracking(false);
+
   if (false) {
     monitor->notify_http_request = nop_request_boundary;
     monitor->notify_function_created = nop_notify_function_created;
     monitor->opmon_interp = execute_opcode_direct;
-
-    monitor->has_taint = nop_has_taint;
-    monitor->dataflow.notify_dataflow = nop_notify_dataflow;
-    monitor->notify_zval_free = nop_notify_zval_free;
-    monitor->notify_database_fetch = nop_notify_database_fetch;
-    monitor->notify_database_query = nop_notify_database_query;
   } else if (false) {
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
@@ -183,13 +181,6 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
     monitor->opmon_interp = execute_opcode_monitor_calls;
-
-    /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
-    monitor->has_taint = nop_has_taint;
-    monitor->dataflow.notify_dataflow = nop_notify_dataflow;
-    monitor->notify_zval_free = nop_notify_zval_free;
-    monitor->notify_database_fetch = nop_notify_database_fetch;
-    monitor->notify_database_query = nop_notify_database_query;
   }
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
@@ -200,8 +191,6 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 
 void enable_request_taint_tracking(bool enabled)
 {
-  SPOT("taint %s\n", enabled ? "on" : "off");
-
   if (enabled) {
     vm_hooks->opmon_interp = execute_opcode_monitor_all;
     vm_hooks->has_taint = zval_has_taint;

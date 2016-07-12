@@ -16,6 +16,7 @@ typedef struct _scarray_t {
 typedef struct _scarray_iterator_t scarray_iterator_t;
 
 void scarray_init(scarray_t *a);
+void scarray_init_ex(scarray_t *a, uint capacity);
 void scarray_destroy(scarray_t *a);
 void scarray_append(scarray_t *a, void *e);
 void *scarray_get(scarray_t *a, uint index);

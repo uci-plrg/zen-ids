@@ -201,7 +201,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
     }
     fqn->unit.application = locate_application(filename);
     site_filename = filename + strlen(fqn->unit.application->root);
-    buffer = REQUEST_ALLOC(strlen(site_filename) + 1);
+    buffer = PROCESS_ALLOC(strlen(site_filename) + 1);
     strcpy(buffer, site_filename);
     fqn->unit.path = buffer;
     buffer = NULL;
@@ -313,7 +313,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
 
   /******************************** 66s ************************************/
 
-  buffer = REQUEST_ALLOC(strlen(routine_name) + 1);
+  buffer = PROCESS_ALLOC(strlen(routine_name) + 1);
   strcpy(buffer, routine_name);
   cfm.routine_name = buffer;
   buffer = NULL;

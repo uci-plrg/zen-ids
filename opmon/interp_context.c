@@ -214,6 +214,13 @@ static uint64 current_request_id = 0;
 
 static sctable_t builtin_cfgs;
 
+#define ORIGINAL_HANDLER_BITS 0x7fffffffffff
+#define ROUTINE_EDGE_INDEX_CACHED 0x800000000000
+#define ROUTINE_EDGE_INDEX_BITS 0xffff000000000000
+#define ROUTINE_EDGE_INDEX_SHIFT 0x30
+
+static scarray_t routine_edge_targets;
+
 #ifdef OPMON_DEBUG
 static pthread_t first_thread_id;
 #endif
@@ -293,7 +300,7 @@ static void update_user_session()
 
   if (current_session.user_level < 2 || !current_session.active) {
     op_context.cfm = NULL;
-    zend_execute_ex = execute_opcode_monitor_all;
+    zend_execute_ex = execute_opcode_monitor_calls;
     // zend_execute_ex = execute_opcode_direct;
   } else {
     zend_execute_ex = execute_opcode_direct;
@@ -332,6 +339,8 @@ void initialize_interp_context()
 
   builtin_cfgs.hash_bits = 7;
   sctable_init(&builtin_cfgs);
+
+  scarray_init_ex(&routine_edge_targets, 1000);
 
   current_session.user_level = USER_LEVEL_BOTTOM;
   current_session.active = false;
@@ -534,6 +543,38 @@ static void push_exception_frame(zend_op_array *op_array)
   exception_frame->cfm = op_context.cfm;
 }
 
+static void block_request(zend_execute_data *from_execute_data, control_flow_metadata_t *from_cfm,
+                          op_t *from_op, control_flow_metadata_t *to_cfm, uint to_index)
+{
+  const char *address = NULL;
+  bool block_now = !is_standalone_mode() && !request_blocked;
+
+  if (block_now) {
+    request_blocked = true;
+    address = get_current_request_address();
+
+    plog(from_cfm->app, PLOG_TYPE_CFG_BLOCK, "block request %08lld 0x%llx: %s\n",
+         current_request_id, get_current_request_start_time(), address);
+  }
+  if (to_index == 0) {
+    plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
+         from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
+         from_cfm->routine_name, to_cfm->routine_name);
+  } else {
+    plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
+         from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
+         from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+  }
+  plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
+
+  if (block_now && IS_CFI_BAILOUT_ENABLED()) {
+    zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
+               current_request_id, get_current_request_start_time(), address);
+    zend_bailout();
+    ERROR("Failed to bail out on blocked request!\n");
+  }
+}
+
 static void
 evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadata_t *from_cfm,
                       op_t *from_op, control_flow_metadata_t *to_cfm, uint to_index)
@@ -650,33 +691,7 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
         plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
       } else {
-        const char *address = NULL;
-        bool block_now = !is_standalone_mode() && !request_blocked;
-
-        if (block_now) {
-          request_blocked = true;
-          address = get_current_request_address();
-
-          plog(from_cfm->app, PLOG_TYPE_CFG_BLOCK, "block request %08lld 0x%llx: %s\n",
-               current_request_id, get_current_request_start_time(), address);
-        }
-        if (to_index == 0) {
-          plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
-               from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
-               from_cfm->routine_name, to_cfm->routine_name);
-        } else {
-          plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
-               from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
-               from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
-        }
-        plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
-
-        if (block_now && IS_CFI_BAILOUT_ENABLED()) {
-          zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
-                     current_request_id, get_current_request_start_time(), address);
-          zend_bailout();
-          ERROR("Failed to bail out on blocked request!\n");
-        }
+        block_request(from_execute_data, from_cfm, from_op, to_cfm, to_index);
       }
     }
   }
@@ -787,7 +802,8 @@ static control_flow_metadata_t *lookup_cfm(zend_execute_data *execute_data, zend
   control_flow_metadata_t *monitored_cfm = get_cfm_by_opcodes_address(op_array->opcodes);
   if (monitored_cfm == NULL) {
     ERROR("Failed to find opcodes for hash 0x%llx\n", hash_addr(op_array->opcodes));
-    monitored_cfm = lookup_cfm_by_name(execute_data, op_array);
+    if (false)
+      monitored_cfm = lookup_cfm_by_name(execute_data, op_array);
   }
 
   return monitored_cfm;
@@ -1764,10 +1780,6 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   op_context.is_unconditional_fallthrough = is_unconditional_fallthrough(op_context.cur.op);
 }
 
-#define ORIGINAL_HANDLER_BITS 0x7fffffffffff
-#define ROUTINE_EDGE_INDEX_BITS 0xffff800000000000
-#define ROUTINE_EDGE_INDEX_SHIFT 0x2f
-
 static int chaperone_opcode(zend_execute_data *execute_data, zend_op *op, int stack_motion)
 {
   opcode_handler_t original_handler;
@@ -1810,33 +1822,94 @@ void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC)
   zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
 
-static scarray_t routine_edge_targets; // init large
-
 void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
 {
-
   while (1) {
-    uint routine_edges_index;
     int stack_motion = STACK_MOTION_CALL;
     uint64 original_handler_addr = p2int(EX(opline)->handler) & ORIGINAL_HANDLER_BITS;
     opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
     stack_motion = original_handler(execute_data TSRMLS_CC);
 
-    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
-      if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
+    switch (stack_motion) {
+      case STACK_MOTION_RETURN:
+        return;
+      case STACK_MOTION_LEAVE:
+        execute_data = EG(current_execute_data);
+        break;
+      case STACK_MOTION_CALL: {
+        bool block = false;
+        zend_op_array *to_op_array;
+        zend_op *op = (zend_op *) EX(opline);
+        control_flow_metadata_t *to_cfm = NULL; // better to separate them than waste init?
+        control_flow_metadata_t *from_cfm = NULL;
+        dataset_target_routines_t *targets = NULL;
+        zend_execute_data *from_execute_data = execute_data;
+        uint64 routine_edges_index, routine_edge_metadata = p2int(op->handler);
+
+        if ((routine_edge_metadata & ROUTINE_EDGE_INDEX_CACHED) == 0) {
+          zend_op_array *op_array = &execute_data->func->op_array;
+          uint from_index = op - op_array->opcodes;
+
+          original_handler_addr |= ROUTINE_EDGE_INDEX_CACHED;
+          from_cfm = lookup_cfm(execute_data, op_array);
+          if (from_cfm == NULL || from_cfm->dataset == NULL) {
+            block = true;
+          } else {
+            targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
+          }
+
+          // debug
+          if (targets == NULL)
+            targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
+
+          if (targets != NULL) {
+            routine_edges_index = routine_edge_targets.size;
+            original_handler_addr |= (routine_edges_index << ROUTINE_EDGE_INDEX_SHIFT);
+
+            scarray_append(&routine_edge_targets, targets);
+
+            SPOT("Append 0x%x:%d -> { "PX" } at index %d\n", from_cfm->cfg->routine_hash,
+                 from_index, p2int(targets), (int) routine_edges_index);
+          } else {
+            block = true;
+
+            SPOT("No target routines for %s 0x%x:%d -> { "PX" }\n", from_cfm->routine_name,
+                 from_cfm->cfg->routine_hash, from_index, p2int(targets));
+          }
+          op->handler = (opcode_handler_t) int2p(original_handler_addr);
+        } else {
+          routine_edges_index = routine_edge_metadata >> ROUTINE_EDGE_INDEX_SHIFT;
+          targets = routine_edge_targets.data[routine_edges_index];
+        }
 
         execute_data = EG(current_execute_data);
 
-        routine_edges_index = (p2int(EX(opline)->handler) & ROUTINE_EDGE_INDEX_BITS) >> ROUTINE_EDGE_INDEX_SHIFT;
-        if (routine_edges_index > 0) {
-          dataset_target_routines_t *targets = routine_edge_targets.data[routine_edges_index];
-          if (targets != (dataset_target_routines_t *) execute_data) // foobar here
-            SPOT("block it!\n");
+        if (targets != NULL) {
+          to_op_array = &execute_data->func->op_array;
+          to_cfm = lookup_cfm(execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+
+          block = !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
+                                                 current_session.user_level,
+                                                 to_op_array->type == ZEND_EVAL_CODE);
         }
-      } else {
-        return;
-      }
+
+        if (block) {
+          zend_op_array *from_op_array = &from_execute_data->func->op_array;
+          op_t from_op = {
+            from_execute_data->opline,
+            from_execute_data->opline - from_op_array->opcodes
+          };
+
+          to_op_array = &execute_data->func->op_array;
+          if (to_cfm == NULL)
+            to_cfm = lookup_cfm(execute_data, to_op_array);
+          if (from_cfm == NULL)
+            from_cfm = lookup_cfm(from_execute_data, from_op_array);
+          block_request(from_execute_data, from_cfm, &from_op, to_cfm, 0);
+        }
+      } break;
+      default: ;
     }
 
   }
