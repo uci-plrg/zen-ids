@@ -248,7 +248,7 @@ dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, u
       targets = (dataset_call_targets_t *) RESOLVE_PTR(dataset, node->call_targets,
                                                        dataset_call_targets_t);
       if (targets->target_count == 1)
-        return (dataset_target_routines_t *) // bit pack the only target
+        return (dataset_target_routines_t *) NULL; // bit pack the only target
       else if (targets->target_count > 0)
         return (dataset_target_routines_t *) targets;
     } else if (TEST(DATASET_NODE_TYPE_EVAL, node->type_flags)) {
@@ -256,7 +256,7 @@ dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, u
       targets = (dataset_eval_targets_t *) RESOLVE_PTR(dataset, node->eval_targets,
                                                        dataset_eval_targets_t);
       if (targets->target_count == 1)
-        return (dataset_target_routines_t *) // bit pack the only target
+        return (dataset_target_routines_t *) NULL; // bit pack the only target
       else if (targets->target_count > 0)
         return (dataset_target_routines_t *) targets;
     }

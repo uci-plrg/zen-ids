@@ -1764,6 +1764,10 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   op_context.is_unconditional_fallthrough = is_unconditional_fallthrough(op_context.cur.op);
 }
 
+#define ORIGINAL_HANDLER_BITS 0x7fffffffffff
+#define ROUTINE_EDGE_INDEX_BITS 0xffff800000000000
+#define ROUTINE_EDGE_INDEX_SHIFT 0x2f
+
 static int chaperone_opcode(zend_execute_data *execute_data, zend_op *op, int stack_motion)
 {
   opcode_handler_t original_handler;
@@ -1771,7 +1775,7 @@ static int chaperone_opcode(zend_execute_data *execute_data, zend_op *op, int st
   if (execute_data != NULL)
     monitor_opcode(execute_data, op, stack_motion);
 
-  original_handler = (opcode_handler_t) int2p(p2int(op->handler) & ~1); // This seems ok for performance
+  original_handler = (opcode_handler_t) int2p(p2int(op->handler) & ORIGINAL_HANDLER_BITS);
 
   if (!IS_CFI_TRAINING())
     ((zend_op *)op)->handler = original_handler;
@@ -1789,13 +1793,9 @@ void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC)
   while (1) {
     zend_op *op = (zend_op *) EX(opline);
 
-    if ((p2int(op->handler) & 1) == 1) {
-      stack_motion = chaperone_opcode(execute_data, op, stack_motion);
-//      if ((++chaperone_count % 10000) == 0)
-//        SPOT("Chaperoned %d opcodes\n", chaperone_count);
-    } else {
-      stack_motion = op->handler(execute_data TSRMLS_CC);
-    }
+    stack_motion = chaperone_opcode(execute_data, op, stack_motion);
+//    if ((++chaperone_count % 10000) == 0)
+//      SPOT("Chaperoned %d opcodes\n", chaperone_count);
 
     if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
       op_context.cfm = NULL;
@@ -1810,8 +1810,36 @@ void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC)
   zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
 
+static scarray_t routine_edge_targets; // init large
+
 void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
 {
+  int stack_motion = STACK_MOTION_CALL;
+
+  while (1) {
+    uint64 original_handler_addr = p2int(EX(opline)->handler) & ORIGINAL_HANDLER_BITS;
+    opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
+
+    stack_motion = original_handler(execute_data TSRMLS_CC);
+
+    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
+      if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
+        uint routine_edges_index = (p2int(EX(opline)->handler) & ROUTINE_EDGE_INDEX_BITS) >> ROUTINE_EDGE_INDEX_SHIFT;
+        if (routine_edges_index > 0) {
+          dataset_target_routines_t *targets = routine_edge_targets.data[routine_edges_index];
+
+          execute_data = EG(current_execute_data);
+
+          if (targets != (dataset_target_routines_t *) execute_data) // foobar here
+            SPOT("block it!\n");
+        }
+      } else {
+        return;
+      }
+    }
+
+  }
+  zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
 
 /* unplugged */
@@ -1819,7 +1847,8 @@ void execute_opcode_direct(zend_execute_data *execute_data TSRMLS_DC)
 {
   while (1) {
     int stack_motion = 0;
-    opcode_handler_t original_handler = (opcode_handler_t) int2p(p2int(EX(opline)->handler) & ~1);
+    uint64 original_handler_addr = p2int(EX(opline)->handler) & ORIGINAL_HANDLER_BITS;
+    opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
     stack_motion = original_handler(execute_data TSRMLS_CC);
 

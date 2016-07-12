@@ -4,6 +4,8 @@
 #include "lib/script_cfi_utils.h"
 #include "metadata_handler.h"
 
+typedef void * dataset_target_routines_t;
+
 void *install_dataset(void *dataset);
 uint dataset_get_eval_count(void *app);
 dataset_routine_t *dataset_routine_lookup(application_t *app, uint routine_hash);
