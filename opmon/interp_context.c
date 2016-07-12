@@ -298,12 +298,14 @@ static void update_user_session()
     // TODO: why is the session sometimes inactive??
   }
 
-  if (current_session.user_level < 2 || !current_session.active) {
-    op_context.cfm = NULL;
-    zend_execute_ex = execute_opcode_monitor_calls;
-    // zend_execute_ex = execute_opcode_direct;
-  } else {
-    zend_execute_ex = execute_opcode_direct;
+  if (!IS_CFI_TRAINING()) {
+    if (current_session.user_level < 2 || !current_session.active) {
+      op_context.cfm = NULL;
+      zend_execute_ex = execute_opcode_monitor_calls;
+      // zend_execute_ex = execute_opcode_direct;
+    } else {
+      zend_execute_ex = execute_opcode_direct;
+    }
   }
 }
 
@@ -1825,11 +1827,10 @@ void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC)
 void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
 {
   while (1) {
-    int stack_motion = STACK_MOTION_CALL;
     uint64 original_handler_addr = p2int(EX(opline)->handler) & ORIGINAL_HANDLER_BITS;
     opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
-    stack_motion = original_handler(execute_data TSRMLS_CC);
+    int stack_motion = original_handler(execute_data TSRMLS_CC);
 
     switch (stack_motion) {
       case STACK_MOTION_RETURN:
@@ -1857,11 +1858,10 @@ void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
             block = true;
           } else {
             targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
+            // debug
+            if (targets == NULL)
+              targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
           }
-
-          // debug
-          if (targets == NULL)
-            targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
 
           if (targets != NULL) {
             routine_edges_index = routine_edge_targets.size;

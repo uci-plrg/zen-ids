@@ -162,25 +162,24 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 
   /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
   enable_request_taint_tracking(false);
+  if (IS_CFI_TRAINING())
+    zend_execute_ex = execute_opcode_monitor_all;
 
-  if (false) {
+  if (false) { // overrides for performance testing
     monitor->notify_http_request = nop_request_boundary;
     monitor->notify_function_created = nop_notify_function_created;
-    monitor->opmon_interp = execute_opcode_direct;
-  } else if (false) {
+  } else if (false) { // overrides for performance testing
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
-    monitor->opmon_interp = execute_opcode_monitor_calls;
 
     monitor->has_taint = nop_has_taint;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
     monitor->notify_zval_free = nop_notify_zval_free;
     monitor->notify_database_fetch = nop_notify_database_fetch;
     monitor->notify_database_query = nop_notify_database_query;
-  } else {
+  } else { // normal mode
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
-    monitor->opmon_interp = execute_opcode_monitor_calls;
   }
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
@@ -192,14 +191,16 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 void enable_request_taint_tracking(bool enabled)
 {
   if (enabled) {
-    vm_hooks->opmon_interp = execute_opcode_monitor_all;
+    zend_execute_ex = execute_opcode_monitor_all;
+
     vm_hooks->has_taint = zval_has_taint;
     vm_hooks->dataflow.notify_dataflow = internal_dataflow;
     vm_hooks->notify_zval_free = taint_var_free;
     vm_hooks->notify_database_fetch = db_fetch_trigger;
     vm_hooks->notify_database_query = db_query;
   } else {
-    vm_hooks->opmon_interp = execute_opcode_monitor_calls;
+    zend_execute_ex = execute_opcode_monitor_calls;
+
     vm_hooks->has_taint = nop_has_taint;
     vm_hooks->dataflow.notify_dataflow = nop_notify_dataflow;
     vm_hooks->notify_zval_free = nop_notify_zval_free;

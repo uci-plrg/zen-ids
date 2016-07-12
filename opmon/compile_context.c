@@ -303,6 +303,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         if (op->opcode != cfg_opcode->opcode ||
             op->extended_value != cfg_opcode->extended_value) {
           recompile = true;
+          SPOT("Recompile %s\n", routine_name);
           break;
         }
         //target = get_compiled_edge_target(op, i);

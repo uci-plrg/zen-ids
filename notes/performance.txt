@@ -111,191 +111,56 @@ Switching PHP modes:
 
  === Native on log.9.top8500.gor: ~17.3s
 
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m16.937s
-user	0m0.507s
-sys	0m0.280s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m16.952s
-user	0m0.528s
-sys	0m0.259s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m17.603s
-user	0m0.493s
-sys	0m0.287s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m17.610s
-user	0m0.540s
-sys	0m0.232s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m17.672s
-user	0m0.497s
-sys	0m0.286s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m16.712s
-user	0m0.499s
-sys	0m0.276s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m17.648s
-user	0m0.484s
-sys	0m0.289s
 
 
  === Opmon (no verification): 18.3s (6%)
 
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m18.474s
-user	0m0.523s
-sys	0m0.267s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m18.182s
-user	0m0.536s
-sys	0m0.244s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m18.272s
-user	0m0.459s
-sys	0m0.335s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
 
 
  === Opmon (naive verification): 21s (21%)
 
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m21.500s
-user	0m0.495s
-sys	0m0.293s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m20.915s
-user	0m0.520s
-sys	0m0.272s
-dc-5:replay| time replay-wordpress gor-logs/gitlist/log.9.top8500.gor
-Replay gor-logs/gitlist/log.9.top8500.gor with exclusions \.edu/git|\.edu/eecs221|\.edu/.bhawkins|\.edu/.bdemsky|\.edu/.peizhaoo|\.edu/compiler|\.edu/javadoc|\.edu/satcheck|\.edu/bdemsky.html
-Starting log gor-logs/gitlist/log.9.top8500.gor
-
 real	0m20.856s
-user	0m0.573s
-sys	0m0.210s
+
+
+ === Opmon complete: 20.3s (18%)
+
+20.63
+20.36
+19.84
 
 
 ================== GitList ===================
 
  === Native: ~15.8s
 
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real    0m16.392s
-user    0m0.196s
-sys     0m0.095s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real    0m16.473s
-user    0m0.171s
-sys     0m0.108s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real    0m15.340s
-user    0m0.177s
-sys     0m0.089s
 
 
  === Opmon (naive verification): ~18.5s (17%)
 
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real	0m17.738s
-user	0m0.188s
-sys	0m0.100s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real	0m18.278s
-user	0m0.189s
-sys	0m0.108s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real	0m19.361s
-user	0m0.188s
-sys	0m0.097s
 
  === Opmon (no verification): ~16.4s (2%)
 
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real	0m16.377s
-user	0m0.226s
-sys	0m0.052s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real	0m16.682s
-user	0m0.202s
-sys	0m0.088s
-dc-5:replay| time replay-gitlist gor-logs/log.16.gor
-Replay gor-logs/log.16.gor with inclusions \.edu/git/[^?]|\.edu/git$
-Starting log gor-logs/log.16.gor
-
 real	0m15.928s
-user	0m0.175s
-sys	0m0.108s
-
-
--------------------------
-
-XXXX7fff0123456X
-
-tail bit:
 
 
 -------------------------
