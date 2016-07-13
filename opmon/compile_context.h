@@ -8,10 +8,6 @@
 #define COMPILED_ROUTINE_DEFAULT_SCOPE "<default>"
 #define COMPILED_ROUTINE_DEFAULT_SCOPE_LEN strlen(COMPILED_ROUTINE_DEFAULT_SCOPE)
 
-typedef struct _interp_hook_t {
-  opcode_handler_t original_handler;
-} interp_hook_t;
-
 typedef enum _compiled_edge_type_t {
   COMPILED_EDGE_NONE,
   COMPILED_EDGE_DIRECT,

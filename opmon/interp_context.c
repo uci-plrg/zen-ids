@@ -56,6 +56,8 @@
    (ex)->prev_execute_data->func == NULL && \
    strcmp((ex)->func->op_array.function_name->val, "__destruct") == 0)
 
+typedef (*opcode_handler_t)(void);
+
 typedef struct _implicit_taint_t {
   uint id;
   const zend_op *end_op;
@@ -342,6 +344,7 @@ void initialize_interp_context()
   builtin_cfgs.hash_bits = 7;
   sctable_init(&builtin_cfgs);
 
+  SPOT("routine_edge_targets.size = %d\n", routine_edge_targets.size);
   scarray_init_ex(&routine_edge_targets, 1000);
 
   current_session.user_level = USER_LEVEL_BOTTOM;
@@ -919,7 +922,7 @@ static bool is_unconditional_fallthrough(const zend_op *op)
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
-    case ZEND_FE_RESET:
+    case ZEND_FE_RESET_R:
     case ZEND_BRK:
     case ZEND_CONT:
       return false;
@@ -960,7 +963,7 @@ static request_input_type_t get_request_input_type(const zend_op *op)
     case ZEND_FETCH_IS:
     case ZEND_FETCH_FUNC_ARG:
       if (op->op1_type == IS_CONST && op->op2_type == IS_UNUSED) {
-        const char *superglobal_name = Z_STRVAL_P(op->op1.zv);
+        const char *superglobal_name = ""; // alpha: Z_STRVAL_P(op->op1.zv);
         if (superglobal_name != NULL) {
           if (strcmp(superglobal_name, "_REQUEST") == 0)
             return REQUEST_INPUT_TYPE_REQUEST;
@@ -1234,8 +1237,8 @@ static zend_op *find_spanning_block_tail(const zend_op *cur_op, zend_op_array *o
       case ZEND_JMPZNZ:
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
-        if (walk->op2.jmp_addr > cur_op)
-          return walk->op2.jmp_addr;
+        if (OP_JMP_ADDR(cur_op, walk->op2) > cur_op) // alpha
+          return OP_JMP_ADDR(cur_op, walk->op2);
     }
     walk--;
   }
@@ -1651,16 +1654,16 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
         switch (jump_op->opcode) {
           case ZEND_JMPZ:
           case ZEND_JMPZNZ:
-            if (jump_op->op2.jmp_addr > jump_op) {
-              jump_target = jump_op->op2.jmp_addr;
+            if (OP_JMP_ADDR(op, jump_op->op2) > jump_op) { // alpha
+              jump_target = OP_JMP_ADDR(op, jump_op->op2);
               if (jump_predicate == NULL)
                 jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
             }
             break;
           case ZEND_JMPZ_EX:
           case ZEND_JMPNZ_EX:
-            if (jump_op->op2.jmp_addr > jump_op) {
-              jump_op = jump_op->op2.jmp_addr;
+            if (OP_JMP_ADDR(op, jump_op->op2) > jump_op) {
+              jump_op = OP_JMP_ADDR(op, jump_op->op2);
               if (jump_predicate == NULL)
                 jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
               continue;
@@ -1697,7 +1700,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
           case ZEND_JMPZNZ:
           case ZEND_JMPZ_EX:
           case ZEND_JMPNZ_EX:
-            if (jump_op->op2.jmp_addr > jump_op) {
+            if (OP_JMP_ADDR(op, jump_op->op2) > jump_op) {
               verified_jump = jump_op;
             } break;
           default:

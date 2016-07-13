@@ -193,3 +193,51 @@ real	0m15.928s
 19.37
 19.29
 
+
+
+-------------------
+
+
+ > #debug# Append 0x5cf2f667:12 -> { 0x8000000002d8ee54 } at index 1057
+
+
+
+
+ZEND_API void execute_ex(zend_execute_data *ex)
+{
+  DCL_OPLINE
+
+  const zend_op *orig_opline = opline;
+  zend_execute_data *orig_execute_data = execute_data;
+  execute_data = ex;
+
+  opline = EX(opline);
+  ZEND_VM_LOOP_INTERRUPT_CHECK();
+
+  while (1) {
+    ((opcode_handler_t)OPLINE->handler)(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU);
+    if (UNEXPECTED(!OPLINE)) {
+      execute_data = orig_execute_data;
+      opline = orig_opline;
+      return;
+    }
+  }
+  zend_error_noreturn(E_CORE_ERROR, "Arrived at end of main loop which shouldn't happen");
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

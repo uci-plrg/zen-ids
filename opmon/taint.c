@@ -134,7 +134,7 @@ static const char *get_operand_index_name(const zend_op *op, taint_operand_index
     case ZEND_ASSIGN_OBJ:
     case ZEND_ASSIGN_DIM:
     case ZEND_FE_RESET:
-    case ZEND_FE_FETCH:
+    case ZEND_FE_FETCH_R:
       switch (index) {
         case TAINT_OPERAND_RESULT:
           return "V";
@@ -572,7 +572,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       // if (op->op2_type != IS_UNUSED) /* when modelled, use the key in this case */
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       break;
-    case ZEND_FE_FETCH:
+    case ZEND_FE_FETCH_R:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_VALUE);
       propagate_zval_taint(app, execute_data, stack_frame, op, true,
                            get_operand_zval(execute_data, op, TAINT_OPERAND_MAP), "?",

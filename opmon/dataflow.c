@@ -83,7 +83,7 @@ static bool uses_return_value(zend_op *op)
     case ZEND_INIT_ARRAY:
     case ZEND_CAST:
     case ZEND_FE_RESET:
-    case ZEND_FE_FETCH:
+    case ZEND_FE_FETCH_R:
     case ZEND_ISSET_ISEMPTY_VAR:
     case ZEND_ISSET_ISEMPTY_DIM_OBJ:
     case ZEND_ISSET_ISEMPTY_PROP_OBJ:
@@ -322,7 +322,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
         case ZEND_ASSIGN_OBJ:
         case ZEND_ASSIGN_DIM:
         case ZEND_FE_RESET:
-        case ZEND_FE_FETCH:
+        case ZEND_FE_FETCH_R:
           log_operand(oplog, 'v', ops, &op->result, op->result_type);
           break;
         default:
@@ -360,7 +360,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
       case ZEND_ASSIGN_OBJ:
       case ZEND_ASSIGN_DIM:
       case ZEND_FE_RESET:
-      case ZEND_FE_FETCH:
+      case ZEND_FE_FETCH_R:
         log_operand(oplog, 'm', ops, &op->op1, op->op1_type);
         break;
       default:
@@ -402,7 +402,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
       case ZEND_ASSIGN_OBJ:
       case ZEND_ASSIGN_DIM:
       case ZEND_FE_RESET:
-      case ZEND_FE_FETCH:
+      case ZEND_FE_FETCH_R:
         log_operand(oplog, 'k', ops, &op->op2, op->op2_type);
         break;
       default:
@@ -427,7 +427,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
         jump_reason = "(?)";
         break;
       case ZEND_FE_RESET:
-      case ZEND_FE_FETCH:
+      case ZEND_FE_FETCH_R:
         jump_target = op->op2.jmp_addr;
         jump_reason = "(if array empty)";
         break;
@@ -696,7 +696,7 @@ void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t i
     case ZEND_FE_RESET: /* starts an iterator */
       print_sink(oplog, "sink(zval:map) {1} =d=> {result} (or skips via 2 => opline if 1 is empty)");
       break;
-    case ZEND_FE_FETCH: /* advances an iterator */
+    case ZEND_FE_FETCH_R: /* advances an iterator */
       print_sink(oplog, "sink(zval:map) {1} =d=> {result(key), next_op.result(value)} "
                        "(or terminates via 2 => opline}");
       break;
@@ -1911,7 +1911,7 @@ static void link_operand_dataflow(FILE *oplog, dataflow_link_pass_t *pass)
         // if (op->op2_type != IS_UNUSED) /* when modelled, use the key in this case */
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
         break;
-      case ZEND_FE_FETCH:
+      case ZEND_FE_FETCH_R:
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_MAP, DATAFLOW_OPERAND_KEY, true);
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_MAP, DATAFLOW_OPERAND_VALUE, true);
         break;

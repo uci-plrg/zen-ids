@@ -265,40 +265,14 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
     } else {
       cfg_opcode_t *cfg_opcode;
       bool recompile = false;
-      //opcode_handler_t handler;
-      // void *handler;
       uint i;
-      //cfg_opcode_edge_t *cfg_edge; // skipping edges for now
-      //compiled_edge_target_t target;
 
       end = &op_array->opcodes[op_array->last];
       for (i = 0, op = op_array->opcodes; op < end; i++, op++) {
         if (zend_get_opcode_name(op->opcode) == NULL)
           continue;
 
-        /*
-        if (op->handler < interp_handlers[0] || op->handler >= interp_handlers[2000]) {
-          handler = sctable_lookup(&handler_table, p2int(op->handler));
-          if (handler == NULL) {
-            uint index = handler_index++;
-
-            if (index >= 2000)
-              ERROR("Too many distinct handlers: %d\n", index);
-
-            sctable_add(&handler_table, p2int(op->handler), interp_handlers[index]);
-            original_handler[index] = op->handler;
-            op->handler = interp_handlers[index];
-          } else {
-            op->handler = handler;
-          }
-        }
-        */
-
-        //if (get_current_user_level() < 2)
-        //  op->handler = (opcode_handler_t) int2p(p2int(op->handler) | 1); // mark as unverified
-
         cfg_opcode = routine_cfg_get_opcode(cfm.cfg, i);
-        //cfg_edge = routine_cfg_get_opcode_edge(cfm.cfg, i);
 
         if (op->opcode != cfg_opcode->opcode ||
             op->extended_value != cfg_opcode->extended_value) {
@@ -306,7 +280,6 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
           SPOT("Recompile %s\n", routine_name);
           break;
         }
-        //target = get_compiled_edge_target(op, i);
       }
       is_already_compiled = !recompile;
     }
@@ -409,7 +382,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         case ZEND_ASSIGN_DIM:
           dump_map_assignment(cfm.app, op_array, op, &op_array->opcodes[i+1]);
           break;
-        case ZEND_FE_FETCH:
+        case ZEND_FE_FETCH_R:
           dump_foreach_fetch(cfm.app, op_array, op, &op_array->opcodes[i+1]);
           break;
         default:
@@ -448,7 +421,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         case ZEND_ASSIGN_DIM:
           add_dataflow_map_assignment(fqn->function.caller_hash, i, op_array);
           break;
-        case ZEND_FE_FETCH:
+        case ZEND_FE_FETCH_R:
           add_dataflow_foreach_fetch(fqn->function.caller_hash, i, op_array);
           break;
         default:
@@ -760,7 +733,7 @@ compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
     case ZEND_FE_RESET:
-    case ZEND_FE_FETCH:
+    case ZEND_FE_FETCH_R:
       target.type = COMPILED_EDGE_DIRECT;
       target.index = op_index + ((zend_op *)op->op2.jmp_addr - op);
       break;
