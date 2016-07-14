@@ -742,8 +742,10 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
   fprintf(out, "%s ", tag);
 
   switch (type) {
-    case IS_CONST:
-      switch (0) { // alpha: operand->zv->u1.v.type) {
+    case IS_CONST: {
+      zval *constant = RT_CONSTANT(ops, *operand);
+
+      switch (Z_TYPE_P(constant)) {
         case IS_UNDEF:
           fprintf(out, "const <undefined-type>");
           break;
@@ -757,15 +759,15 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
           fprintf(out, "const true");
           break;
         case IS_LONG:
-          fprintf(out, "const 0x%lx", 0UL); // alpha: operand->zv->value.lval);
+          fprintf(out, "const 0x%lx", Z_LVAL_P(constant));
           break;
         case IS_DOUBLE:
-          fprintf(out, "const %f", 0.0); // alpha: operand->zv->value.dval);
+          fprintf(out, "const %f", Z_DVAL_P(constant));
           break;
         case IS_STRING: {
           uint i, j;
           char buffer[32] = {0};
-          const char *str = ""; // alpha: Z_STRVAL_P(operand->zv);
+          const char *str = Z_STRVAL_P(constant);
 
           for (i = 0, j = 0; i < 31; i++) {
             if (str[i] == '\0')
@@ -776,22 +778,22 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
           fprintf(out, "\"%s\"", buffer);
         } break;
         case IS_ARRAY:
-          fprintf(out, "const array (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(out, "const array (zv:"PX")", p2int(constant));
           break;
         case IS_OBJECT:
-          fprintf(out, "const object? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(out, "const object? (zv:"PX")", p2int(constant));
           break;
         case IS_RESOURCE:
-          fprintf(out, "const resource? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(out, "const resource? (zv:"PX")", p2int(constant));
           break;
         case IS_REFERENCE:
-          fprintf(out, "const reference? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(out, "const reference? (zv:"PX")", p2int(constant));
           break;
         default:
-          fprintf(out, "const what?? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(out, "const what?? (zv:"PX")", p2int(constant));
           break;
       }
-      break;
+    } break;
     case IS_VAR:
     case IS_TMP_VAR:
       fprintf(out, "var #%d: ", (uint) (EX_VAR_TO_NUM(operand->var) - ops->last_var));

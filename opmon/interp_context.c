@@ -558,19 +558,21 @@ static void block_request(zend_execute_data *from_execute_data, control_flow_met
     request_blocked = true;
     address = get_current_request_address();
 
-    plog(from_cfm->app, PLOG_TYPE_CFG_BLOCK, "block request %08lld 0x%llx: %s\n",
+    plog(current_app, PLOG_TYPE_CFG_BLOCK, "block request %08lld 0x%llx: %s\n",
          current_request_id, get_current_request_start_time(), address);
   }
   if (to_index == 0) {
-    plog(from_cfm->app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
+    plog(current_app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
          from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
-         from_cfm->routine_name, to_cfm->routine_name);
+         (from_cfm == NULL) ? "?" : from_cfm->routine_name /* alpha */,
+         (to_cfm == NULL) ? "?" : to_cfm->routine_name /* alpha */);
   } else {
-    plog(from_cfm->app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
+    plog(current_app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
          from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
-         from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+         from_op->op->lineno, (from_cfm == NULL) ? "?" : from_cfm->routine_name /* alpha */,
+         (to_cfm == NULL) ? "?" : to_cfm->routine_name /* alpha */);
   }
-  plog_stacktrace(from_cfm->app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
+  plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
 
   if (block_now && IS_CFI_BAILOUT_ENABLED()) {
     zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
@@ -588,20 +590,20 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
 
   if (current_session.user_level >= 2) {
     if (IS_REQUEST_EDGE_OUTPUT_ENABLED()) {
-      write_request_edge(false, from_cfm->app, from_cfm->cfg->routine_hash, from_op->index,
+      write_request_edge(false, current_app, from_cfm->cfg->routine_hash, from_op->index,
                          to_cfm->cfg->routine_hash, to_index, current_session.user_level);
     }
     return;
   }
 
   if (from_cfm->dataset != NULL) {
-    if (dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_op->index, to_index,
+    if (dataset_verify_routine_edge(current_app, from_cfm->dataset, from_op->index, to_index,
                                     to_cfm->cfg->routine_hash, current_session.user_level)) {
       verified = true;
     }
 #ifdef OPMON_DEBUG
     else {
-      dataset_verify_routine_edge(from_cfm->app, from_cfm->dataset, from_op->index, to_index,
+      dataset_verify_routine_edge(current_app, from_cfm->dataset, from_op->index, to_index,
                                   to_cfm->cfg->routine_hash, current_session.user_level);
     }
 #endif
@@ -613,7 +615,7 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
           implicit_taint_call_chain.suspension_frame == NULL) {
         implicit_taint_call_chain.suspension_frame = from_execute_data;
 
-        plog(from_cfm->app, PLOG_TYPE_CFG_DETAIL,
+        plog(current_app, PLOG_TYPE_CFG_DETAIL,
              "call chain would be suspended at %04d(L%04d) %s -> %s\n", from_op->index,
              from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
         plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
@@ -627,13 +629,13 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
           verified_jump = NULL;
           verified = true;
 
-          plog(from_cfm->app, PLOG_TYPE_CFG, "call chain activated at %04d(L%04d) %s -> %s\n",
+          plog(current_app, PLOG_TYPE_CFG, "call chain activated at %04d(L%04d) %s -> %s\n",
                from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
         }
       } else if (implicit_taint_call_chain.suspension_frame == NULL) {
         verified = true;
 
-        plog(from_cfm->app, PLOG_TYPE_CFG_DETAIL, "call chain allows %04d(L%04d) %s -> %s\n",
+        plog(current_app, PLOG_TYPE_CFG_DETAIL, "call chain allows %04d(L%04d) %s -> %s\n",
              from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
          plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
       }
@@ -641,7 +643,7 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
   }
 
   if (IS_CFI_DATA() && !verified) {
-    verified = cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_op->index,
+    verified = cfg_has_routine_edge(current_app->cfg, from_cfm->cfg, from_op->index,
                                     to_cfm->cfg, to_index, current_session.user_level);
     if (verified && !IS_REQUEST_EDGE_OUTPUT_ENABLED())
       return;
@@ -655,7 +657,7 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
           implicit_taint_call_chain.taint_source = op_context.implicit_taint;
           add = true;
 
-          plog(from_cfm->app, PLOG_TYPE_CFG, "call chain activated at %04d(L%04d) %s -> %s\n",
+          plog(current_app, PLOG_TYPE_CFG, "call chain activated at %04d(L%04d) %s -> %s\n",
                from_op->index, from_op->op->lineno,
                from_cfm->routine_name, to_cfm->routine_name);
         }
@@ -663,11 +665,11 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
         add = true;
 
         if (implicit_taint_call_chain.start_frame == op_context.execute_data) {
-          plog(from_cfm->app, PLOG_TYPE_CFG, "evo span allows %04d(L%04d) %s -> %s\n",
+          plog(current_app, PLOG_TYPE_CFG, "evo span allows %04d(L%04d) %s -> %s\n",
                from_op->index, from_op->op->lineno,
                from_cfm->routine_name, to_cfm->routine_name);
         } else {
-          plog(from_cfm->app, PLOG_TYPE_CFG, "call chain allows %04d(L%04d) %s -> %s\n",
+          plog(current_app, PLOG_TYPE_CFG, "call chain allows %04d(L%04d) %s -> %s\n",
                from_op->index, from_op->op->lineno,
                from_cfm->routine_name, to_cfm->routine_name);
         }
@@ -677,14 +679,14 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
     }
   }
 
-  if (write_request_edge(add, from_cfm->app, from_cfm->cfg->routine_hash, from_op->index,
+  if (write_request_edge(add, current_app, from_cfm->cfg->routine_hash, from_op->index,
                          to_cfm->cfg->routine_hash, to_index, current_session.user_level)) {
     if (!verified) {
       if (add) {
         pending_cfg_patch_t *patch = PROCESS_NEW(pending_cfg_patch_t);
         patch->type = PENDING_ROUTINE_EDGE;
         patch->taint_source = GET_TAINT_VAR_EVO_SOURCE(implicit_taint_call_chain.taint_source->taint);
-        patch->app = from_cfm->app;
+        patch->app = current_app;
         patch->from_routine = from_cfm->cfg;
         patch->to_routine = to_cfm->cfg;
         patch->from_index = from_op->index;
@@ -693,7 +695,7 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
         patch->next_pending = NULL;
         scarray_append(&pending_cfg_patches, patch);
 
-        plog(from_cfm->app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
+        plog(current_app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
       } else {
         block_request(from_execute_data, from_cfm, from_op, to_cfm, to_index);
@@ -705,17 +707,17 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
 static bool generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_index,
                                   routine_cfg_t *to_cfg, uint to_index)
 {
-  bool add_routine_edge = !cfg_has_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index,
+  bool add_routine_edge = !cfg_has_routine_edge(current_app->cfg, from_cfm->cfg, from_index,
                                                 to_cfg, to_index, current_session.user_level);
 
   if (add_routine_edge) {
-    cfg_add_routine_edge(from_cfm->app->cfg, from_cfm->cfg, from_index, to_cfg, to_index,
+    cfg_add_routine_edge(current_app->cfg, from_cfm->cfg, from_index, to_cfg, to_index,
                          current_session.user_level);
-    write_routine_edge(from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+    write_routine_edge(current_app, from_cfm->cfg->routine_hash, from_index,
                        to_cfg->routine_hash, to_index, current_session.user_level);
   }
 
-  write_request_edge(add_routine_edge, from_cfm->app, from_cfm->cfg->routine_hash, from_index,
+  write_request_edge(add_routine_edge, current_app, from_cfm->cfg->routine_hash, from_index,
                      to_cfg->routine_hash, to_index, current_session.user_level);
 
   return add_routine_edge;
@@ -954,7 +956,7 @@ static bool is_lambda_call_init(const zend_op *op)
 */
 
 #ifdef TAINT_REQUEST_INPUT
-static request_input_type_t get_request_input_type(const zend_op *op)
+static request_input_type_t get_request_input_type(zend_execute_data *execute_data, const zend_op *op)
 {
   switch (op->opcode) {
     case ZEND_FETCH_R:  /* fetch a superglobal */
@@ -963,7 +965,7 @@ static request_input_type_t get_request_input_type(const zend_op *op)
     case ZEND_FETCH_IS:
     case ZEND_FETCH_FUNC_ARG:
       if (op->op1_type == IS_CONST && op->op2_type == IS_UNUSED) {
-        const char *superglobal_name = ""; // alpha: Z_STRVAL_P(op->op1.zv);
+        const char *superglobal_name = Z_STRVAL_P(EX_CONSTANT(op->op1));
         if (superglobal_name != NULL) {
           if (strcmp(superglobal_name, "_REQUEST") == 0)
             return REQUEST_INPUT_TYPE_REQUEST;
@@ -1237,7 +1239,7 @@ static zend_op *find_spanning_block_tail(const zend_op *cur_op, zend_op_array *o
       case ZEND_JMPZNZ:
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
-        if (OP_JMP_ADDR(walk, walk->op2) > cur_op) // alpha
+        if (OP_JMP_ADDR(walk, walk->op2) > cur_op) // alpha check
           return OP_JMP_ADDR(walk, walk->op2);
     }
     walk--;
@@ -1433,7 +1435,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
 
 #ifdef TAINT_REQUEST_INPUT
   if (IS_CFI_DGC() && op_context.prev.op != NULL) {
-    request_input_type_t input_type = get_request_input_type(op_context.prev.op);
+    request_input_type_t input_type = get_request_input_type(execute_data, op_context.prev.op);
     if (input_type != REQUEST_INPUT_TYPE_NONE) { // && TAINT_ALL) {
       const zval *value = get_zval(execute_data, &op_context.prev.op->result, op_context.prev.op->result_type);
       if (value != NULL) {
@@ -1654,7 +1656,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
         switch (jump_op->opcode) {
           case ZEND_JMPZ:
           case ZEND_JMPZNZ:
-            if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) { // alpha
+            if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) { // alpha check
               jump_target = OP_JMP_ADDR(jump_op, jump_op->op2);
               if (jump_predicate == NULL)
                 jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
@@ -1832,7 +1834,7 @@ void monitor_call()
   if ((routine_edge_metadata & ROUTINE_EDGE_INDEX_CACHED) == 0) {
     uint64 original_handler_addr = p2int(opline->handler) & ORIGINAL_HANDLER_BITS;
     zend_op_array *op_array = &execute_data->func->op_array;
-    uint from_index = opline - op_array->opcodes;
+    uint from_index = EX(opline) /* alpha: `opline` may be a trampoline outside EX */ - op_array->opcodes;
 
     original_handler_addr |= ROUTINE_EDGE_INDEX_CACHED;
     from_cfm = lookup_cfm(execute_data, op_array);
@@ -1843,21 +1845,21 @@ void monitor_call()
       // debug
       if (targets == NULL)
         targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
-    }
 
-    if (targets != NULL) {
-      routine_edges_index = routine_edge_targets.size;
-      original_handler_addr |= (routine_edges_index << ROUTINE_EDGE_INDEX_SHIFT);
+      if (targets != NULL) {
+        routine_edges_index = routine_edge_targets.size;
+        original_handler_addr |= (routine_edges_index << ROUTINE_EDGE_INDEX_SHIFT);
 
-      scarray_append(&routine_edge_targets, targets);
+        scarray_append(&routine_edge_targets, targets);
 
-      SPOT("Append 0x%x:%d -> { "PX" } at index %d\n", from_cfm->cfg->routine_hash,
-           from_index, p2int(targets), (int) routine_edges_index);
-    } else {
-      block = true;
+        SPOT("Append 0x%x:%d -> { "PX" } at index %d\n", from_cfm->cfg->routine_hash,
+             from_index, p2int(targets), (int) routine_edges_index);
+      } else {
+        block = true;
 
-      SPOT("No target routines for %s 0x%x:%d -> { "PX" }\n", from_cfm->routine_name,
-           from_cfm->cfg->routine_hash, from_index, p2int(targets));
+        SPOT("No target routines for %s 0x%x:%d -> { "PX" }\n", from_cfm->routine_name,
+             from_cfm->cfg->routine_hash, from_index, p2int(targets));
+      }
     }
     ((zend_op *) opline)->handler = (opcode_handler_t) int2p(original_handler_addr);
   } else {
@@ -1872,7 +1874,8 @@ void monitor_call()
     to_op_array = &to_execute_data->func->op_array;
     to_cfm = lookup_cfm(to_execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
 
-    block = !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
+
+    block = (to_cfm != NULL) && !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
                                            current_session.user_level,
                                            to_op_array->type == ZEND_EVAL_CODE);
   }

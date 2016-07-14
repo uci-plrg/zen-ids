@@ -106,7 +106,7 @@ zval *php_session_set_var(zend_string *key, zval *value)
 
   HashTable *session_table = Z_ARRVAL_P(Z_REFVAL(PS(http_session_vars)));
   cell = zend_hash_add_new(session_table, key, &EG(uninitialized_zval));
-  ZVAL_COPY_VALUE(cell, value);
+  opmon_copy_value(cell, value);
   return cell;
 }
 
@@ -120,10 +120,11 @@ char *request_strdup(const char *src)
 const char *operand_strdup(zend_execute_data *execute_data, const znode_op *operand, zend_uchar type)
 {
   switch (type) {
-    case IS_CONST:
-      if (0 /* alpha: operand->zv->u1.v.type */ == IS_STRING)
-        return request_strdup("alpha"); // Z_STRVAL_P(operand->zv));
-      break;
+    case IS_CONST: {
+      zval *constant = EX_CONSTANT(*operand);
+      if (Z_TYPE_P(constant) == IS_STRING)
+        return request_strdup(Z_STRVAL_P(constant));
+    } break;
     case IS_VAR:
     case IS_TMP_VAR:
     case IS_CV:
@@ -137,7 +138,7 @@ const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, z
 {
   switch (type) {
     case IS_CONST:
-      return NULL; // alpha: operand->zv;
+      return EX_CONSTANT(*operand);
     case IS_VAR:
     case IS_TMP_VAR:
     case IS_CV:

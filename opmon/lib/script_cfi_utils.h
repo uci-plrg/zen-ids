@@ -301,4 +301,26 @@ static inline uint squash_trailing_slash(char *str)
   return 0;
 }
 
+static inline void opmon_copy_value_ex(zval *dst, const zval *src, zend_refcounted *gc, uint32_t t)
+{
+# if SIZEOF_SIZE_T == 4
+  uint32_t _w2 = src->value.ww.w2;
+  Z_COUNTED_P(dst) = gc;
+  dst->value.ww.w2 = _w2;
+  Z_TYPE_INFO_P(dst) = t;
+# elif SIZEOF_SIZE_T == 8
+  Z_COUNTED_P(dst) = gc;
+  Z_TYPE_INFO_P(dst) = t;
+# else
+#  error "Unknown SIZEOF_SIZE_T"
+# endif
+}
+
+static inline void opmon_copy_value(zval *dst, const zval *src)
+{
+  zend_refcounted *gc = Z_COUNTED_P(src);
+  uint32_t t = Z_TYPE_INFO_P(src);
+  opmon_copy_value_ex(dst, src, gc, t);
+}
+
 #endif

@@ -200,7 +200,7 @@ void dump_fcall_arg(application_t *app, zend_op_array *ops, zend_op *op, const c
 void dump_map_assignment(application_t *app, zend_op_array *ops, zend_op *op, zend_op *next_op);
 void dump_foreach_fetch(application_t *app, zend_op_array *ops, zend_op *op, zend_op *next_op);
 void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op);
-void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t id);
+void identify_sink_operands(application_t *app, zend_op_array *ops, zend_op *op, sink_identifier_t id);
 
 bool is_db_source_function(const char *type, const char *name);
 bool is_db_sink_function(const char *type, const char *name);

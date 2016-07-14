@@ -38,9 +38,9 @@ void destroy_operand_resolver()
   cfg_free(unknown_app.cfg);
 }
 
-const char *resolve_constant_include(zend_op *op)
+const char *resolve_constant_include(zend_op_array *op_array, zend_op *op)
 {
-	zval *inc_filename = NULL; // alpha: op->op1.zv;
+	zval *inc_filename = RT_CONSTANT(op_array, op->op1);
 	zval tmp_inc_filename;
   zend_string *resolved_path;
   char *return_path;
@@ -77,13 +77,13 @@ const char *resolve_constant_include(zend_op *op)
   return return_path;
 }
 
-char *resolve_eval_body(zend_op *op)
+char *resolve_eval_body(zend_op_array *op_array, zend_op *op)
 {
 	zval *eval_body_z;
 	zval tmp_eval_body_z;
   char *eval_body;
 
-	eval_body_z = NULL; // alpha: op->op1.zv;
+	eval_body_z = RT_CONSTANT(op_array, op->op1);
 
 	ZVAL_UNDEF(&tmp_eval_body_z);
 	if (Z_TYPE_P(eval_body_z) != IS_STRING) {

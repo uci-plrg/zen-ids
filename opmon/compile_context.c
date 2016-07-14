@@ -392,7 +392,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
       }
 
       if (sink_id.call_target != NULL)
-        identify_sink_operands(cfm.app, op, sink_id);
+        identify_sink_operands(cfm.app, op_array, op, sink_id);
     }
 
     if (is_dataflow_analysis()) {
@@ -449,7 +449,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
               case ZEND_REQUIRE:
               case ZEND_INCLUDE_ONCE:
               case ZEND_REQUIRE_ONCE: {
-                const char *site_to_path, *internal_to_path = resolve_constant_include(op);
+                const char *site_to_path, *internal_to_path = resolve_constant_include(op_array, op);
                 zend_string *resolved_internal_to_path = NULL;
                 char to_unit_path[ROUTINE_NAME_LENGTH], to_routine_name[ROUTINE_NAME_LENGTH];
 
@@ -500,7 +500,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
                                    to_routine_hash, 0, USER_LEVEL_TOP);
               } break;
               case ZEND_EVAL: {
-                char *eval_body = resolve_eval_body(op);
+                char *eval_body = resolve_eval_body(op_array, op);
                 PRINT("Opcode %d calls eval(%s)\n", i, eval_body);
                 // PROCESS_FREE(eval_body); // mem: per-request?
               } break;
@@ -509,8 +509,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         } break;
         case ZEND_NEW: {
           if (op->op1_type == IS_CONST) {
-            PRINT("Opcode %d calls new %s()\n", i, "alpha!"); // Z_STRVAL_P(op->op1.zv));
-            classname = "alpha"; // Z_STRVAL_P(op->op1.zv);
+            PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(RT_CONSTANT(op_array, op->op1)));
+            classname = Z_STRVAL_P(RT_CONSTANT(op_array, op->op1));
           } else {
             classname = "<unknown-type>";
           }
@@ -544,19 +544,20 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
             // in ZEND_INIT_FCALL_BY_NAME_SPEC_CONST_HANDLER:
             //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
             //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
+            zend_string *callee = Z_STR_P(RT_CONSTANT(op_array, op->op2));
 
-            zval *func = zend_hash_find(executor_globals.function_table, NULL); // alpha: Z_STR_P(op->op2.zv));
+            zval *func = zend_hash_find(executor_globals.function_table, callee);
             // This is matching user-defined functions...? Needs to be builtins only.
             if (func != NULL && Z_TYPE_P(func) == IS_PTR &&
                 func->value.func->type == ZEND_INTERNAL_FUNCTION) {
               ignore_call |= !IS_OPCODE_DUMP_ENABLED();
-              sprintf(routine_name, "builtin:%s", "alpha"); // Z_STRVAL_P(op->op2.zv));
+              sprintf(routine_name, "builtin:%s", callee->val);
               push_fcall_init(cfm.app, i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);
               break; // ignore builtins for now (unless dumping ops)
             }
 
             classname = COMPILED_ROUTINE_DEFAULT_SCOPE;
-            sprintf(routine_name, "%s:%s", classname, "alpha"); // Z_STRVAL_P(op->op2.zv));
+            sprintf(routine_name, "%s:%s", classname, callee->val);
           } else if (op->op2_type != IS_UNUSED) { // some kind of var
             uint var_index = (uint) (op->op2.var / sizeof(zval *));
             sprintf(routine_name, "<var #%d>", var_index);
@@ -571,7 +572,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
             classname = "<class-instance>";
 
           if (op->op2_type == IS_CONST)
-            sprintf(routine_name, "%s:%s", classname, "alpha"); // Z_STRVAL_P(op->op2.zv));
+            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(RT_CONSTANT(op_array, op->op2)));
           else
             sprintf(routine_name, "%s:<var>", classname);
           to_routine_hash = hash_routine(routine_name);
@@ -580,14 +581,14 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         case ZEND_INIT_STATIC_METHOD_CALL: {
           classname = NULL;
           if (op->op1_type == IS_CONST && op->op2_type == IS_CONST) {
-            classname = "alpha"; // Z_STRVAL_P(op->op1.zv);
+            classname = Z_STRVAL_P(RT_CONSTANT(op_array, op->op1));
           } else if (op->op1_type == IS_VAR && op->op2_type == IS_UNUSED) {
             if ((op-1)->extended_value == ZEND_FETCH_CLASS_SELF)
               classname = op_array->scope->name->val;
           }
 
           if (classname != NULL) {
-            sprintf(routine_name, "%s:%s", classname, "alpha"); // Z_STRVAL_P(op->op2.zv));
+            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(RT_CONSTANT(op_array, op->op2)));
             to_routine_hash = hash_routine(routine_name);
             push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
           }

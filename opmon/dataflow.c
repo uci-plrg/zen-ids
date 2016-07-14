@@ -162,8 +162,10 @@ static void log_operand(FILE *oplog, char index, zend_op_array *ops, znode_op *o
 {
   fprintf(oplog, "[%c|", index);
   switch (type) {
-    case IS_CONST:
-      switch (0) { // alpha: operand->zv->u1.v.type) {
+    case IS_CONST: {
+      zval *constant = RT_CONSTANT(ops, *operand);
+
+      switch (Z_TYPE_P(constant)) {
         case IS_UNDEF:
           fprintf(oplog, "const <undefined-type>");
           break;
@@ -177,15 +179,15 @@ static void log_operand(FILE *oplog, char index, zend_op_array *ops, znode_op *o
           fprintf(oplog, "const true");
           break;
         case IS_LONG:
-          fprintf(oplog, "const 0x%lx", 0UL); // alpha: operand->zv->value.lval);
+          fprintf(oplog, "const 0x%lx", Z_LVAL_P(constant));
           break;
         case IS_DOUBLE:
-          fprintf(oplog, "const %f", 0.0); // alpha: operand->zv->value.dval);
+          fprintf(oplog, "const %f", Z_DVAL_P(constant));
           break;
         case IS_STRING: {
           uint i, j;
           char buffer[32] = {0};
-          const char *str = ""; // alpha: Z_STRVAL_P(operand->zv);
+          const char *str = Z_STRVAL_P(constant);
 
           for (i = 0, j = 0; i < 31; i++) {
             if (str[i] == '\0')
@@ -196,22 +198,22 @@ static void log_operand(FILE *oplog, char index, zend_op_array *ops, znode_op *o
           fprintf(oplog, "\"%s\"", buffer);
         } break;
         case IS_ARRAY:
-          fprintf(oplog, "const array (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(oplog, "const array (zv:"PX")", p2int(constant));
           break;
         case IS_OBJECT:
-          fprintf(oplog, "const object? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(oplog, "const object? (zv:"PX")", p2int(constant));
           break;
         case IS_RESOURCE:
-          fprintf(oplog, "const resource? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(oplog, "const resource? (zv:"PX")", p2int(constant));
           break;
         case IS_REFERENCE:
-          fprintf(oplog, "const reference? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(oplog, "const reference? (zv:"PX")", p2int(constant));
           break;
         default:
-          fprintf(oplog, "const what?? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
+          fprintf(oplog, "const what?? (zv:"PX")", p2int(constant));
           break;
       }
-      break;
+    } break;
     case IS_VAR:
     case IS_TMP_VAR:
       fprintf(oplog, "var #%d", (uint) (EX_VAR_TO_NUM(operand->var) - ops->last_var));
@@ -449,7 +451,7 @@ static void print_sink(FILE *oplog, const char *sink_details)
   fprintf(oplog, "\t      %s\n", sink_details);
 }
 
-void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t id)
+void identify_sink_operands(application_t *app, zend_op_array *ops, zend_op *op, sink_identifier_t id)
 {
   FILE *oplog = ((cfg_files_t *) app->cfg_files)->opcode_log;
 
@@ -528,7 +530,7 @@ void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t i
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
       if (op->op2_type == IS_UNUSED) {
-        const char *superglobal_name = ""; // alpha: Z_STRVAL_P(op->op1.zv);
+        const char *superglobal_name = Z_STRVAL_P(RT_CONSTANT(ops, op->op1));
         if (superglobal_name != NULL) {
           if (strcmp(superglobal_name, "_SESSION") == 0) {
             print_sink(oplog, "sink(zval) {session} =d=> {result}");
@@ -2475,7 +2477,7 @@ static void initilize_dataflow_operand(dataflow_operand_t *operand, zend_op_arra
   switch (type) {
     case IS_CONST:
       operand->value.type = DATAFLOW_VALUE_TYPE_CONST;
-      operand->value.constant = NULL; // alpha: znode->zv;
+      operand->value.constant = RT_CONSTANT(zops, *znode);
       break;
     case IS_VAR:
     case IS_TMP_VAR:
@@ -2604,7 +2606,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
       if (zop->op2_type == IS_UNUSED) {
-        const char *superglobal_name = ""; // alpha: Z_STRVAL_P(zop->op1.zv);
+        const char *superglobal_name = Z_STRVAL_P(RT_CONSTANT(zops, zop->op1));
         if (superglobal_name != NULL) {
           if (strcmp(superglobal_name, "_SESSION") == 0) {
             initialize_source(opcode, SOURCE_TYPE_SESSION);
