@@ -321,7 +321,7 @@ static void open_output_files(const char *script_path)
 void starting_script(const char *script_path)
 {
   struct stat dirinfo;
-  char *resolved_path = zend_resolve_path(script_path, strlen(script_path));
+  zend_string *resolved_path = zend_resolve_path(script_path, strlen(script_path));
 
   is_standalone_app = true;
 
@@ -330,7 +330,7 @@ void starting_script(const char *script_path)
     //char cfg_file_path[256] = {0};
 
     SPOT("Starting static analysis '%s' of file %s on pid %d\n",
-         analysis, resolved_path, getpid());
+         analysis, resolved_path->val, getpid());
 
     setup_base_path(cfg_file_path, "runs", analysis);
     strcat(cfg_file_path, "/");
@@ -338,7 +338,7 @@ void starting_script(const char *script_path)
     if (stat(cfg_file_path, &dirinfo) != 0) {
       if (mkdir(cfg_file_path, 0777) != 0) {
         ERROR("Failed to create the cfg file directory %s\n", cfg_file_path);
-        efree(resolved_path);
+        zend_string_free(resolved_path);
         return;
       }
     }
@@ -346,15 +346,15 @@ void starting_script(const char *script_path)
     open_output_files_in_dir(&standalone_cfg_files, cfg_file_path, "a");
     standalone_dataset = load_dataset(analysis);
   } else {
-    SPOT("starting_script %s on pid %d\n", resolved_path, getpid());
+    SPOT("starting_script %s on pid %d\n", resolved_path->val, getpid());
 
-    open_output_files(resolved_path);
-    standalone_dataset = load_dataset(resolved_path);
+    open_output_files(resolved_path->val);
+    standalone_dataset = load_dataset(resolved_path->val);
   }
 
   init_operand_resolver();
 
-  efree(resolved_path);
+  zend_string_free(resolved_path);
 }
 
 void server_startup()
@@ -743,7 +743,7 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
 
   switch (type) {
     case IS_CONST:
-      switch (operand->zv->u1.v.type) {
+      switch (0) { // alpha: operand->zv->u1.v.type) {
         case IS_UNDEF:
           fprintf(out, "const <undefined-type>");
           break;
@@ -757,15 +757,15 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
           fprintf(out, "const true");
           break;
         case IS_LONG:
-          fprintf(out, "const 0x%lx", operand->zv->value.lval);
+          fprintf(out, "const 0x%lx", 0UL); // alpha: operand->zv->value.lval);
           break;
         case IS_DOUBLE:
-          fprintf(out, "const %f", operand->zv->value.dval);
+          fprintf(out, "const %f", 0.0); // alpha: operand->zv->value.dval);
           break;
         case IS_STRING: {
           uint i, j;
           char buffer[32] = {0};
-          const char *str = Z_STRVAL_P(operand->zv);
+          const char *str = ""; // alpha: Z_STRVAL_P(operand->zv);
 
           for (i = 0, j = 0; i < 31; i++) {
             if (str[i] == '\0')
@@ -776,19 +776,19 @@ void print_operand(FILE *out, const char *tag, zend_op_array *ops,
           fprintf(out, "\"%s\"", buffer);
         } break;
         case IS_ARRAY:
-          fprintf(out, "const array (zv:"PX")", p2int(operand->zv));
+          fprintf(out, "const array (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         case IS_OBJECT:
-          fprintf(out, "const object? (zv:"PX")", p2int(operand->zv));
+          fprintf(out, "const object? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         case IS_RESOURCE:
-          fprintf(out, "const resource? (zv:"PX")", p2int(operand->zv));
+          fprintf(out, "const resource? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         case IS_REFERENCE:
-          fprintf(out, "const reference? (zv:"PX")", p2int(operand->zv));
+          fprintf(out, "const reference? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         default:
-          fprintf(out, "const what?? (zv:"PX")", p2int(operand->zv));
+          fprintf(out, "const what?? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
       }
       break;

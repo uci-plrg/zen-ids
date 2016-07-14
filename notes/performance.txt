@@ -205,22 +205,21 @@ real	0m15.928s
 
 ZEND_API void execute_ex(zend_execute_data *ex)
 {
-  DCL_OPLINE
-
-  const zend_op *orig_opline = opline;
+  const zend_op *orig_opline = opline; // IP register
   zend_execute_data *orig_execute_data = execute_data;
-  execute_data = ex;
+  execute_data = ex; // FP register
 
   opline = EX(opline);
+
   ZEND_VM_LOOP_INTERRUPT_CHECK();
 
   while (1) {
-    ((opcode_handler_t)OPLINE->handler)(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU);
-    if (UNEXPECTED(!OPLINE)) {
+    ((opcode_handler_t) opline->handler)();
+    if (UNEXPECTED(!opline)) {
       execute_data = orig_execute_data;
       opline = orig_opline;
       return;
-    }
+    } // forward only occurs via ZEND_VM_ENTER()
   }
   zend_error_noreturn(E_CORE_ERROR, "Arrived at end of main loop which shouldn't happen");
 }

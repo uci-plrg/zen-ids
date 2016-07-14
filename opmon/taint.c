@@ -72,11 +72,11 @@ typedef union _taint_cache_slot_t {
    CACHED_PTR_EX((slot).pointer + 1) : \
    CACHED_PTR((slot).offset + 1))
 
-void propagate_taint_from_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, const zend_op *op, uint flags);
+//void propagate_taint_from_object(application_t *app, zend_execute_data *execute_data,
+//                                 zend_op_array *stack_frame, const zend_op *op, uint flags);
 
-void propagate_taint_into_object(application_t *app, zend_execute_data *execute_data,
-                                 zend_op_array *stack_frame, const zend_op *op, uint flags);
+//void propagate_taint_into_object(application_t *app, zend_execute_data *execute_data,
+//                                 zend_op_array *stack_frame, const zend_op *op, uint flags);
 
 static inline const znode_op *get_operand(const zend_op *op, taint_operand_index_t index)
 {
@@ -133,7 +133,7 @@ static const char *get_operand_index_name(const zend_op *op, taint_operand_index
     case ZEND_FETCH_OBJ_UNSET:
     case ZEND_ASSIGN_OBJ:
     case ZEND_ASSIGN_DIM:
-    case ZEND_FE_RESET:
+    case ZEND_FE_RESET_R:
     case ZEND_FE_FETCH_R:
       switch (index) {
         case TAINT_OPERAND_RESULT:
@@ -244,6 +244,7 @@ static void merge_operand_taint(application_t *app, zend_execute_data *execute_d
   propagate_operand_taint(app, execute_data, stack_frame, op, false, src, dst);
 }
 
+/*
 static bool is_derived_class(zend_class_entry *child_class, zend_class_entry *parent_class)
 {
   child_class = child_class->parent;
@@ -256,7 +257,9 @@ static bool is_derived_class(zend_class_entry *child_class, zend_class_entry *pa
 
   return false;
 }
+*/
 
+/*
 void propagate_taint_from_array(application_t *app, zend_execute_data *execute_data,
                                 zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
@@ -283,7 +286,7 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
           }
           ZEND_HANDLE_NUMERIC(key_string, key_long);
         }
-        case IS_LONG: /* FT */
+        case IS_LONG: / * FT * /
           src = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
           propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "[mapped]", dst, "R");
       }
@@ -296,7 +299,7 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
       break;
     case IS_NULL:
     case IS_FALSE:
-      break; /* ignore */
+      break; / * ignore * /
     default:
       ERROR("<taint> Error propagating from %s: found an unknown array type %d at %04d(L%04d)%s\n",
             zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -305,7 +308,8 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
 
   merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
 }
-
+*/
+/*
 void propagate_taint_into_array(application_t *app, zend_execute_data *execute_data,
                                 zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
@@ -322,7 +326,7 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
   } else {
     zval *key = NULL, temp_key;
 
-    if (op->op2_type == IS_UNUSED) { /* it's an append, so point key at the appended element */
+    if (op->op2_type == IS_UNUSED) { / * it's an append, so point key at the appended element * /
       zend_long count = php_count_recursive(map, COUNT_NORMAL);
 
       if (count <= 0) {
@@ -353,7 +357,8 @@ void propagate_taint_into_array(application_t *app, zend_execute_data *execute_d
           OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
   }
 }
-
+*/
+/*
 void propagate_taint_from_object(application_t *app, zend_execute_data *execute_data,
                                  zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
@@ -429,7 +434,8 @@ void propagate_taint_from_object(application_t *app, zend_execute_data *execute_
 
   merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
 }
-
+*/
+/*
 void propagate_taint_into_object(application_t *app, zend_execute_data *execute_data,
                                  zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
@@ -502,6 +508,7 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
           OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
   }
 }
+*/
 
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, const zend_op *op)
@@ -528,6 +535,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_BW_XOR:
     case ZEND_BW_NOT:
     case ZEND_CONCAT:
+    case ZEND_FAST_CONCAT:
     case ZEND_BOOL_XOR:
     case ZEND_INSTANCEOF:
     case ZEND_IS_IDENTICAL:
@@ -537,23 +545,25 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_IS_SMALLER:
     case ZEND_IS_SMALLER_OR_EQUAL:
     case ZEND_CASE:
+    case ZEND_ROPE_END:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       break;
-    case ZEND_TYPE_CHECK: /* FT */
+    case ZEND_TYPE_CHECK:
     case ZEND_DEFINED:
     case ZEND_CAST:
     case ZEND_QM_ASSIGN:
     case ZEND_STRLEN:
-    case ZEND_FE_RESET:
+    case ZEND_FE_RESET_R:
     case ZEND_BOOL:
     case ZEND_BOOL_NOT:
     case ZEND_CLONE: // TODO: propagate into clone function (if any)
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       break;
-    case ZEND_ADD_VAR:
-    case ZEND_ADD_STRING:
-      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT); // probably redundant
+    case ZEND_ROPE_INIT:
+    case ZEND_ROPE_ADD:
+      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_1);
+      break;
     case ZEND_FETCH_CONSTANT:
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       break;
@@ -563,10 +573,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_ASSIGN_REF:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_1);
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
-      break;
-    case ZEND_ADD_CHAR:
-      clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
-      clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_RESULT, TAINT_OPERAND_RESULT);
       break;
     case ZEND_ADD_ARRAY_ELEMENT:
       // if (op->op2_type != IS_UNUSED) /* when modelled, use the key in this case */
@@ -585,9 +591,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_1);
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       break;
-    case ZEND_PRINT:
-      clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
-      break;
     case ZEND_DECLARE_FUNCTION:
       // TODO: taint the function?
       break;
@@ -604,12 +607,12 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       mapping_flags |= MAPPING_BY_REF;
     case ZEND_FETCH_DIM_R:
     case ZEND_FETCH_DIM_IS:
-      propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
+      //propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_FETCH_DIM_FUNC_ARG:
       if (ARG_SHOULD_BE_SENT_BY_REF(execute_data->call->func, op->extended_value & ZEND_FETCH_ARG_MASK))
         mapping_flags |= MAPPING_BY_REF;
-      propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
+      //propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_DIM:
       // if (!skip_arrays) /* fail here */
@@ -621,12 +624,12 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_FETCH_OBJ_R:
     case ZEND_FETCH_OBJ_IS:
       mapping_flags |= MAPPING_IS_OBJECT;
-      if (false) propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
+      //if (false) propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_FETCH_OBJ_FUNC_ARG:
       if (ARG_SHOULD_BE_SENT_BY_REF(execute_data->call->func, op->extended_value & ZEND_FETCH_ARG_MASK))
         mapping_flags |= MAPPING_BY_REF;
-      if (false) propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
+      //if (false) propagate_taint_from_object(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_OBJ:
       // if (!skip_arrays) /* fail here */

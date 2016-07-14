@@ -102,11 +102,11 @@ zend_bool nop_has_taint(const zval *value)
   return false;
 }
 
-void nop_top_stack_motion(zend_execute_data *execute_data, const zend_op *op, int stack_motion)
+void nop_notify_function_created(zend_op_array *src, zend_op_array *dst)
 {
 }
 
-void nop_notify_function_created(zend_op_array *src, zend_op_array *dst)
+void nop_notify_call(zend_execute_data *from, zend_execute_data *to)
 {
 }
 
@@ -168,9 +168,11 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   if (false) { // overrides for performance testing
     monitor->notify_http_request = nop_request_boundary;
     monitor->notify_function_created = nop_notify_function_created;
+    monitor->notify_call = nop_notify_call;
   } else if (false) { // overrides for performance testing
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
+    monitor->notify_call = monitor_call;
 
     monitor->has_taint = nop_has_taint;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
@@ -180,6 +182,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   } else { // normal mode
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
+    monitor->notify_call = monitor_call;
   }
 
   SPOT("SAPI type: %s\n", EG(sapi_type));

@@ -40,9 +40,10 @@ void destroy_operand_resolver()
 
 const char *resolve_constant_include(zend_op *op)
 {
-	zval *inc_filename = op->op1.zv;
+	zval *inc_filename = NULL; // alpha: op->op1.zv;
 	zval tmp_inc_filename;
-  char *resolved_path, *return_path;
+  zend_string *resolved_path;
+  char *return_path;
 
 	ZVAL_UNDEF(&tmp_inc_filename);
 	if (Z_TYPE_P(inc_filename) != IS_STRING) {
@@ -50,14 +51,15 @@ const char *resolve_constant_include(zend_op *op)
 		inc_filename = &tmp_inc_filename;
 	}
 
-  resolved_path = zend_resolve_path(Z_STRVAL_P(inc_filename), (int)Z_STRLEN_P(inc_filename)); // TSRMLS_CC);
+  resolved_path = zend_resolve_path(Z_STRVAL_P(inc_filename), (int) Z_STRLEN_P(inc_filename));
   if (resolved_path) {
-    return_path = REQUEST_ALLOC(strlen(resolved_path) + 1);
-    strcpy(return_path, resolved_path);
-    efree(resolved_path);
+    size_t resolved_path_len = strlen(resolved_path->val);
+    return_path = REQUEST_ALLOC(resolved_path_len + 1);
+    strcpy(return_path, resolved_path->val);
+    zend_string_release(resolved_path);
 
     PRINT("PROCESS_ALLOC %ld bytes for return_path %s\n",
-          strlen(resolved_path) + 1, return_path);
+          resolved_path_len + 1, return_path);
   } else {
     const char *val = Z_STRVAL_P(inc_filename);
     size_t length = Z_STRLEN_P(inc_filename) + 1;
@@ -81,7 +83,7 @@ char *resolve_eval_body(zend_op *op)
 	zval tmp_eval_body_z;
   char *eval_body;
 
-	eval_body_z = op->op1.zv;
+	eval_body_z = NULL; // alpha: op->op1.zv;
 
 	ZVAL_UNDEF(&tmp_eval_body_z);
 	if (Z_TYPE_P(eval_body_z) != IS_STRING) {

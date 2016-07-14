@@ -32,6 +32,7 @@ static bool uses_return_value(zend_op *op)
     case ZEND_SL:
     case ZEND_SR:
     case ZEND_CONCAT:
+    case ZEND_FAST_CONCAT:
     case ZEND_IS_IDENTICAL:
     case ZEND_IS_NOT_IDENTICAL:
     case ZEND_IS_EQUAL:
@@ -47,7 +48,6 @@ static bool uses_return_value(zend_op *op)
     case ZEND_POST_DEC_OBJ:
     case ZEND_POST_INC:
     case ZEND_POST_DEC:
-    case ZEND_PRINT:
     case ZEND_FETCH_R:
     case ZEND_FETCH_W:
     case ZEND_FETCH_RW:
@@ -69,9 +69,7 @@ static bool uses_return_value(zend_op *op)
     case ZEND_FETCH_LIST:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
-    case ZEND_ADD_CHAR:
-    case ZEND_ADD_STRING:
-    case ZEND_ADD_VAR:
+    case ZEND_ROPE_END:
     case ZEND_FETCH_CLASS:
     case ZEND_RECV:
     case ZEND_RECV_INIT:
@@ -82,7 +80,7 @@ static bool uses_return_value(zend_op *op)
     case ZEND_ADD_ARRAY_ELEMENT:
     case ZEND_INIT_ARRAY:
     case ZEND_CAST:
-    case ZEND_FE_RESET:
+    case ZEND_FE_RESET_R:
     case ZEND_FE_FETCH_R:
     case ZEND_ISSET_ISEMPTY_VAR:
     case ZEND_ISSET_ISEMPTY_DIM_OBJ:
@@ -126,6 +124,8 @@ static bool uses_return_value(zend_op *op)
     case ZEND_BRK:
     case ZEND_CONT:
     case ZEND_GOTO:
+    case ZEND_ROPE_INIT:
+    case ZEND_ROPE_ADD:
     case ZEND_UNSET_VAR:
     case ZEND_UNSET_DIM:
     case ZEND_UNSET_OBJ:
@@ -153,7 +153,7 @@ static bool uses_return_value(zend_op *op)
     case ZEND_RETURN:
       return false;
     default:
-      return (op->result_type & EXT_TYPE_UNUSED) == 0;
+      return (op->result_type & IS_UNUSED) == 0;
   }
 }
 
@@ -163,7 +163,7 @@ static void log_operand(FILE *oplog, char index, zend_op_array *ops, znode_op *o
   fprintf(oplog, "[%c|", index);
   switch (type) {
     case IS_CONST:
-      switch (operand->zv->u1.v.type) {
+      switch (0) { // alpha: operand->zv->u1.v.type) {
         case IS_UNDEF:
           fprintf(oplog, "const <undefined-type>");
           break;
@@ -177,15 +177,15 @@ static void log_operand(FILE *oplog, char index, zend_op_array *ops, znode_op *o
           fprintf(oplog, "const true");
           break;
         case IS_LONG:
-          fprintf(oplog, "const 0x%lx", operand->zv->value.lval);
+          fprintf(oplog, "const 0x%lx", 0UL); // alpha: operand->zv->value.lval);
           break;
         case IS_DOUBLE:
-          fprintf(oplog, "const %f", operand->zv->value.dval);
+          fprintf(oplog, "const %f", 0.0); // alpha: operand->zv->value.dval);
           break;
         case IS_STRING: {
           uint i, j;
           char buffer[32] = {0};
-          const char *str = Z_STRVAL_P(operand->zv);
+          const char *str = ""; // alpha: Z_STRVAL_P(operand->zv);
 
           for (i = 0, j = 0; i < 31; i++) {
             if (str[i] == '\0')
@@ -196,19 +196,19 @@ static void log_operand(FILE *oplog, char index, zend_op_array *ops, znode_op *o
           fprintf(oplog, "\"%s\"", buffer);
         } break;
         case IS_ARRAY:
-          fprintf(oplog, "const array (zv:"PX")", p2int(operand->zv));
+          fprintf(oplog, "const array (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         case IS_OBJECT:
-          fprintf(oplog, "const object? (zv:"PX")", p2int(operand->zv));
+          fprintf(oplog, "const object? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         case IS_RESOURCE:
-          fprintf(oplog, "const resource? (zv:"PX")", p2int(operand->zv));
+          fprintf(oplog, "const resource? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         case IS_REFERENCE:
-          fprintf(oplog, "const reference? (zv:"PX")", p2int(operand->zv));
+          fprintf(oplog, "const reference? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
         default:
-          fprintf(oplog, "const what?? (zv:"PX")", p2int(operand->zv));
+          fprintf(oplog, "const what?? (zv:"PX")", 0ULL); // alpha: p2int(operand->zv));
           break;
       }
       break;
@@ -321,7 +321,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
         case ZEND_FETCH_OBJ_UNSET:
         case ZEND_ASSIGN_OBJ:
         case ZEND_ASSIGN_DIM:
-        case ZEND_FE_RESET:
+        case ZEND_FE_RESET_R:
         case ZEND_FE_FETCH_R:
           log_operand(oplog, 'v', ops, &op->result, op->result_type);
           break;
@@ -359,7 +359,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
       case ZEND_FETCH_OBJ_UNSET:
       case ZEND_ASSIGN_OBJ:
       case ZEND_ASSIGN_DIM:
-      case ZEND_FE_RESET:
+      case ZEND_FE_RESET_R:
       case ZEND_FE_FETCH_R:
         log_operand(oplog, 'm', ops, &op->op1, op->op1_type);
         break;
@@ -371,11 +371,11 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
     switch (op->opcode) {
       case ZEND_JMP:
       case ZEND_GOTO:
-        jump_target = op->op1.jmp_addr;
+        jump_target = OP_JMP_ADDR(op, op->op1);
         jump_reason = "(target)";
         break;
       case ZEND_FAST_CALL:
-        jump_target = op->op1.jmp_addr;
+        jump_target = OP_JMP_ADDR(op, op->op1);
         jump_reason = "(?)";
         break;
       case ZEND_FETCH_OBJ_R:
@@ -401,7 +401,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
       case ZEND_FETCH_OBJ_UNSET:
       case ZEND_ASSIGN_OBJ:
       case ZEND_ASSIGN_DIM:
-      case ZEND_FE_RESET:
+      case ZEND_FE_RESET_R:
       case ZEND_FE_FETCH_R:
         log_operand(oplog, 'k', ops, &op->op2, op->op2_type);
         break;
@@ -415,24 +415,24 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
       case ZEND_JMPZNZ:
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
-        jump_target = op->op2.jmp_addr;
+        jump_target = OP_JMP_ADDR(op, op->op2);
         jump_reason = "(target)";
         break;
       case ZEND_COALESCE:
-        jump_target = op->op2.jmp_addr;
+        jump_target = OP_JMP_ADDR(op, op->op2);
         jump_reason = "(?)";
         break;
       case ZEND_JMP_SET:
-        jump_target = op->op2.jmp_addr;
+        jump_target = OP_JMP_ADDR(op, op->op2);
         jump_reason = "(?)";
         break;
-      case ZEND_FE_RESET:
+      case ZEND_FE_RESET_R:
       case ZEND_FE_FETCH_R:
-        jump_target = op->op2.jmp_addr;
+        jump_target = OP_JMP_ADDR(op, op->op2);
         jump_reason = "(if array empty)";
         break;
       case ZEND_NEW:
-        jump_target = op->op2.jmp_addr;
+        jump_target = OP_JMP_ADDR(op, op->op2);
         jump_reason = "(if no constructor)";
         break;
     }
@@ -482,6 +482,7 @@ void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t i
       print_sink(oplog, "sink(zval:number) {1,2} =d=> {1,result}");
       break;
     case ZEND_CONCAT:
+    case ZEND_FAST_CONCAT:
       print_sink(oplog, "sink(zval:string) {1,2} =d=> {result}");
       break;
     case ZEND_ASSIGN_CONCAT:
@@ -522,15 +523,12 @@ void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t i
     case ZEND_ECHO:
       print_sink(oplog, "sink(output) {1} =d=> {output}");
       break;
-    case ZEND_PRINT:
-      print_sink(oplog, "sink(output,zval:number) {1} =d=> {output}, {len(1)} =d=> {result}");
-      break;
     case ZEND_FETCH_R:  /* fetch a superglobal */
     case ZEND_FETCH_W:
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
       if (op->op2_type == IS_UNUSED) {
-        const char *superglobal_name = Z_STRVAL_P(op->op1.zv);
+        const char *superglobal_name = ""; // alpha: Z_STRVAL_P(op->op1.zv);
         if (superglobal_name != NULL) {
           if (strcmp(superglobal_name, "_SESSION") == 0) {
             print_sink(oplog, "sink(zval) {session} =d=> {result}");
@@ -598,11 +596,12 @@ void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t i
     case ZEND_JMPNZ_EX:
       print_sink(oplog, "sink(branch) {1} =l=> {opline}");
       break;
-    /* opcode has misleading name: ADD means APPEND */
-    case ZEND_ADD_CHAR:   /* (op2 must be a const char) */
-    case ZEND_ADD_STRING: /* (op2 must be a const string) */
-    case ZEND_ADD_VAR:    /* (may convert op2 to string) */
-      print_sink(oplog, "sink(zval:string) {2,result} =d=> {result}");
+    case ZEND_ROPE_INIT:
+    case ZEND_ROPE_ADD:
+      print_sink(oplog, "sink(rope) {2} =d=> {1}");
+      break;
+    case ZEND_ROPE_END:    /* (may convert op2 to string) */
+      print_sink(oplog, "sink(rope) {1,2} =d=> {result}");
       break;
     case ZEND_ADD_ARRAY_ELEMENT: /* insert or append */
       if (op->op2_type == IS_UNUSED)
@@ -693,7 +692,7 @@ void identify_sink_operands(application_t *app, zend_op *op, sink_identifier_t i
     case ZEND_CAST:
       print_sink(oplog, "sink(zval) {1,ext} =d=> {result}"); /* ext specifies cast dest type */
       break;
-    case ZEND_FE_RESET: /* starts an iterator */
+    case ZEND_FE_RESET_R: /* starts an iterator */
       print_sink(oplog, "sink(zval:map) {1} =d=> {result} (or skips via 2 => opline if 1 is empty)");
       break;
     case ZEND_FE_FETCH_R: /* advances an iterator */
@@ -1860,6 +1859,7 @@ static void link_operand_dataflow(FILE *oplog, dataflow_link_pass_t *pass)
       case ZEND_BW_XOR:
       case ZEND_BW_NOT:
       case ZEND_CONCAT:
+      case ZEND_FAST_CONCAT:
       case ZEND_BOOL_XOR:
       case ZEND_INSTANCEOF:
       case ZEND_IS_IDENTICAL:
@@ -1880,16 +1880,19 @@ static void link_operand_dataflow(FILE *oplog, dataflow_link_pass_t *pass)
       case ZEND_FETCH_CONSTANT:
       case ZEND_FETCH_DIM_UNSET: /* also {} => {1.2}, which is not modelled yet */
       case ZEND_FETCH_OBJ_UNSET:
-      case ZEND_ADD_VAR:
-      case ZEND_ADD_STRING:
+      case ZEND_ROPE_END:
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
       case ZEND_TYPE_CHECK: /* FT */
       case ZEND_DEFINED:
       case ZEND_CAST:
       case ZEND_QM_ASSIGN: /* ? */
       case ZEND_STRLEN:
-      case ZEND_FE_RESET:
+      case ZEND_FE_RESET_R:
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, true);
+        break;
+      case ZEND_ROPE_INIT:
+      case ZEND_ROPE_ADD:
+        link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_1, true);
         break;
       case ZEND_BOOL:
       case ZEND_BOOL_NOT:
@@ -1902,10 +1905,6 @@ static void link_operand_dataflow(FILE *oplog, dataflow_link_pass_t *pass)
       case ZEND_ASSIGN_OBJ:
       case ZEND_ASSIGN_DIM: /* ignoring key for now */
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_VALUE, DATAFLOW_OPERAND_MAP, true);
-        break;
-      case ZEND_ADD_CHAR:
-        link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_2, DATAFLOW_OPERAND_RESULT, false);
-        link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_RESULT, DATAFLOW_OPERAND_RESULT, true);
         break;
       case ZEND_ADD_ARRAY_ELEMENT:
         // if (op->op2_type != IS_UNUSED) /* when modelled, use the key in this case */
@@ -1966,8 +1965,6 @@ static void link_operand_dataflow(FILE *oplog, dataflow_link_pass_t *pass)
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_SOURCE, DATAFLOW_OPERAND_RESULT, true);
         break;
       /****************** sinks *****************/
-      case ZEND_PRINT:
-        link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_RESULT, false);
       case ZEND_ECHO:
         link_operand(oplog, pass->live_variables, dop, DATAFLOW_OPERAND_1, DATAFLOW_OPERAND_SINK, true);
         break;
@@ -2478,7 +2475,7 @@ static void initilize_dataflow_operand(dataflow_operand_t *operand, zend_op_arra
   switch (type) {
     case IS_CONST:
       operand->value.type = DATAFLOW_VALUE_TYPE_CONST;
-      operand->value.constant = znode->zv;
+      operand->value.constant = NULL; // alpha: znode->zv;
       break;
     case IS_VAR:
     case IS_TMP_VAR:
@@ -2549,7 +2546,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
   switch (zop->opcode) {
     case ZEND_JMP:
       opcode->op1.value.type = DATAFLOW_VALUE_TYPE_JMP;
-      opcode->op1.value.jmp_target = (uint) (zop->op1.jmp_addr - zops->opcodes);
+      opcode->op1.value.jmp_target = (uint) (OP_JMP_ADDR(zop, zop->op1) - zops->opcodes);
       break;
     case ZEND_JMPZ:
     case ZEND_JMPNZ:
@@ -2557,7 +2554,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
       opcode->op2.value.type = DATAFLOW_VALUE_TYPE_JMP;
-      opcode->op2.value.jmp_target = (uint) (zop->op2.jmp_addr - zops->opcodes);
+      opcode->op2.value.jmp_target = (uint) (OP_JMP_ADDR(zop, zop->op2) - zops->opcodes);
       break;
     default:
       initilize_dataflow_operand(&opcode->op1, zops, &zop->op1, zop->op1_type);
@@ -2568,7 +2565,6 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
   switch (zop->opcode) {
     // where do these happen? SOURCE_TYPE_FILE|SOURCE_TYPE_SQL|SOURCE_TYPE_SYSTEM (via fcall)
     case ZEND_ECHO:
-    case ZEND_PRINT:
       initialize_sink(opcode, SINK_TYPE_OUTPUT);
       break;
     case ZEND_JMPZ:
@@ -2608,7 +2604,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
     case ZEND_FETCH_RW:
     case ZEND_FETCH_IS:
       if (zop->op2_type == IS_UNUSED) {
-        const char *superglobal_name = Z_STRVAL_P(zop->op1.zv);
+        const char *superglobal_name = ""; // alpha: Z_STRVAL_P(zop->op1.zv);
         if (superglobal_name != NULL) {
           if (strcmp(superglobal_name, "_SESSION") == 0) {
             initialize_source(opcode, SOURCE_TYPE_SESSION);

@@ -121,8 +121,8 @@ const char *operand_strdup(zend_execute_data *execute_data, const znode_op *oper
 {
   switch (type) {
     case IS_CONST:
-      if (operand->zv->u1.v.type == IS_STRING)
-        return request_strdup(Z_STRVAL_P(operand->zv));
+      if (0 /* alpha: operand->zv->u1.v.type */ == IS_STRING)
+        return request_strdup("alpha"); // Z_STRVAL_P(operand->zv));
       break;
     case IS_VAR:
     case IS_TMP_VAR:
@@ -137,7 +137,7 @@ const zval *get_zval(zend_execute_data *execute_data, const znode_op *operand, z
 {
   switch (type) {
     case IS_CONST:
-      return operand->zv;
+      return NULL; // alpha: operand->zv;
     case IS_VAR:
     case IS_TMP_VAR:
     case IS_CV:

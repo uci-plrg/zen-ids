@@ -141,7 +141,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
   function_fqn_t *fqn = PROCESS_NEW(function_fqn_t); /* can use REQUEST_NEW w/o opcache */
   control_flow_metadata_t cfm = { "<uninitialized>", NULL, NULL, NULL };
   const char *function_name;
-  char *buffer, *filename, *site_filename;
+  char *buffer, *site_filename;
+  zend_string *filename;
   char routine_name[ROUTINE_NAME_LENGTH], routine_caller_name[ROUTINE_NAME_LENGTH] = {0};
   char closure_id[CLOSURE_ID_LENGTH];
 #ifdef SPOT_DEBUG
@@ -189,7 +190,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
     bool free_filename = false;
 
     if (strncmp(op_array->filename->val, "phar://", 7) == 0) {
-      filename = op_array->filename->val;
+      filename = op_array->filename;
     } else {
       filename = zend_resolve_path(op_array->filename->val, op_array->filename->len);
       if (filename == NULL) {
@@ -199,15 +200,16 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
       }
       free_filename = true;
     }
-    fqn->unit.application = locate_application(filename);
-    site_filename = filename + strlen(fqn->unit.application->root);
+    fqn->unit.application = locate_application(filename->val);
+    site_filename = filename->val + strlen(fqn->unit.application->root);
     buffer = PROCESS_ALLOC(strlen(site_filename) + 1);
     strcpy(buffer, site_filename);
     fqn->unit.path = buffer;
     buffer = NULL;
     if (free_filename)
-      efree(filename);
-    filename = site_filename = NULL;
+      zend_string_release(filename);
+    filename = NULL;
+    site_filename = NULL;
 
     if (is_script_body) {
       sprintf(routine_name, "%s:%s", fqn->unit.path, function_name);
@@ -448,8 +450,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
               case ZEND_INCLUDE_ONCE:
               case ZEND_REQUIRE_ONCE: {
                 const char *site_to_path, *internal_to_path = resolve_constant_include(op);
+                zend_string *resolved_internal_to_path = NULL;
                 char to_unit_path[ROUTINE_NAME_LENGTH], to_routine_name[ROUTINE_NAME_LENGTH];
-                bool free_internal_to_path = false;
 
                 // make the included path absolute
                 if (internal_to_path[0] == '/') {
@@ -469,11 +471,11 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
                 }
                 // PROCESS_FREE((char *) internal_to_path); // mem: per-request?
 
-                internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
-                if (internal_to_path == NULL) {
+                resolved_internal_to_path = zend_resolve_path(to_unit_path, strlen(to_unit_path));
+                if (resolved_internal_to_path == NULL) {
                   internal_to_path = to_unit_path;
                 } else {
-                  free_internal_to_path = true;
+                  internal_to_path = resolved_internal_to_path->val;
                 }
                 site_to_path = internal_to_path + strlen(fqn->unit.application->root);
                 sprintf(to_routine_name, "%s:<script-body>", site_to_path);
@@ -484,8 +486,10 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
                                        to_routine_hash);
                 }
 
-                if (free_internal_to_path)
-                  efree((char *) internal_to_path);
+                if (resolved_internal_to_path != NULL) {
+                  zend_string_release(resolved_internal_to_path);
+                  resolved_internal_to_path = NULL;
+                }
                 internal_to_path = site_to_path = NULL;
 
                 WARN("Opcode %d includes %s (0x%x)\n", i, to_routine_name, to_routine_hash);
@@ -505,8 +509,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         } break;
         case ZEND_NEW: {
           if (op->op1_type == IS_CONST) {
-            PRINT("Opcode %d calls new %s()\n", i, Z_STRVAL_P(op->op1.zv));
-            classname = Z_STRVAL_P(op->op1.zv);
+            PRINT("Opcode %d calls new %s()\n", i, "alpha!"); // Z_STRVAL_P(op->op1.zv));
+            classname = "alpha"; // Z_STRVAL_P(op->op1.zv);
           } else {
             classname = "<unknown-type>";
           }
@@ -541,18 +545,18 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
             //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
             //   zend_hash_find(EG(function_table), Z_STR_P(function_name))
 
-            zval *func = zend_hash_find(executor_globals.function_table, Z_STR_P(op->op2.zv));
+            zval *func = zend_hash_find(executor_globals.function_table, NULL); // alpha: Z_STR_P(op->op2.zv));
             // This is matching user-defined functions...? Needs to be builtins only.
             if (func != NULL && Z_TYPE_P(func) == IS_PTR &&
                 func->value.func->type == ZEND_INTERNAL_FUNCTION) {
               ignore_call |= !IS_OPCODE_DUMP_ENABLED();
-              sprintf(routine_name, "builtin:%s", Z_STRVAL_P(op->op2.zv));
+              sprintf(routine_name, "builtin:%s", "alpha"); // Z_STRVAL_P(op->op2.zv));
               push_fcall_init(cfm.app, i, op->opcode, BUILTIN_ROUTINE_HASH_PLACEHOLDER, routine_name);
               break; // ignore builtins for now (unless dumping ops)
             }
 
             classname = COMPILED_ROUTINE_DEFAULT_SCOPE;
-            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+            sprintf(routine_name, "%s:%s", classname, "alpha"); // Z_STRVAL_P(op->op2.zv));
           } else if (op->op2_type != IS_UNUSED) { // some kind of var
             uint var_index = (uint) (op->op2.var / sizeof(zval *));
             sprintf(routine_name, "<var #%d>", var_index);
@@ -567,7 +571,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
             classname = "<class-instance>";
 
           if (op->op2_type == IS_CONST)
-            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+            sprintf(routine_name, "%s:%s", classname, "alpha"); // Z_STRVAL_P(op->op2.zv));
           else
             sprintf(routine_name, "%s:<var>", classname);
           to_routine_hash = hash_routine(routine_name);
@@ -576,14 +580,14 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         case ZEND_INIT_STATIC_METHOD_CALL: {
           classname = NULL;
           if (op->op1_type == IS_CONST && op->op2_type == IS_CONST) {
-            classname = Z_STRVAL_P(op->op1.zv);
+            classname = "alpha"; // Z_STRVAL_P(op->op1.zv);
           } else if (op->op1_type == IS_VAR && op->op2_type == IS_UNUSED) {
             if ((op-1)->extended_value == ZEND_FETCH_CLASS_SELF)
               classname = op_array->scope->name->val;
           }
 
           if (classname != NULL) {
-            sprintf(routine_name, "%s:%s", classname, Z_STRVAL_P(op->op2.zv));
+            sprintf(routine_name, "%s:%s", classname, "alpha"); // Z_STRVAL_P(op->op2.zv));
             to_routine_hash = hash_routine(routine_name);
             push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
           }
@@ -725,17 +729,17 @@ compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
   switch (op->opcode) {
     case ZEND_JMP:
       target.type = COMPILED_EDGE_DIRECT;
-      target.index = op_index + ((zend_op *)op->op1.jmp_addr - op);
+      target.index = op_index + (OP_JMP_ADDR(op, op->op1) - op);
       break;
     case ZEND_JMPZ:
     case ZEND_JMPNZ:
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
-    case ZEND_FE_RESET:
+    case ZEND_FE_RESET_R:
     case ZEND_FE_FETCH_R:
       target.type = COMPILED_EDGE_DIRECT;
-      target.index = op_index + ((zend_op *)op->op2.jmp_addr - op);
+      target.index = op_index + (OP_JMP_ADDR(op, op->op2) - op);
       break;
     case ZEND_DO_FCALL:
     case ZEND_INCLUDE_OR_EVAL:

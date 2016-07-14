@@ -23,7 +23,7 @@ void set_opmon_user_level(long user_level);
 
 void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm);
 void pop_interp_context();
-//void top_stack_motion(zend_execute_data *execute_data, const zend_op *op, int top_stack_motion);
+void monitor_call();
 void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC);
 void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC);
 void execute_opcode_direct(zend_execute_data *execute_data TSRMLS_DC);

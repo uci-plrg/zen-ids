@@ -56,7 +56,7 @@
    (ex)->prev_execute_data->func == NULL && \
    strcmp((ex)->func->op_array.function_name->val, "__destruct") == 0)
 
-typedef (*opcode_handler_t)(void);
+typedef void (*opcode_handler_t)(void);
 
 typedef struct _implicit_taint_t {
   uint id;
@@ -1237,8 +1237,8 @@ static zend_op *find_spanning_block_tail(const zend_op *cur_op, zend_op_array *o
       case ZEND_JMPZNZ:
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
-        if (OP_JMP_ADDR(cur_op, walk->op2) > cur_op) // alpha
-          return OP_JMP_ADDR(cur_op, walk->op2);
+        if (OP_JMP_ADDR(walk, walk->op2) > cur_op) // alpha
+          return OP_JMP_ADDR(walk, walk->op2);
     }
     walk--;
   }
@@ -1654,16 +1654,16 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
         switch (jump_op->opcode) {
           case ZEND_JMPZ:
           case ZEND_JMPZNZ:
-            if (OP_JMP_ADDR(op, jump_op->op2) > jump_op) { // alpha
-              jump_target = OP_JMP_ADDR(op, jump_op->op2);
+            if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) { // alpha
+              jump_target = OP_JMP_ADDR(jump_op, jump_op->op2);
               if (jump_predicate == NULL)
                 jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
             }
             break;
           case ZEND_JMPZ_EX:
           case ZEND_JMPNZ_EX:
-            if (OP_JMP_ADDR(op, jump_op->op2) > jump_op) {
-              jump_op = OP_JMP_ADDR(op, jump_op->op2);
+            if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) {
+              jump_op = OP_JMP_ADDR(jump_op, jump_op->op2);
               if (jump_predicate == NULL)
                 jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
               continue;
@@ -1700,7 +1700,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
           case ZEND_JMPZNZ:
           case ZEND_JMPZ_EX:
           case ZEND_JMPNZ_EX:
-            if (OP_JMP_ADDR(op, jump_op->op2) > jump_op) {
+            if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) {
               verified_jump = jump_op;
             } break;
           default:
@@ -1785,189 +1785,164 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   op_context.is_unconditional_fallthrough = is_unconditional_fallthrough(op_context.cur.op);
 }
 
-static int chaperone_opcode(zend_execute_data *execute_data, zend_op *op, int stack_motion)
+#define ZEND_VM_FP_GLOBAL_REG "%r14"
+#define ZEND_VM_IP_GLOBAL_REG "%r15"
+
+#pragma GCC diagnostic ignored "-Wvolatile-register-var"
+register zend_execute_data* volatile execute_data __asm__(ZEND_VM_FP_GLOBAL_REG);
+register const zend_op* volatile opline __asm__(ZEND_VM_IP_GLOBAL_REG);
+#pragma GCC diagnostic warning "-Wvolatile-register-var"
+
+void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
 {
-  opcode_handler_t original_handler;
+  const zend_op *caller_opline = opline;
+  zend_execute_data *caller_execute_data = execute_data;
+  execute_data = cur_execute_data;
 
-  if (execute_data != NULL)
-    monitor_opcode(execute_data, op, stack_motion);
+  opline = EX(opline);
 
-  original_handler = (opcode_handler_t) int2p(p2int(op->handler) & ORIGINAL_HANDLER_BITS);
-
-  if (!IS_CFI_TRAINING())
-    ((zend_op *)op)->handler = original_handler;
-
-  return original_handler(execute_data TSRMLS_DC);
-}
-
-// static uint chaperone_count = 0;
-
-/* plugged */
-void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC)
-{
-  int stack_motion = STACK_MOTION_CALL;
+  // ZEND_VM_LOOP_INTERRUPT_CHECK(); // alpha
 
   while (1) {
-    zend_op *op = (zend_op *) EX(opline);
-
-    stack_motion = chaperone_opcode(execute_data, op, stack_motion);
-//    if ((++chaperone_count % 10000) == 0)
-//      SPOT("Chaperoned %d opcodes\n", chaperone_count);
-
-    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
-      op_context.cfm = NULL;
-      if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
-        execute_data = EG(current_execute_data);
-      } else {
-        return;
-      }
-    }
-
-  }
-  zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
-}
-
-void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC)
-{
-  while (1) {
-    uint64 original_handler_addr = p2int(EX(opline)->handler) & ORIGINAL_HANDLER_BITS;
+    uint64 original_handler_addr = p2int(opline->handler) & ORIGINAL_HANDLER_BITS;
     opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
-    int stack_motion = original_handler(execute_data TSRMLS_CC);
+    monitor_opcode(execute_data, opline, STACK_MOTION_NONE /* alpha */);
+    original_handler(); // on ZEND_VM_ENTER(): `op_context.cfm = NULL`
 
-    switch (stack_motion) {
-      case STACK_MOTION_RETURN:
-        return;
-      case STACK_MOTION_LEAVE:
-        execute_data = EG(current_execute_data);
-        break;
-      case STACK_MOTION_CALL: {
-        bool block = false;
-        zend_op_array *to_op_array;
-        zend_op *op = (zend_op *) EX(opline);
-        control_flow_metadata_t *to_cfm = NULL; // better to separate them than waste init?
-        control_flow_metadata_t *from_cfm = NULL;
-        dataset_target_routines_t *targets = NULL;
-        zend_execute_data *from_execute_data = execute_data;
-        uint64 routine_edges_index, routine_edge_metadata = p2int(op->handler);
-
-        if ((routine_edge_metadata & ROUTINE_EDGE_INDEX_CACHED) == 0) {
-          zend_op_array *op_array = &execute_data->func->op_array;
-          uint from_index = op - op_array->opcodes;
-
-          original_handler_addr |= ROUTINE_EDGE_INDEX_CACHED;
-          from_cfm = lookup_cfm(execute_data, op_array);
-          if (from_cfm == NULL || from_cfm->dataset == NULL) {
-            block = true;
-          } else {
-            targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
-            // debug
-            if (targets == NULL)
-              targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
-          }
-
-          if (targets != NULL) {
-            routine_edges_index = routine_edge_targets.size;
-            original_handler_addr |= (routine_edges_index << ROUTINE_EDGE_INDEX_SHIFT);
-
-            scarray_append(&routine_edge_targets, targets);
-
-            SPOT("Append 0x%x:%d -> { "PX" } at index %d\n", from_cfm->cfg->routine_hash,
-                 from_index, p2int(targets), (int) routine_edges_index);
-          } else {
-            block = true;
-
-            SPOT("No target routines for %s 0x%x:%d -> { "PX" }\n", from_cfm->routine_name,
-                 from_cfm->cfg->routine_hash, from_index, p2int(targets));
-          }
-          op->handler = (opcode_handler_t) int2p(original_handler_addr);
-        } else {
-          routine_edges_index = routine_edge_metadata >> ROUTINE_EDGE_INDEX_SHIFT;
-          targets = routine_edge_targets.data[routine_edges_index];
-        }
-
-        execute_data = EG(current_execute_data);
-
-        if (targets != NULL) {
-          to_op_array = &execute_data->func->op_array;
-          to_cfm = lookup_cfm(execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
-
-          block = !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
-                                                 current_session.user_level,
-                                                 to_op_array->type == ZEND_EVAL_CODE);
-        }
-
-        if (block) {
-          zend_op_array *from_op_array = &from_execute_data->func->op_array;
-          op_t from_op = {
-            from_execute_data->opline,
-            from_execute_data->opline - from_op_array->opcodes
-          };
-
-          to_op_array = &execute_data->func->op_array;
-          if (to_cfm == NULL)
-            to_cfm = lookup_cfm(execute_data, to_op_array);
-          if (from_cfm == NULL)
-            from_cfm = lookup_cfm(from_execute_data, from_op_array);
-          block_request(from_execute_data, from_cfm, &from_op, to_cfm, 0);
-        }
-      } break;
-      default: ;
+    if (UNEXPECTED(!opline)) {
+      execute_data = caller_execute_data;
+      opline = caller_opline;
+      return;
     }
-
   }
   zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
 
-/* unplugged */
-void execute_opcode_direct(zend_execute_data *execute_data TSRMLS_DC)
+void monitor_call()
 {
+  bool block = false;
+  zend_op_array *to_op_array;
+  zend_execute_data *to_execute_data;
+  control_flow_metadata_t *to_cfm = NULL; // better to separate them than waste init?
+  control_flow_metadata_t *from_cfm = NULL;
+  dataset_target_routines_t *targets = NULL;
+  uint64 routine_edges_index, routine_edge_metadata = p2int(opline->handler);
+
+  if ((routine_edge_metadata & ROUTINE_EDGE_INDEX_CACHED) == 0) {
+    uint64 original_handler_addr = p2int(opline->handler) & ORIGINAL_HANDLER_BITS;
+    zend_op_array *op_array = &execute_data->func->op_array;
+    uint from_index = opline - op_array->opcodes;
+
+    original_handler_addr |= ROUTINE_EDGE_INDEX_CACHED;
+    from_cfm = lookup_cfm(execute_data, op_array);
+    if (from_cfm == NULL || from_cfm->dataset == NULL) {
+      block = true;
+    } else {
+      targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
+      // debug
+      if (targets == NULL)
+        targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
+    }
+
+    if (targets != NULL) {
+      routine_edges_index = routine_edge_targets.size;
+      original_handler_addr |= (routine_edges_index << ROUTINE_EDGE_INDEX_SHIFT);
+
+      scarray_append(&routine_edge_targets, targets);
+
+      SPOT("Append 0x%x:%d -> { "PX" } at index %d\n", from_cfm->cfg->routine_hash,
+           from_index, p2int(targets), (int) routine_edges_index);
+    } else {
+      block = true;
+
+      SPOT("No target routines for %s 0x%x:%d -> { "PX" }\n", from_cfm->routine_name,
+           from_cfm->cfg->routine_hash, from_index, p2int(targets));
+    }
+    ((zend_op *) opline)->handler = (opcode_handler_t) int2p(original_handler_addr);
+  } else {
+    routine_edges_index = routine_edge_metadata >> ROUTINE_EDGE_INDEX_SHIFT;
+    targets = routine_edge_targets.data[routine_edges_index];
+    block = (targets == NULL);
+  }
+
+  to_execute_data = EG(current_execute_data);
+
+  if (!block) {
+    to_op_array = &to_execute_data->func->op_array;
+    to_cfm = lookup_cfm(to_execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+
+    block = !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
+                                           current_session.user_level,
+                                           to_op_array->type == ZEND_EVAL_CODE);
+  }
+
+  if (block) {
+    zend_op_array *from_op_array = &execute_data->func->op_array;
+    op_t from_op = {
+      execute_data->opline,
+      execute_data->opline - from_op_array->opcodes
+    };
+
+    to_op_array = &to_execute_data->func->op_array;
+    if (to_cfm == NULL)
+      to_cfm = lookup_cfm(to_execute_data, to_op_array);
+    if (from_cfm == NULL)
+      from_cfm = lookup_cfm(execute_data, from_op_array);
+    block_request(execute_data, from_cfm, &from_op, to_cfm, 0);
+  }
+}
+
+void execute_opcode_monitor_calls(zend_execute_data *cur_execute_data)
+{
+  const zend_op *caller_opline = opline;
+  zend_execute_data *caller_execute_data = execute_data;
+  execute_data = cur_execute_data;
+
+  opline = EX(opline);
+
+  // ZEND_VM_LOOP_INTERRUPT_CHECK(); // alpha
+
   while (1) {
-    int stack_motion = 0;
-    uint64 original_handler_addr = p2int(EX(opline)->handler) & ORIGINAL_HANDLER_BITS;
+    uint64 original_handler_addr = p2int(opline->handler) & ORIGINAL_HANDLER_BITS;
     opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
-    stack_motion = original_handler(execute_data TSRMLS_CC);
+    original_handler(); // ZEND_VM_ENTER() hooked to `monitor_call()`
 
-    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
-      if (UNEXPECTED(stack_motion > STACK_MOTION_NONE)) {
-        execute_data = EG(current_execute_data);
-      } else {
-        return;
-      }
+    if (UNEXPECTED(!opline)) {
+      execute_data = caller_execute_data;
+      opline = caller_opline;
+      return;
     }
-
   }
   zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
 
-/* wrapper way:
-void execute_opcode(zend_execute_data *execute_data TSRMLS_DC)
+void execute_opcode_direct(zend_execute_data *cur_execute_data)
 {
-  opcode_monitor->notify_top_stack_motion(execute_data, EX(opline), 3);
+
+  const zend_op *caller_opline = opline;
+  zend_execute_data *caller_execute_data = execute_data;
+  execute_data = cur_execute_data;
+
+  opline = EX(opline);
+
+  // ZEND_VM_LOOP_INTERRUPT_CHECK(); // alpha
 
   while (1) {
-    int stack_motion;
-#ifdef ZEND_WIN32
-    if (EG(timed_out)) {
-      zend_timeout(0);
-    }
-#endif
+    uint64 original_handler_addr = p2int(opline->handler) & ORIGINAL_HANDLER_BITS;
+    opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
-    stack_motion = EX(opline)->handler(execute_data TSRMLS_CC);
-    if (UNEXPECTED(stack_motion != STACK_MOTION_NONE)) {
-      if (EXPECTED(stack_motion > STACK_MOTION_NONE)) {
-        execute_data = EG(current_execute_data);
-      } else {
-        notify_top_stack_motion(execute_data, EX(opline), -1);
-        return;
-      }
-    }
+    original_handler();
 
+    if (UNEXPECTED(!opline)) {
+      execute_data = caller_execute_data;
+      opline = caller_opline;
+      return;
+    }
   }
   zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
-*/
 
 /************* Evo Functions *************/
 
