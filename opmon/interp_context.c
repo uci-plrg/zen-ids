@@ -573,17 +573,23 @@ static void block_request(zend_execute_data *from_execute_data, control_flow_met
     plog(current_app, PLOG_TYPE_CFG_BLOCK, "block request %08lld 0x%llx: %s\n",
          current_request_id, get_current_request_start_time(), address);
   }
-  if (to_index == 0) {
-    plog(current_app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
-         (from_op == NULL) ? -1 : from_op->index,
-         (from_op == NULL) ? -1 : (from_op->op == NULL ? -1 : from_op->op->lineno),
-         (from_cfm == NULL) ? "?" : from_cfm->routine_name /* alpha */,
-         (to_cfm == NULL) ? "?" : to_cfm->routine_name /* alpha */);
+
+  if (from_op == NULL || from_cfm == NULL || to_cfm == NULL) {
+    zend_op_array *op_array = &from_execute_data->func->op_array;
+
+    plog(current_app, PLOG_TYPE_CFG, "%s unverified: %s:%s:%d -> %s\n",
+         (to_index == 0) ? "call" : "throw", op_array->filename->val,
+         op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val,
+         from_execute_data->opline->lineno, to_cfm == NULL ? "?" : to_cfm->routine_name);
   } else {
-    plog(current_app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
-         from_op->index, (from_op->op == NULL ? 0 : from_op->op->lineno),
-         from_op->op->lineno, (from_cfm == NULL) ? "?" : from_cfm->routine_name /* alpha */,
-         (to_cfm == NULL) ? "?" : to_cfm->routine_name /* alpha */);
+    if (to_index == 0) {
+      plog(current_app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
+           from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+    } else {
+      plog(current_app, PLOG_TYPE_CFG, "throw unverified: %04d(L%04d) %s -> %s\n",
+           from_op->index, from_op->op->lineno, from_op->op->lineno, from_cfm->routine_name,
+           to_cfm->routine_name);
+    }
   }
 
   if (from_execute_data != NULL)
@@ -1932,6 +1938,9 @@ static void monitor_call_from(zend_execute_data *from_execute_data, const zend_o
 
   to_execute_data = EG(current_execute_data);
 
+  if (to_execute_data->func != NULL && to_execute_data->opline > to_execute_data->func->op_array.opcodes)
+    SPOT("wait\n");
+
   if (!block) {
     to_op_array = &to_execute_data->func->op_array;
     to_cfm = lookup_cfm(to_execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
@@ -1995,6 +2004,7 @@ void monitor_call()
   monitor_all_stack_motion = STACK_MOTION_CALL;
 }
 
+// alpha: missing try/catch edges in quick mode
 void monitor_call_quick()
 {
   monitor_call_from(execute_data, opline);
@@ -2038,8 +2048,6 @@ void execute_opcode_monitor_calls(zend_execute_data *cur_execute_data)
   zend_execute_data *caller_execute_data = execute_data;
   execute_data = cur_execute_data;
 
-  // alpha: missing script entry point and system entries (e.g. classloader)
-  // alpha: missing calls to builtins
   monitor_top_entry();
 
   opline = EX(opline);
