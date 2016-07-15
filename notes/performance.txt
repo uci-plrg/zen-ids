@@ -143,24 +143,53 @@ real	0m20.856s
 
 ================== GitList ===================
 
- === Native: ~15.8s
+ === Native 7.1.0alpha3 on log.16.gor: ~13.4s
 
-real    0m16.392s
-real    0m16.473s
-real    0m15.340s
+Wall time: 13.96
+Wall time: 13.70
+Wall time: 15.24
+Wall time: 13.57
+Wall time: 14.54
+Wall time: 12.99
+Wall time: 13.39
+Wall time: 13.80
+Wall time: 13.39
+Wall time: 12.83
+Wall time: 13.33
+Wall time: 14.10
+Wall time: 13.74
+Wall time: 14.37
 
 
- === Opmon (naive verification): ~18.5s (17%)
+ === Native 7.1.0alpha3 on log.17.gor: ~141s
 
-real	0m17.738s
-real	0m18.278s
-real	0m19.361s
+Wall time: 139.81
+Wall time: 142.35
+Wall time: 143.40
+Wall time: 143.92
+Wall time: 140.15
 
- === Opmon (no verification): ~16.4s (2%)
 
-real	0m16.377s
-real	0m16.682s
-real	0m15.928s
+ === Opmon 7.1.0alpha3 on log.16.gor: ~14.5s (8%)
+
+Wall time: 15.56
+Wall time: 14.51
+Wall time: 15.54
+Wall time: 14.44
+Wall time: 14.50
+Wall time: 14.11
+Wall time: 14.66
+Wall time: 14.73
+Wall time: 14.57
+Wall time: 14.87
+Wall time: 14.73
+Wall time: 14.01
+Wall time: 14.26
+
+
+ === Opmon 7.1.0alpha3 on log.17.gor: ~150s (6%)
+
+
 
 
 -------------------------
@@ -225,7 +254,13 @@ ZEND_API void execute_ex(zend_execute_data *ex)
 }
 
 
-x0x7fffe995121f
+<cfg> block request 00132558 0x537a4eb52232d: GET /git/IRC.git/commit/db08e90ba058c9d0ab3d80a723410f22a5492c74 HTTP/1.1
+<cfg> block request 00132725 0x537a4ebac0b7f: GET /git/IRC.git/blob/master/Robust/Transactions/PureIOFiles/s.text HTTP/1
+<cfg> call unverified: 0030(L0274) Symfony\Component\HttpFoundation\Request:createFromGlobals -> Symfony\Component\HttpF
+<cfg> block request 00132874 0x537a4ec02f48c: GET /git/model-checker.git/commit/ad52dcdb3a75a69242a392165934e942cb76513b
+<cfg> call unverified: 0030(L0274) Symfony\Component\HttpFoundation\Request:createFromGlobals -> Symfony\Component\HttpF
+<cfg> block request 00132875 0x537a4ec03577e: POST /git/model-checker.git/commit/ad52dcdb3a75a69242a392165934e942cb76513
+
 
 
 

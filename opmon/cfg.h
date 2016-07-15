@@ -60,6 +60,7 @@ typedef struct _application_t {
   void *dataset;
   void *base_frame;
   void *system_frame;
+  scarray_t routine_edge_targets;
   FILE *evo_taint_log;
   FILE *request_id_file;
 } application_t;

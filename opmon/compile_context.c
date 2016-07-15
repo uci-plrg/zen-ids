@@ -687,12 +687,15 @@ void function_created(zend_op_array *src, zend_op_array *f)
   if (f == NULL)
     return;
 
-    function_fqn_t *fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(f->opcodes));
-    if (fqn == NULL) {
-      fqn = register_new_function(f);
-      sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
-    }
+  function_fqn_t *fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(f->opcodes));
+  if (fqn != NULL)
     return;
+  if (src != NULL)
+    fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(src->opcodes));
+  if (fqn == NULL)
+    fqn = register_new_function(f);
+
+  sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
 }
 
 // (can never find an eval this way)

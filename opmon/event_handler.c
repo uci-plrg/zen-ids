@@ -162,8 +162,6 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
 
   /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
   enable_request_taint_tracking(false);
-  if (IS_CFI_TRAINING())
-    zend_execute_ex = execute_opcode_monitor_all;
 
   if (false) { // overrides for performance testing
     monitor->notify_http_request = nop_request_boundary;
@@ -172,7 +170,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   } else if (false) { // overrides for performance testing
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
-    monitor->notify_call = monitor_call;
+    monitor->notify_call = monitor_call_quick;
 
     monitor->has_taint = nop_has_taint;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
@@ -182,6 +180,11 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   } else { // normal mode
     monitor->notify_http_request = request_boundary;
     monitor->notify_function_created = function_created;
+    monitor->notify_call = monitor_call_quick;
+  }
+
+  if (IS_CFI_TRAINING()) {
+    zend_execute_ex = execute_opcode_monitor_all;
     monitor->notify_call = monitor_call;
   }
 
