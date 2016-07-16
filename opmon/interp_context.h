@@ -4,14 +4,6 @@
 #include <php.h>
 #include "metadata_handler.h"
 #include "cfg.h"
-// #include "interp_handler.h"
-
-typedef enum _stack_motion_t {
-  STACK_MOTION_RETURN = -1,
-  STACK_MOTION_NONE = 0,
-  STACK_MOTION_CALL = 1,
-  STACK_MOTION_LEAVE = 2,
-} stack_motion_t;
 
 typedef void (*execute_opcode_t)(zend_execute_data *execute_data TSRMLS_DC);
 

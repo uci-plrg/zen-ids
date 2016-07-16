@@ -21,7 +21,13 @@
 
 // #define OPMON_LOG_SELECT 1
 // #defne TRANSACTIONAL_SUBPROCESS 1
-#define OPT 1
+
+typedef enum _stack_motion_t {
+  STACK_MOTION_RETURN = -1,
+  STACK_MOTION_NONE = 0,
+  STACK_MOTION_CALL = 1,
+  STACK_MOTION_LEAVE = 2,
+} stack_motion_t;
 
 #define MAX_STACK_FRAME_shadow_stack 0x1000
 #define MAX_STACK_FRAME_exception_stack 0x100
@@ -29,12 +35,6 @@
 #define MAX_STACK_FRAME_fcall_stack 0x20
 #define ROUTINE_NAME_LENGTH 256
 #define FLUSH_MASK 0xff
-
-#define IS_TOP_FRAME(ex) \
-  (VM_FRAME_KIND((ex)->frame_info) == VM_FRAME_TOP_CODE || \
-   VM_FRAME_KIND((ex)->frame_info) == VM_FRAME_TOP_FUNCTION)
-
-#define IS_SAME_FRAME(a, b) ((a).execute_data == (b).execute_data && (a).opcodes == (b).opcodes)
 
 #define MAX_BIGINT_CHARS 32
 #define EVO_STATE_QUERY "SELECT request_id, table_name, column_name, table_key " \
@@ -49,12 +49,6 @@
 #define EVO_UPDATE_REQUEST_ID_BUFFER_LEN sizeof(EVO_UPDATE_REQUEST_ID) + 20
 
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
-
-/* N.B.: distinguish user-space calls to __destruct()! */
-#define IS_DESTRUCTOR(ex)                   \
-  ((ex)->prev_execute_data != NULL &&       \
-   (ex)->prev_execute_data->func == NULL && \
-   strcmp((ex)->func->op_array.function_name->val, "__destruct") == 0)
 
 typedef void (*opcode_handler_t)(void);
 
@@ -267,15 +261,6 @@ static void file_read_trigger(zend_execute_data *execute_data, const char *sysca
                               const zval *return_value, const zend_op **args, uint arg_count);
 static void file_write_trigger(zend_execute_data *execute_data, const char *syscall,
                                const zend_op **args, uint arg_count);
-
-/*
-static uint get_first_executable_index(zend_op *opcodes)
-{
-  uint i;
-  for (i = 0; zend_get_opcode_name(opcodes[i].opcode) == NULL; i++) ;
-  return i;
-}
-*/
 
 static void update_user_session()
 {
@@ -574,13 +559,17 @@ static void block_request(zend_execute_data *from_execute_data, control_flow_met
          current_request_id, get_current_request_start_time(), address);
   }
 
-  if (from_op == NULL || from_cfm == NULL || to_cfm == NULL) {
+  if (from_execute_data == NULL) {
+    plog(current_app, PLOG_TYPE_CFG, "%s unverified: %s -> %s\n", (to_index == 0) ? "call" : "throw",
+         (from_cfm == NULL) ? "<system>" : from_cfm->routine_name,
+         (to_cfm == NULL) ? "?" : to_cfm->routine_name);
+  } else if (from_op == NULL || from_cfm == NULL || to_cfm == NULL) {
     zend_op_array *op_array = &from_execute_data->func->op_array;
 
     plog(current_app, PLOG_TYPE_CFG, "%s unverified: %s:%s:%d -> %s\n",
          (to_index == 0) ? "call" : "throw", op_array->filename->val,
-         op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val,
-         from_execute_data->opline->lineno, to_cfm == NULL ? "?" : to_cfm->routine_name);
+         (op_array->function_name == NULL) ? "<script-body>" : op_array->function_name->val,
+         from_execute_data->opline->lineno, (to_cfm == NULL) ? "?" : to_cfm->routine_name);
   } else {
     if (to_index == 0) {
       plog(current_app, PLOG_TYPE_CFG, "call unverified: %04d(L%04d) %s -> %s\n",
@@ -829,8 +818,8 @@ static control_flow_metadata_t *lookup_cfm(zend_execute_data *execute_data, zend
 {
   control_flow_metadata_t *monitored_cfm = get_cfm_by_opcodes_address(op_array->opcodes);
   if (monitored_cfm == NULL) {
-    WARN("Failed to find CFM for opcodes at 0x%llx: %s:%s\n", hash_addr(op_array->opcodes),
-         op_array->filename->val, op_array->function_name == NULL ? "-" : op_array->function_name->val);
+    ERROR("Failed to find CFM for opcodes at 0x%llx: %s:%s\n", hash_addr(op_array->opcodes),
+          op_array->filename->val, op_array->function_name == NULL ? "-" : op_array->function_name->val);
     if (false)
       monitored_cfm = lookup_cfm_by_name(execute_data, op_array);
   }
@@ -884,7 +873,7 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
     }
 
     if (prev_execute_data->func != NULL) {
-      if (prev_execute_data->func == EG(autoload_func)) {
+      if (prev_execute_data->func != NULL && prev_execute_data->func == EG(autoload_func)) {
         from_cfm = (control_flow_metadata_t *) current_app->system_frame;
         prev_execute_data = NULL;
         break;
@@ -1455,16 +1444,6 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       DECREMENT_STACK(exception_stack, exception_frame);
       // what to do with implicit taint here?
     } break;
-#ifdef OPT
-    case ZEND_INCLUDE_OR_EVAL:
-    case ZEND_RETURN:
-    case ZEND_RETURN_BY_REF:
-    case ZEND_FAST_RET:
-    case ZEND_HANDLE_EXCEPTION:
-      break;
-    default:
-      return;
-#endif
   }
 
 #ifdef TAINT_REQUEST_INPUT
@@ -1912,6 +1891,10 @@ static void monitor_call_from(zend_execute_data *from_execute_data, const zend_o
     if (from_cfm == NULL || from_cfm->dataset == NULL) {
       block = true;
     } else {
+
+      if (from_cfm->cfg->routine_hash == 0x718743e7 && opline->lineno == 494)
+        SPOT("wait\n");
+
       targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
       // debug
       if (targets == NULL)
@@ -1937,9 +1920,6 @@ static void monitor_call_from(zend_execute_data *from_execute_data, const zend_o
   }
 
   to_execute_data = EG(current_execute_data);
-
-  if (to_execute_data->func != NULL && to_execute_data->opline > to_execute_data->func->op_array.opcodes)
-    SPOT("wait\n");
 
   if (!block) {
     to_op_array = &to_execute_data->func->op_array;
@@ -2025,7 +2005,8 @@ static void monitor_top_entry()
       return;
     }
 
-    if (user_caller_execute_data->func == EG(autoload_func)) {
+    if (user_caller_execute_data->func != NULL &&
+        user_caller_execute_data->func == EG(autoload_func)) {
       monitor_call_from_system((control_flow_metadata_t *) current_app->system_frame,
                                SYSTEM_ROUTINE_EDGES_INDEX);
       return;

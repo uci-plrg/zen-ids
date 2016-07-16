@@ -46,7 +46,7 @@ export PATH_TRANSLATED="$script"
 
 if [ ! -z "$debug" ]
 then
-  gdb --args $PHP_HOME/bin/$php_bin $php_options $script $@
+  gdb -q --args $PHP_HOME/bin/$php_bin $php_options $script $@
   exit
 fi
 

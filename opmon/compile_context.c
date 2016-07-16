@@ -91,7 +91,7 @@ static inline bool has_fcall_init(uint index)
 static inline fcall_init_t *pop_fcall_init()
 {
   fcall_init_t *top = fcall_frame;
-  DECREMENT_STACK(fcall_stack, fcall_frame);
+  DECREMENT_STACK(fcall_stack, fcall_frame); // alpha: hitting bottom
   return top;
 }
 
@@ -616,7 +616,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
     target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
       if (target.index >= op_array->last) {
-        ERROR("Skipping foobar edge %u|0x%x(%u,%u) -> %u in {%s|%s, 0x%x}\n",
+        ERROR("Skipping foobar edge %u|0x%x(%u,%u) -> %u in {%s|%s, 0x%x}\n", // alpha: getting a few of these
               i, op->opcode, op->op1_type, op->op2_type, target.index,
               fqn->unit.path, fqn->function.cfm.routine_name,
               fqn->function.callee_hash);
@@ -696,6 +696,8 @@ void function_created(zend_op_array *src, zend_op_array *f)
     fqn = register_new_function(f);
 
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
+
+  PRINT("Registered %s with opcodes "PX"\n", fqn->function.cfm.routine_name, p2int(f->opcodes));
 }
 
 // (can never find an eval this way)
