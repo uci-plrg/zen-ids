@@ -170,7 +170,7 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
     monitor->notify_call = nop_notify_call;
   } else if (false) { // overrides for performance testing
     monitor->notify_http_request = request_boundary;
-    monitor->notify_function_created = nop_notify_function_created;
+    monitor->notify_function_created = function_created;
     monitor->notify_call = nop_notify_call;
 
     monitor->has_taint = nop_has_taint;

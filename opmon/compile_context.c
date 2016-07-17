@@ -149,6 +149,9 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
   bool spot = false;
 #endif
 
+  SPOT("register_new_function: %s:%s\n", op_array->filename->val,
+       op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
+
   /******************************** 60s ************************************/
 
   if (op_array->type == ZEND_EVAL_CODE) { // lambda or plain eval?
@@ -616,10 +619,10 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
     target = get_compiled_edge_target(op, i);
     if (target.type == COMPILED_EDGE_DIRECT) {
       if (target.index >= op_array->last) {
-        ERROR("Skipping foobar edge %u|0x%x(%u,%u) -> %u in {%s|%s, 0x%x}\n", // alpha: getting a few of these
+        ERROR("Skipping foobar edge %u|0x%x(%u,%u) -> %u in {%s|%s, 0x%x}; max %d\n", // alpha: getting a few of these
               i, op->opcode, op->op1_type, op->op2_type, target.index,
               fqn->unit.path, fqn->function.cfm.routine_name,
-              fqn->function.callee_hash);
+              fqn->function.callee_hash, op_array->last);
         continue;
       }
 
@@ -682,10 +685,15 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
   return fqn;
 }
 
+static uint count = 0;
+
 void function_created(zend_op_array *src, zend_op_array *f)
 {
   if (f == NULL)
     return;
+
+  if ((++count % 10000) == 0)
+    SPOT("%d calls to function_created\n", count);
 
   function_fqn_t *fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(f->opcodes));
   if (fqn != NULL)
@@ -694,6 +702,8 @@ void function_created(zend_op_array *src, zend_op_array *f)
     fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(src->opcodes));
   if (fqn == NULL)
     fqn = register_new_function(f);
+  else
+    SPOT("copy opcodes "PX" to "PX"\n", p2int(src->opcodes), p2int(f->opcodes));
 
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
 

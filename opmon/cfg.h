@@ -63,6 +63,7 @@ typedef struct _application_t {
   scarray_t routine_edge_targets;
   FILE *evo_taint_log;
   FILE *request_id_file;
+  FILE *evo_start_file;
 } application_t;
 
 static inline bool
