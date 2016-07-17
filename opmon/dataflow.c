@@ -121,9 +121,6 @@ static bool uses_return_value(zend_op *op)
     case ZEND_SEND_UNPACK:
     case ZEND_SEND_ARRAY:
     case ZEND_SEND_USER:
-    case ZEND_BRK:
-    case ZEND_CONT:
-    case ZEND_GOTO:
     case ZEND_ROPE_INIT:
     case ZEND_ROPE_ADD:
     case ZEND_UNSET_VAR:
@@ -372,7 +369,6 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
   } else {
     switch (op->opcode) {
       case ZEND_JMP:
-      case ZEND_GOTO:
         jump_target = OP_JMP_ADDR(op, op->op1);
         jump_reason = "(target)";
         break;
@@ -682,11 +678,6 @@ void identify_sink_operands(application_t *app, zend_op_array *ops, zend_op *op,
     case ZEND_BOOL:
     case ZEND_BOOL_NOT:
       print_sink(oplog, "sink(zval) {1} =d=> {result}");
-      break;
-    case ZEND_BRK:
-    case ZEND_CONT:
-    case ZEND_GOTO:
-      print_sink(oplog, "sink(branch) {2} =i=> {opline}");
       break;
     case ZEND_CASE: /* execute case if 1 == 2 (via fast_equal_function) */
       print_sink(oplog, "sink(zval:bool) {1,2} =l=> {result}");
@@ -2007,11 +1998,6 @@ static void link_operand_dataflow(FILE *oplog, dataflow_link_pass_t *pass)
         enqueue_dataflow_link_pass(oplog, pass->droutine, dop->op2.value.jmp_target,
                                    pass->live_variables);
         break;
-      case ZEND_BRK:
-      case ZEND_CONT:
-      case ZEND_GOTO:
-        end_pass = true;
-        break;
       case ZEND_INIT_METHOD_CALL: /* {1.2} => {fcall-stack} */
         break;
       case ZEND_INIT_STATIC_METHOD_CALL: /* {1.2} => {fcall-stack} */
@@ -2574,9 +2560,6 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
-    case ZEND_BRK:
-    case ZEND_CONT:
-    case ZEND_GOTO:
       initialize_sink(opcode, SINK_TYPE_EDGE);
       break;
     case ZEND_JMP_SET:

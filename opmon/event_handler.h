@@ -10,5 +10,6 @@ const char *get_static_analysis();
 bool is_static_analysis();
 bool is_dataflow_analysis();
 void enable_request_taint_tracking(bool enabled);
+void enable_monitor(bool enabled);
 
 #endif

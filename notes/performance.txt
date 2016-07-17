@@ -55,53 +55,18 @@ keep the last user-space stack frame?
 
 =======================
 
+To try:
 
-Opcodes that must always be monitored:
-
-  ZEND_DO_FCALL
-  ZEND_INCLUDE_OR_EVAL
-  ZEND_RETURN
-  ZEND_RETURN_BY_REF
-  ZEND_FAST_RET
-  ZEND_CATCH
-  ZEND_HANDLE_EXCEPTION
-
-  So it can go fast when there is no taint in the entire request. But as soon as one zval has taint,
-  we are stuck monitoring every opocde to transfer the taint along.
-
-
-
-Opcodes that require taint transfer:
-
-    case ZEND_ADD:
-    case ZEND_SUB:
-    case ZEND_MUL:
-    case ZEND_DIV:
-    case ZEND_MOD:
-    case ZEND_POW:
-    case ZEND_SL:
-    case ZEND_SR:
-    case ZEND_BW_OR:
-    case ZEND_BW_AND:
-    case ZEND_BW_XOR:
-    case ZEND_BW_NOT:
-    case ZEND_CONCAT:
-    case ZEND_BOOL_XOR:
-    case ZEND_INSTANCEOF:
-    case ZEND_IS_IDENTICAL:
-    case ZEND_IS_NOT_IDENTICAL:
-    case ZEND_IS_EQUAL:
-    case ZEND_IS_NOT_EQUAL:
-    case ZEND_IS_SMALLER:
-    case ZEND_IS_SMALLER_OR_EQUAL:
-    case ZEND_CASE:
+  · prepared statement
+  · query w/o read lock?
+  · write evo status to flat file
 
 -------------------------
 
 Switching PHP modes:
 
   · wp-config.php:74
-  · ext/opcache/ZendAccelerator.h:50
+  · (ext/opcache/ZendAccelerator.h:50)
   · ./current-config[-plain]
   · opmon-config: -c <cfi> -r <request-synch> (disable other stuff)
 
@@ -109,37 +74,90 @@ Switching PHP modes:
 
 ================== WordPress ===================
 
- === Native on log.9.top8500.gor: ~17.3s
+ === Native on log.9.top8500.gor: ~14.4s
 
-real	0m16.937s
-real	0m16.952s
-real	0m17.603s
-real	0m17.610s
-real	0m17.672s
-real	0m16.712s
-real	0m17.648s
-
-
- === Opmon (no verification): 18.3s (6%)
-
-real	0m18.474s
-real	0m18.182s
-real	0m18.272s
+Wall time: 14.21
+Wall time: 14.01
+Wall time: 14.56
+Wall time: 14.28
+Wall time: 15.10
+Wall time: 14.40
 
 
- === Opmon (naive verification): 21s (21%)
+=== Native on log.9.top27k.gor: ~27.175s
 
-real	0m21.500s
-real	0m20.915s
-real	0m20.856s
+Wall time: 27.04
+Wall time: 27.18
+Wall time: 27.11
+Wall time: 27.04
+Wall time: 26.91
+Wall time: 27.15
+Wall time: 26.95
+Wall time: 27.57
+Wall time: 27.53
+Wall time: 27.27
 
 
- === Opmon complete: 20.3s (18%)
+ === Opmon nop core on log.9.top27k.gor: 28.465s (4.7%)
 
-20.63
-20.36
-19.84
+Wall time: 29.16
+Wall time: 28.27
+Wall time: 28.29
+Wall time: 28.34
+Wall time: 27.79
+Wall time: 28.40
+Wall time: 28.74
+Wall time: 28.76
+Wall time: 28.46
+Wall time: 28.44
 
+
+ === Opmon complete on log.9.top27k.gor: 30.923s (13.8%) (+9.1% opmon module)
+
+Wall time: 30.94
+Wall time: 31.05
+Wall time: 30.88
+Wall time: 30.86
+Wall time: 30.93
+Wall time: 30.73
+Wall time: 31.13
+Wall time: 30.79
+Wall time: 31.11
+Wall time: 30.81
+
+
+ === Opmon request + evo synch log.9.top27k.gor: 29.727s (9.4%) (+4.7% opmon)
+
+Wall time: 30.74
+Wall time: 29.79
+Wall time: 29.50
+Wall time: 29.75
+Wall time: 29.42
+Wall time: 29.47
+Wall time: 29.77
+Wall time: 29.47
+Wall time: 29.88
+Wall time: 29.48
+
+
+ === Opmon request - evo synch log.9.top27k.gor: 28.125s (3.5%) (+0% opmon)
+
+Wall time: 29.07
+Wall time: 28.04
+Wall time: 27.85
+Wall time: 28.03
+Wall time: 27.98
+Wall time: 27.88
+Wall time: 28.18
+Wall time: 28.04
+Wall time: 28.09
+Wall time: 28.09
+
+Synopsis:
+
+4.7% evo synch
+4.7% opmon runtime (compile + monitor)
+4.7% core
 
 ================== GitList ===================
 
@@ -254,81 +272,30 @@ ZEND_API void execute_ex(zend_execute_data *ex)
 }
 
 
-br Zend/zend_vm_execute.h:6192
-br Zend/zend_vm_execute.h:9909
-br Zend/zend_vm_execute.h:11797
-br Zend/zend_vm_execute.h:29829 <
-br Zend/zend_vm_execute.h:32411
-br Zend/zend_vm_execute.h:34321
-br Zend/zend_vm_execute.h:40294 <
-br Zend/zend_vm_execute.h:47145
-br Zend/zend_vm_execute.h:51115
-br Zend/zend_vm_execute.h:53194 <
-br Zend/zend_vm_execute.h:55452
-br Zend/zend_vm_execute.h:56717
+// with evo update query off:
+
+Wall time: 31.23
+Wall time: 30.42
+Wall time: 30.67
+Wall time: 30.70
+Wall time: 30.63
+
+
+// with evo update query on:
+
+Wall time: 32.25
+Wall time: 32.14
+Wall time: 32.08
+
+
+Overheads:
+
+  · ~4% recovered by defining `ZEND_DATAFLOW()` as `0`
+  ·
 
 
 
 
-
-
-
-
-ZEND_NOP: 0: #define ZEND_NOP                               0
-ZEND_CONCAT: 8: #define ZEND_CONCAT                            8
-ZEND_CAST: 21: #define ZEND_CAST                             21
-ZEND_ASSIGN_CONCAT: 30: #define ZEND_ASSIGN_CONCAT                    30
-ZEND_JMP: 42: #define ZEND_JMP                              42
-ZEND_JMPZ: 43: #define ZEND_JMPZ                             43
-ZEND_JMPNZ: 44: #define ZEND_JMPNZ                            44
-ZEND_JMPZNZ: 45: #define ZEND_JMPZNZ                           45
-ZEND_JMPZ_EX: 46: #define ZEND_JMPZ_EX                          46
-ZEND_JMPNZ_EX: 47: #define ZEND_JMPNZ_EX                         47
-ZEND_BRK: 50: #define ZEND_SEND_VAR_NO_REF_EX               50
-ZEND_CONT: 51: ZEND_INIT_FCALL_BY_NAME: 59: #define ZEND_INIT_FCALL_BY_NAME               59
-ZEND_DO_FCALL: 60: #define ZEND_DO_FCALL                         60
-ZEND_INIT_FCALL: 61: #define ZEND_INIT_FCALL                       61
-ZEND_RETURN: 62: #define ZEND_RETURN                           62
-ZEND_SEND_VAL: 65: #define ZEND_SEND_VAL                         65
-ZEND_SEND_VAR: 66: #define ZEND_SEND_VAR_EX                      66
-ZEND_SEND_REF: 67: #define ZEND_SEND_REF                         67
-ZEND_NEW: 68: #define ZEND_NEW                              68
-ZEND_INIT_NS_FCALL_BY_NAME: 69: #define ZEND_INIT_NS_FCALL_BY_NAME            69
-ZEND_INCLUDE_OR_EVAL: 73: #define ZEND_INCLUDE_OR_EVAL                  73
-ZEND_FE_RESET: 77: #define ZEND_FE_RESET_R                       77
-ZEND_FE_FETCH: 78: #define ZEND_FE_FETCH_R                       78
-ZEND_FETCH_DIM_R: 81: #define ZEND_FETCH_DIM_R                      81
-ZEND_FETCH_OBJ_R: 82: #define ZEND_FETCH_OBJ_R                      82
-ZEND_FETCH_DIM_W: 84: #define ZEND_FETCH_DIM_W                      84
-ZEND_FETCH_OBJ_W: 85: #define ZEND_FETCH_OBJ_W                      85
-ZEND_FETCH_DIM_RW: 87: #define ZEND_FETCH_DIM_RW                     87
-ZEND_FETCH_OBJ_RW: 88: #define ZEND_FETCH_OBJ_RW                     88
-ZEND_FETCH_DIM_IS: 90: #define ZEND_FETCH_DIM_IS                     90
-ZEND_FETCH_OBJ_IS: 91: #define ZEND_FETCH_OBJ_IS                     91
-ZEND_FETCH_DIM_FUNC_ARG: 93: #define ZEND_FETCH_DIM_FUNC_ARG               93
-ZEND_FETCH_OBJ_FUNC_ARG: 94: #define ZEND_FETCH_OBJ_FUNC_ARG               94
-ZEND_FETCH_DIM_UNSET: 96: #define ZEND_FETCH_DIM_UNSET                  96
-ZEND_FETCH_OBJ_UNSET: 97: #define ZEND_FETCH_OBJ_UNSET                  97
-ZEND_FETCH_CONSTANT: 99: #define ZEND_FETCH_CONSTANT                   99
-ZEND_SEND_VAR_NO_REF: 106: #define ZEND_SEND_VAR_NO_REF                 106
-ZEND_THROW: 108: #define ZEND_THROW                           108
-ZEND_FETCH_CLASS: 109: #define ZEND_FETCH_CLASS                     109
-ZEND_CATCH: 107: #define ZEND_CATCH                           107
-ZEND_RETURN_BY_REF: 111: #define ZEND_RETURN_BY_REF                   111
-ZEND_INIT_METHOD_CALL: 112: #define ZEND_INIT_METHOD_CALL                112
-ZEND_INIT_STATIC_METHOD_CALL: 113: #define ZEND_INIT_STATIC_METHOD_CALL         113
-ZEND_ISSET_ISEMPTY_DIM_OBJ: 115: #define ZEND_ISSET_ISEMPTY_DIM_OBJ           115
-ZEND_SEND_VAL_EX: 116: #define ZEND_SEND_VAL_EX                     116
-ZEND_SEND_VAR_EX: 117: #define ZEND_SEND_VAR                        117
-ZEND_INIT_USER_CALL: 118: #define ZEND_INIT_USER_CALL                  118
-ZEND_ASSIGN_OBJ: 136: #define ZEND_ASSIGN_OBJ                      136
-ZEND_DECLARE_INHERITED_CLASS: 140: #define ZEND_DECLARE_INHERITED_CLASS         140
-ZEND_ADD_INTERFACE: 144: #define ZEND_ADD_INTERFACE                   144
-ZEND_ASSIGN_DIM: 147: #define ZEND_ASSIGN_DIM                      147
-ZEND_ISSET_ISEMPTY_PROP_OBJ: 148: #define ZEND_ISSET_ISEMPTY_PROP_OBJ          148
-ZEND_JMP_SET: 152: #define ZEND_JMP_SET                         152
-ZEND_ADD_TRAIT: 154: #define ZEND_ADD_TRAIT                       154
-ZEND_FAST_RET: 163: #define ZEND_FAST_RET                        163
 
 
 

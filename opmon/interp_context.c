@@ -36,20 +36,6 @@ typedef enum _stack_motion_t {
 #define ROUTINE_NAME_LENGTH 256
 #define FLUSH_MASK 0xff
 
-#define MAX_BIGINT_CHARS 32
-#define EVO_STATE_QUERY "SELECT request_id, table_name, column_name, table_key " \
-                        "FROM opmon_evolution "                                  \
-                        "WHERE request_id > %d"
-#define EVO_STATE_QUERY_MAX_LENGTH (sizeof(EVO_STATE_QUERY) + MAX_BIGINT_CHARS)
-#define EVO_STATE_QUERY_FIELD_COUNT 4
-
-#define EVO_TAINT_EXPIRATION 2000
-
-#define EVO_UPDATE_REQUEST_ID "UPDATE opmon_request_sequence SET request_id = %ld"
-#define EVO_UPDATE_REQUEST_ID_BUFFER_LEN sizeof(EVO_UPDATE_REQUEST_ID) + 20
-
-#define EVO_QUERY(query) { query, sizeof(query) - 1 }
-
 typedef void (*opcode_handler_t)(void);
 
 typedef struct _implicit_taint_t {
@@ -142,6 +128,32 @@ typedef struct _evo_key_t {
   const char *column_names[EVO_MAX_KEY_COLUMN_COUNT];
   bool is_md5;
 } evo_key_t;
+
+#define CONNECT_TO_DB(c) mysql_real_connect(c, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0)
+#define MAX_BIGINT_CHARS 32
+#define EVO_STATE_QUERY "SELECT request_id, table_name, column_name, table_key " \
+                        "FROM opmon_evolution "                                  \
+                        "WHERE request_id > ?"
+//                        "WHERE request_id > %d"
+#define EVO_STATE_QUERY_MAX_LENGTH (sizeof(EVO_STATE_QUERY) + MAX_BIGINT_CHARS)
+#define EVO_STATE_QUERY_FIELD_COUNT 4
+
+static MYSQL_STMT *evo_state_query_stmt = NULL;
+static MYSQL_BIND bind_request_id[1];
+static MYSQL_BIND bind_evo_result[4];
+static unsigned long bind_evo_result_lengths[4];
+static my_bool bind_evo_result_is_nulls[4];
+static my_bool bind_evo_result_errors[4];
+static uint64 evo_result_request_id, evo_result_table_key;
+static char evo_result_table_name[64], evo_result_column_name[64];
+static evo_taint_t evo_update_taint_id = { 0, evo_result_table_name, { evo_result_column_name }, 0, NULL};
+
+#define EVO_TAINT_EXPIRATION 2000
+
+#define EVO_UPDATE_REQUEST_ID "UPDATE opmon_request_sequence SET request_id = %ld"
+#define EVO_UPDATE_REQUEST_ID_BUFFER_LEN sizeof(EVO_UPDATE_REQUEST_ID) + 20
+
+#define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
 typedef enum _routine_edge_status_t {
   ROUTINE_EDGE_VERIFIED       = 1,
@@ -262,6 +274,18 @@ static void file_read_trigger(zend_execute_data *execute_data, const char *sysca
 static void file_write_trigger(zend_execute_data *execute_data, const char *syscall,
                                const zend_op **args, uint arg_count);
 
+static void update_exec_loop_for_auth()
+{
+  if (!IS_CFI_TRAINING()) {
+    if (current_session.user_level < 2 || !current_session.active) {
+      op_context.cfm = NULL;
+      enable_monitor(true);
+    } else {
+      enable_monitor(false);
+    }
+  }
+}
+
 static void update_user_session()
 {
   if (is_php_session_active()) {
@@ -285,15 +309,7 @@ static void update_user_session()
     // TODO: why is the session sometimes inactive??
   }
 
-  if (!IS_CFI_TRAINING()) {
-    if (current_session.user_level < 2 || !current_session.active) {
-      op_context.cfm = NULL;
-      zend_execute_ex = execute_opcode_monitor_calls;
-      // zend_execute_ex = execute_opcode_direct;
-    } else {
-      zend_execute_ex = execute_opcode_direct;
-    }
-  }
+  update_exec_loop_for_auth();
 }
 
 void initialize_interp_context()
@@ -342,10 +358,58 @@ void initialize_interp_context()
 
   if (IS_REQUEST_ID_SYNCH_DB()) {
     db_connection = mysql_init(NULL);
-    if (mysql_real_connect(db_connection, "localhost", "wordpressuser", "$<r!p+5A3e", "wordpress", 0, NULL, 0) == NULL)
+    if (CONNECT_TO_DB(db_connection) == NULL) {
       ERROR("Failed to connect to the database!\n");
-    else
+    } else {
+      int result;
+
       SPOT("Successfully connected to the Opmon Evolution database.\n");
+
+      evo_state_query_stmt = mysql_stmt_init(db_connection);
+      result = mysql_stmt_prepare(evo_state_query_stmt, EVO_STATE_QUERY, sizeof(EVO_STATE_QUERY));
+      if (result == 0) {
+        uint i, status;
+
+        memset(bind_request_id, 0, sizeof(bind_request_id));
+        bind_request_id[0].buffer_type = MYSQL_TYPE_LONGLONG;
+        bind_request_id[0].buffer = &evo_last_synch_request_id;
+        bind_request_id[0].buffer_length = sizeof(evo_last_synch_request_id);
+        bind_request_id[0].length = NULL;
+        bind_request_id[0].is_null = 0;
+        bind_request_id[0].is_unsigned = 1;
+
+        status = mysql_stmt_bind_param(evo_state_query_stmt, bind_request_id);
+        if (status != 0)
+          ERROR("Failed to bind parameterse to the evo synch statement: %d\n", status);
+
+        memset(bind_evo_result, 0, sizeof(bind_evo_result));
+
+        for (i = 0; i < 4; i++) {
+          bind_evo_result[i].length = &bind_evo_result_lengths[i];
+          bind_evo_result[i].is_null = &bind_evo_result_is_nulls[i];
+          bind_evo_result[i].error = &bind_evo_result_errors[i];
+        }
+
+        bind_evo_result[0].buffer_type = MYSQL_TYPE_LONGLONG;
+        bind_evo_result[0].buffer = &evo_result_request_id;
+        bind_evo_result[0].buffer_length = sizeof(evo_result_request_id);
+
+        bind_evo_result[1].buffer_type = MYSQL_TYPE_VAR_STRING;
+        bind_evo_result[1].buffer = &evo_result_table_name;
+
+        bind_evo_result[2].buffer_type = MYSQL_TYPE_LONGLONG;
+        bind_evo_result[2].buffer = &evo_result_column_name;
+
+        bind_evo_result[3].buffer_type = MYSQL_TYPE_LONGLONG;
+        bind_evo_result[3].buffer = &evo_result_table_key;
+        bind_evo_result[3].buffer_length = sizeof(evo_result_request_id);
+      } else {
+        mysql_stmt_close(evo_state_query_stmt);
+        evo_state_query_stmt = NULL;
+
+        ERROR("Failed to prepare the evo state synch query: %d\n", result);
+      }
+    }
   }
 
   if (IS_CFI_DATA()) {
@@ -398,8 +462,11 @@ void destroy_interp_app_context(application_t *app)
   routine_cfg_free(((control_flow_metadata_t *) app->system_frame)->cfg);
   PROCESS_FREE(app->system_frame);
 
-  if (IS_REQUEST_ID_SYNCH_DB())
+  if (IS_REQUEST_ID_SYNCH_DB()) {
+    if (evo_state_query_stmt != NULL)
+      mysql_stmt_close(evo_state_query_stmt);
     mysql_close(db_connection);
+  }
 
   if (app->evo_taint_log != NULL) {
     fflush(app->evo_taint_log);
@@ -461,6 +528,12 @@ uint64 interp_request_boundary(bool is_request_start)
 
     if (local_request_id)
       current_request_id++;
+
+    update_user_session();
+  } else {
+    request_blocked = false;
+    flush_all_outputs(current_app);
+    fflush(current_app->evo_taint_log);
   }
 
   if (IS_CFI_DATA()) {
@@ -476,9 +549,11 @@ uint64 interp_request_boundary(bool is_request_start)
             ERROR("Failed to update the evo request id: %s.\n", mysql_sqlstate(db_connection));
         }
 
-        evo_db_state_synch();
+        if (current_session.user_level < 2)
+          evo_db_state_synch();
       } else {
-        evo_file_state_synch();
+        if (current_session.user_level < 2)
+          evo_file_state_synch();
       }
     } else {
       sctable_clear(&implicit_taint_table);
@@ -490,14 +565,6 @@ uint64 interp_request_boundary(bool is_request_start)
         evo_commit_request_patches();
       pending_cfg_patches.size = 0; /* evo: need to free them if request blocked */
     }
-  }
-
-  if (is_request_start) {
-    update_user_session();
-  } else {
-    request_blocked = false;
-    flush_all_outputs(current_app);
-    fflush(current_app->evo_taint_log);
   }
 
   return current_request_id;
@@ -532,6 +599,8 @@ void set_opmon_user_level(long user_level)
   } else {
     ERROR("<session> User level assigned with no active PHP session!\n");
   }
+
+  update_exec_loop_for_auth();
 }
 
 static void push_exception_frame(zend_op_array *op_array)
@@ -944,8 +1013,6 @@ static bool is_unconditional_fallthrough(const zend_op *op)
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
     case ZEND_FE_RESET_R:
-    case ZEND_BRK:
-    case ZEND_CONT:
       return false;
   }
   return true;
@@ -1892,13 +1959,10 @@ static void monitor_call_from(zend_execute_data *from_execute_data, const zend_o
       block = true;
     } else {
 
-      if (from_cfm->cfg->routine_hash == 0x718743e7 && opline->lineno == 494)
-        SPOT("wait\n");
-
       targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
       // debug
-      if (targets == NULL)
-        targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
+      //if (targets == NULL)
+      //  targets = dataset_lookup_target_routines(current_app, from_cfm->dataset, from_index);
 
       if (targets != NULL) {
         routine_edges_index = current_app->routine_edge_targets.size;
@@ -2301,7 +2365,7 @@ static bool increment_file_synch_request_id()
   return true;
 }
 
-static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
+static void admin_site_modification(uint request_id, uint table_key, evo_taint_t *taint_id)
 {
   uint64 hash = hash_evo_taint(taint_id);
 
@@ -2310,7 +2374,7 @@ static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
 
     memset(taint, 0, sizeof(evo_taint_t));
     if (is_db_taint(taint_id)) {
-      taint->table_key = taint_id->table_key;
+      taint->table_key = table_key;
       taint->table_name = strdup(taint_id->table_name);  /* alloc process scope: until expiration */
       taint->column_name = strdup(taint_id->column_name);
     } else {
@@ -2326,7 +2390,7 @@ static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
   if (current_app != NULL) {
     if (is_db_taint(taint_id)) {
       plog(current_app, PLOG_TYPE_DB_MOD,
-           "%s.%s[%lld]\n", taint_id->table_name, taint_id->column_name, taint_id->table_key);
+           "%s.%s[%lld]\n", taint_id->table_name, taint_id->column_name, table_key);
     } else {
       plog(current_app, PLOG_TYPE_FILE_MOD, "%s\n", taint_id->file_path);
     }
@@ -2335,10 +2399,7 @@ static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
 
 static void evo_db_state_synch()
 {
-  char evo_state_query[EVO_STATE_QUERY_MAX_LENGTH];
-  MYSQL_RES *result;
-  MYSQL_ROW row;
-  uint request_id;
+  int status;
 
   evo_expire_taint();
 
@@ -2349,30 +2410,30 @@ static void evo_db_state_synch()
       evo_last_synch_request_id = (current_request_id - EVO_TAINT_EXPIRATION);
   }
 
-  snprintf(evo_state_query, EVO_STATE_QUERY_MAX_LENGTH, EVO_STATE_QUERY, evo_last_synch_request_id);
-  if (mysql_real_query(db_connection, evo_state_query, strlen(evo_state_query)) != 0) {
-    if (mysql_field_count(db_connection))
-      ERROR("Failed to query the evolution state: %s.\n", mysql_sqlstate(db_connection));
-  } else {
-    result = mysql_store_result(db_connection);
-    if (result == NULL) {
-      if (mysql_field_count(db_connection))
-        ERROR("Failed to store the evolution state query result: %s.\n", mysql_sqlstate(db_connection));
-    } else {
-      while ((row = mysql_fetch_row(result)) != NULL) {
-        if (row[0] == NULL || strlen(row[0]) == 0)
-          break;
-        request_id = strtoul(row[0], NULL, 10);
-        if (request_id > evo_last_synch_request_id)
-          evo_last_synch_request_id = request_id;
+  // if (true) return;
 
-        {
-          evo_taint_t taint_id = { 0, row[1], { row[2] }, strtoull(row[3], NULL, 10), NULL };
-          admin_site_modification(request_id, &taint_id);
+  status = mysql_stmt_execute(evo_state_query_stmt);
+  if (status == 0) {
+    status = mysql_stmt_bind_result(evo_state_query_stmt, bind_evo_result);
+    if (status == 0) {
+      while (true) {
+        status = mysql_stmt_fetch(evo_state_query_stmt);
+        if (status == 0) {
+          if (evo_result_request_id > evo_last_synch_request_id)
+            evo_last_synch_request_id = evo_result_request_id;
+
+          admin_site_modification(evo_result_request_id, evo_result_table_key, &evo_update_taint_id);
+        } else {
+          if (status == 1)
+            ERROR("Failed to fetch results from the evo synch statement: %d\n", status);
+          break;
         }
       }
-      mysql_free_result(result);
+    } else {
+      ERROR("Failed to bind results from the evo synch statement: %d\n", status);
     }
+  } else {
+    ERROR("Failed to execute the evo synch statement: %d\n", status);
   }
 
   request_has_taint = (evo_taint_queue.head != NULL);
@@ -2416,7 +2477,7 @@ static void evo_file_state_synch()
 
       {
         evo_taint_t taint_id = { 0, NULL, { file_path }, 0ULL, NULL };
-        admin_site_modification(request_id, &taint_id);
+        admin_site_modification(request_id, 0ULL, &taint_id);
       }
     }
   }

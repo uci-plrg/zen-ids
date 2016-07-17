@@ -752,10 +752,6 @@ compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
       target.type = COMPILED_EDGE_CALL;
       break;
     case ZEND_THROW:
-    case ZEND_BRK:
-    case ZEND_CONT:
-      target.type = COMPILED_EDGE_INDIRECT;
-      break;
     case ZEND_NEW:
       target.type = COMPILED_EDGE_DIRECT;
       target.index = op_index + 2;

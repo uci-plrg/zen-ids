@@ -163,14 +163,15 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
   enable_request_taint_tracking(false);
 
+    // switch here
   if (false) { // overrides for performance testing
     monitor->notify_http_request = nop_request_boundary;
     monitor->notify_function_created = nop_notify_function_created;
     monitor->notify_call = nop_notify_call;
   } else if (false) { // overrides for performance testing
     monitor->notify_http_request = request_boundary;
-    monitor->notify_function_created = function_created;
-    monitor->notify_call = monitor_call_quick;
+    monitor->notify_function_created = nop_notify_function_created;
+    monitor->notify_call = nop_notify_call;
 
     monitor->has_taint = nop_has_taint;
     monitor->dataflow.notify_dataflow = nop_notify_dataflow;
@@ -200,18 +201,35 @@ void enable_request_taint_tracking(bool enabled)
     zend_execute_ex = execute_opcode_monitor_all;
 
     vm_hooks->has_taint = zval_has_taint;
+    vm_hooks->dataflow.is_enabled = true;
     vm_hooks->dataflow.notify_dataflow = internal_dataflow;
     vm_hooks->notify_zval_free = taint_var_free;
     vm_hooks->notify_database_fetch = db_fetch_trigger;
     vm_hooks->notify_database_query = db_query;
   } else {
+    // switch here
     zend_execute_ex = execute_opcode_monitor_calls;
+    // zend_execute_ex = execute_opcode_direct;
 
     vm_hooks->has_taint = nop_has_taint;
+    vm_hooks->dataflow.is_enabled = false;
     vm_hooks->dataflow.notify_dataflow = nop_notify_dataflow;
     vm_hooks->notify_zval_free = nop_notify_zval_free;
     vm_hooks->notify_database_fetch = nop_notify_database_fetch;
     vm_hooks->notify_database_query = nop_notify_database_query;
+  }
+}
+
+void enable_monitor(bool enabled)
+{
+  // switch here
+  if (enabled) {
+    vm_hooks->notify_call = monitor_call_quick; // alpha: but not in taint mode
+    zend_execute_ex = execute_opcode_monitor_calls;
+    // zend_execute_ex = execute_opcode_direct;
+  } else {
+    vm_hooks->notify_call = nop_notify_call;
+    zend_execute_ex = execute_opcode_direct;
   }
 }
 
