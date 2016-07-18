@@ -84,7 +84,7 @@ Wall time: 15.10
 Wall time: 14.40
 
 
-=== Native on log.9.top27k.gor: ~26.162s   <obsolete>
+=== Native on log.9.top27k.gor: ~26.162s
 
 Wall time: 26.60
 Wall time: 26.09
@@ -256,31 +256,4 @@ ZEND_API void execute_ex(zend_execute_data *ex)
   }
   zend_error_noreturn(E_CORE_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
-
-
-
-http://media.libsyn.com/media/coffeebreakfrench/cbf-79-basic.mp3
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
