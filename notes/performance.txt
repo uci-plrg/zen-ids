@@ -84,82 +84,66 @@ Wall time: 15.10
 Wall time: 14.40
 
 
-=== Native on log.9.top27k.gor: ~27.175s
+=== Native on log.9.top27k.gor: ~26.162s   <obsolete>
 
-Wall time: 27.04
-Wall time: 27.18
-Wall time: 27.11
-Wall time: 27.04
-Wall time: 26.91
-Wall time: 27.15
-Wall time: 26.95
-Wall time: 27.57
-Wall time: 27.53
-Wall time: 27.27
-
-
- === Opmon nop core on log.9.top27k.gor: 28.465s (4.7%)
-
-Wall time: 29.16
-Wall time: 28.27
-Wall time: 28.29
-Wall time: 28.34
-Wall time: 27.79
-Wall time: 28.40
-Wall time: 28.74
-Wall time: 28.76
-Wall time: 28.46
-Wall time: 28.44
+Wall time: 26.60
+Wall time: 26.09
+Wall time: 26.28
+Wall time: 26.21
+Wall time: 26.06
+Wall time: 25.98
+Wall time: 25.99
+Wall time: 25.87
+Wall time: 26.12
+Wall time: 26.42
 
 
- === Opmon complete on log.9.top27k.gor: 30.172s (11%) (+6.3% opmon module)
+ === Opmon nop core on log.9.top27k.gor: 28.075s (7% core hooks)
 
-Wall time: 30.31
-Wall time: 30.16
-Wall time: 30.32
-Wall time: 30.18
-Wall time: 30.15
-Wall time: 30.18
-Wall time: 30.03
-Wall time: 30.07
-Wall time: 30.19
-Wall time: 30.13
-
-
- === Opmon request log.9.top27k.gor: 28.688s (5.6%) (+0.9% opmon)
-
-Wall time: 29.43
-Wall time: 28.60
-Wall time: 28.54
-Wall time: 28.42
-Wall time: 28.61
-Wall time: 28.56
-Wall time: 28.56
-Wall time: 28.62
-Wall time: 28.86
-Wall time: 28.68
+Wall time: 28.73
+Wall time: 28.01
+Wall time: 27.99
+Wall time: 28.00
+Wall time: 28.12
+Wall time: 27.91
+Wall time: 28.15
+Wall time: 28.32
+Wall time: 28.21
+Wall time: 27.97
 
 
- === Opmon request + compile log.9.top27k.gor: 29.025s (6.8%) (+2.1% opmon)
+ === Opmon complete on log.9.top27k.gor: 29.107s (11.3%) (+4.3% opmon module)
 
-Wall time: 29.51
+Wall time: 31.21
+Wall time: 29.39
 Wall time: 29.05
-Wall time: 29.21
-Wall time: 28.72
-Wall time: 28.78
-Wall time: 29.12
 Wall time: 29.19
-Wall time: 29.06
-Wall time: 28.81
-Wall time: 28.80
+Wall time: 29.16
+Wall time: 29.05
+Wall time: 29.07
+Wall time: 29.02
+Wall time: 29.05
+Wall time: 28.99
+
+
+=== Opmon request + compile log.9.top27k.gor: 27.954s (7%) (+0% opmon r+c)
+
+Wall time: 29.35
+Wall time: 27.91
+Wall time: 27.83
+Wall time: 28.32
+Wall time: 28.08
+Wall time: 27.89
+Wall time: 27.58
+Wall time: 27.92
+Wall time: 27.99
+Wall time: 28.07
 
 
 Synopsis:
 
-3.5% monitor
-1.2% compile
-0.9% request
-4.7% core
+4.3% monitor
+7% core
 
 ================== GitList ===================
 
@@ -286,5 +270,17 @@ http://media.libsyn.com/media/coffeebreakfrench/cbf-79-basic.mp3
 
 
 
-Acc: 1844
-wp-load.php at 0x7fffe9e6e008
+
+
+
+
+
+
+
+
+
+
+
+
+
+

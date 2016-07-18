@@ -102,7 +102,7 @@ zend_bool nop_has_taint(const zval *value)
   return false;
 }
 
-void nop_notify_function_created(zend_op_array *src, zend_op_array *dst)
+void nop_notify_function_created(zend_op *src, zend_op_array *dst)
 {
 }
 
@@ -223,7 +223,7 @@ void enable_request_taint_tracking(bool enabled)
 void enable_monitor(bool enabled)
 {
   // switch here
-  if (enabled) {
+  if (/* false && */ enabled) {
     vm_hooks->notify_call = monitor_call_quick; // alpha: but not in taint mode
     zend_execute_ex = execute_opcode_monitor_calls;
     // zend_execute_ex = execute_opcode_direct;

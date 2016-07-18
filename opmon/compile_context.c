@@ -149,7 +149,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
   bool spot = false;
 #endif
 
-  SPOT("register_new_function: %s:%s\n", op_array->filename->val,
+  SPOT("register_new_function("PX"): %s:%s\n", p2int(op_array->opcodes), op_array->filename->val,
        op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
 
   /******************************** 60s ************************************/
@@ -687,7 +687,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
 
 static uint count = 0;
 
-void function_created(zend_op_array *src, zend_op_array *f)
+void function_created(zend_op *src, zend_op_array *f)
 {
   if (f == NULL)
     return;
@@ -698,12 +698,16 @@ void function_created(zend_op_array *src, zend_op_array *f)
   function_fqn_t *fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(f->opcodes));
   if (fqn != NULL)
     return;
-  if (src != NULL)
-    fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(src->opcodes));
-  if (fqn == NULL)
+  if (src != NULL) {
+    fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(src));
+    sctable_remove(&routines_by_opcode_address, hash_addr(src));
+  }
+  if (fqn == NULL) {
     fqn = register_new_function(f);
-  else
-    SPOT("copy opcodes "PX" to "PX"\n", p2int(src->opcodes), p2int(f->opcodes));
+  } else {
+    SPOT("copy opcodes "PX" to "PX" (%s:%s)\n", p2int(src), p2int(f->opcodes), f->filename->val,
+         f->function_name == NULL ? "<script-body>" : f->function_name->val);
+  }
 
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
 

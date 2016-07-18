@@ -2081,12 +2081,14 @@ static void monitor_call_from(zend_execute_data *from_execute_data, const zend_o
       SPOT("Skipping verification of call to missing method %s:%s() with no targets\n",
            to_op_array->filename->val, to_op_array->function_name->val);
     } else if (from_cfm == NULL) {
-      SPOT("No target routines for %s:%s -> %s 0x%x\n", from_op_array->filename->val,
+      SPOT("No target routines for opcodes "PX" %s:%s -> %s 0x%x\n",
+           p2int(from_op_array->opcodes), from_op_array->filename->val,
            from_op_array->function_name == NULL ? "-" : from_op_array->function_name->val,
            to_cfm->routine_name, to_cfm->cfg->routine_hash);
     } else {
-      SPOT("No target routines for %s 0x%x:%d -> %s 0x%x\n", from_cfm->routine_name,
-           from_cfm->cfg->routine_hash, from_index, to_cfm->routine_name, to_cfm->cfg->routine_hash);
+      SPOT("No target routines for opcodes "PX" %s 0x%x:%d -> %s 0x%x\n", p2int(from_op_array->opcodes),
+           from_cfm->routine_name, from_cfm->cfg->routine_hash, from_index,
+           to_cfm->routine_name, to_cfm->cfg->routine_hash);
     }
   }
 
