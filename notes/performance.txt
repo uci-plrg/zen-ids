@@ -140,10 +140,77 @@ Wall time: 27.99
 Wall time: 28.07
 
 
-Synopsis:
+
+Summary:
 
 4.3% monitor
 7% core
+
+
+  ------------------------- log.21.gor ----------------------
+
+
+ === Native on log.21.gor: 189.081s
+
+Wall time: 192.40
+Wall time: 186.72
+Wall time: 189.62
+Wall time: 188.19
+Wall time: 187.18
+Wall time: 189.52
+Wall time: 189.28
+Wall time: 189.40
+Wall time: 188.69
+Wall time: 189.81
+
+
+ === Opmon complete on log.21.gor: 213.340s (12.8%)
+
+Wall time: 210.19
+Wall time: 210.49
+Wall time: 210.90
+Wall time: 212.90
+Wall time: 213.26
+Wall time: 212.75
+Wall time: 215.76
+Wall time: 216.22
+Wall time: 214.73
+Wall time: 216.20
+
+
+  ------------------------- log.21.gor (WP only) ----------------------
+
+
+ === Native on log.21.gor: 137.783s
+
+Wall time: 137.44
+Wall time: 137.75
+Wall time: 138.16
+
+
+ === Opmon complete on log.21.gor: ~145.603 (5.6%)
+
+Wall time: 145.85
+Wall time: 145.44
+Wall time: 145.52
+
+
+ === Opmon core on log.21.gor: 143.230s (4%)
+
+Wall time: 144.03
+Wall time: 142.87
+Wall time: 142.79
+
+
+ === Opmon core w/o call hook on log.21.gor: 138.500s (0.5%)
+
+Wall time: 139.93
+Wall time: 137.49
+Wall time: 138.08
+
+
+
+
 
 ================== GitList ===================
 
@@ -192,8 +259,6 @@ Wall time: 14.26
 
 
  === Opmon 7.1.0alpha3 on log.17.gor: ~150s (6%)
-
-
 
 
 -------------------------
@@ -256,4 +321,15 @@ ZEND_API void execute_ex(zend_execute_data *ex)
   }
   zend_error_noreturn(E_CORE_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
+
+---------------------
+
+  · Push the HashTable copy propagation into opmon
+    · If not flagged, check the flow stack for pending flags
+  · Stack entries must be initialized to zero!
+  · Initialize opmon structs in zend_compile.c somehow
+
+---------------------
+
+
 

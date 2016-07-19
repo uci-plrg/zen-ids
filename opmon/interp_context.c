@@ -495,6 +495,14 @@ initialize_entry_point(application_t *app, uint entry_point_hash, const char *ro
   return entry_cfm;
 }
 
+static void load_entry_points(control_flow_metadata_t *entry_cfm)
+{
+  dataset_target_routines_t *targets;
+
+  targets = dataset_lookup_target_routines(current_app, entry_cfm->dataset, 0);
+  scarray_append(&current_app->routine_edge_targets, targets);
+}
+
 void initialize_interp_app_context(application_t *app)
 {
   current_app = app;
@@ -502,8 +510,14 @@ void initialize_interp_app_context(application_t *app)
   app->base_frame = (void *) initialize_entry_point(app, BASE_FRAME_HASH, "<app_base_frame>");
   app->system_frame = (void *) initialize_entry_point(app, SYSTEM_FRAME_HASH, "<system_frame>");
 
-  if (is_standalone_mode() && current_app->evo_taint_log != NULL)
-    evo_file_state_synch();
+  if (is_standalone_mode()) {
+    scarray_init_ex(&current_app->routine_edge_targets, 50);
+    load_entry_points((control_flow_metadata_t *) current_app->base_frame);
+    load_entry_points((control_flow_metadata_t *) current_app->system_frame);
+
+    if (current_app->evo_taint_log != NULL)
+      evo_file_state_synch();
+  }
 }
 
 void destroy_interp_app_context(application_t *app)
@@ -527,14 +541,6 @@ void destroy_interp_app_context(application_t *app)
     if (app->evo_start_file != NULL)
       fclose(app->evo_start_file);
   }
-}
-
-static void load_entry_points(control_flow_metadata_t *entry_cfm)
-{
-  dataset_target_routines_t *targets;
-
-  targets = dataset_lookup_target_routines(current_app, entry_cfm->dataset, 0);
-  scarray_append(&current_app->routine_edge_targets, targets);
 }
 
 uint64 interp_request_boundary(bool is_request_start)
@@ -2110,9 +2116,13 @@ static void monitor_call_from_system(control_flow_metadata_t *from_cfm, uint edg
     return;
   }
 
-  block = !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
-                                         current_session.user_level,
-                                         to_op_array->type == ZEND_EVAL_CODE);
+  if (targets == NULL) {
+    block = true;
+  } else {
+    block = !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
+                                           current_session.user_level,
+                                           to_op_array->type == ZEND_EVAL_CODE);
+  }
 
   if (block)
     block_request(NULL, from_cfm, NULL, to_cfm, 0);
@@ -2839,9 +2849,7 @@ monitor_query_flags_t db_query(const char *query)
   return flags;
 }
 
-zend_bool internal_dataflow(const zval *src, const char *src_name,
-                            const zval *dst, const char *dst_name,
-                            zend_bool is_internal_transfer)
+zend_bool internal_dataflow(const zval *src, const zval *dst, zend_bool is_internal_transfer)
 {
   zend_bool has_taint = false;
 
@@ -2851,13 +2859,13 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
   if (is_return(op_context.cur.op->opcode)) {
     /* N.B.: must be in a builtin function: cannot ref cur_frame.execute_data! */
     if (op_context.implicit_taint != NULL && !is_internal_transfer) {
-      plog(current_app, PLOG_TYPE_TAINT, "implicit %s(I%d)->%s(0x%llx) at a builtin\n",
-           src_name, op_context.implicit_taint->id, dst_name, (uint64) dst);
+      plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at a builtin\n",
+           op_context.implicit_taint->id, (uint64) dst);
       taint_var_add(current_app, dst, op_context.implicit_taint->taint);
       op_context.implicit_taint->last_applied_op_index = 0; /* not at any op */
       has_taint = true;
     } else {
-      has_taint = propagate_zval_taint_quiet(current_app, true, src, src_name, dst, dst_name);
+      has_taint = propagate_zval_taint_quiet(current_app, true, src, "internal", dst, "internal");
     }
   } else {
     zend_op_array *stack_frame = &op_context.execute_data->func->op_array;
@@ -2865,15 +2873,15 @@ zend_bool internal_dataflow(const zval *src, const char *src_name,
     if (op_context.implicit_taint != NULL && !is_internal_transfer &&
         op_context.implicit_taint->last_applied_op_index != op_context.cur.index) {
 
-      plog(current_app, PLOG_TYPE_TAINT, "implicit %s(I%d)->%s(0x%llx) at %04d(L%04d)%s\n",
-           src_name, op_context.implicit_taint->id, dst_name, (uint64) dst, op_context.cur.index,
+      plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at %04d(L%04d)%s\n",
+           op_context.implicit_taint->id, (uint64) dst, op_context.cur.index,
            op_context.cur.op->lineno, site_relative_path(current_app, stack_frame));
       taint_var_add(current_app, dst, op_context.implicit_taint->taint);
       op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
       has_taint = true;
     } else {
       has_taint = propagate_zval_taint(current_app, op_context.execute_data, stack_frame,
-                                       op_context.cur.op, true, src, src_name, dst, dst_name);
+                                       op_context.cur.op, true, src, "internal", dst, "internal");
     }
   }
 

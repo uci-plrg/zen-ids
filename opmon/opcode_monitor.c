@@ -84,8 +84,6 @@ zend_module_entry opcode_monitor_module_entry = {
 ZEND_GET_MODULE(opcode_monitor)
 #endif
 
-static zend_opcode_monitor_t monitor_functions;
-
 PHP_MINIT_FUNCTION(opcode_monitor)
 {
   REGISTER_INI_ENTRIES();
@@ -102,8 +100,7 @@ PHP_MINIT_FUNCTION(opcode_monitor)
           OPMON_G(file_evo_log_dir));
   }
 
-  init_event_handler(&monitor_functions);
-  register_opcode_monitor(&monitor_functions);
+  init_event_handler();
   initialize_interp_context();
 
   return SUCCESS;
@@ -114,7 +111,7 @@ PHP_MSHUTDOWN_FUNCTION(opcode_monitor)
   UNREGISTER_INI_ENTRIES();
 
   destroy_event_handler();
-  register_opcode_monitor(NULL);
+  // register_opcode_monitor(NULL);
 
   return SUCCESS;
 }

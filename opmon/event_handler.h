@@ -4,7 +4,7 @@
 #include "interp_context.h"
 #include "lib/script_cfi_utils.h"
 
-void init_event_handler(zend_opcode_monitor_t *monitor);
+void init_event_handler();
 void destroy_event_handler();
 const char *get_static_analysis();
 bool is_static_analysis();

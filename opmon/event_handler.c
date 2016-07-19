@@ -28,7 +28,8 @@ typedef enum _opmon_run_type {
 
 static const char *static_analysis = NULL;
 static opmon_run_type run_type = OPMON_RUN_EXECUTION;
-static zend_opcode_monitor_t *vm_hooks = NULL;
+static zend_dataflow_monitor_t *dataflow_hooks = NULL;
+static zend_opcode_monitor_t *opcode_hooks = NULL;
 
 static void init_top_level_script(const char *script_path)
 {
@@ -90,9 +91,7 @@ void nop_request_boundary(bool is_request_start)
 {
 }
 
-zend_bool nop_notify_dataflow(const zval *src, const char *src_name,
-                                     const zval *dst, const char *dst_name,
-                                     zend_bool is_internal_transfer)
+zend_bool nop_notify_dataflow(const zval *src, const zval *dst, zend_bool is_internal_transfer)
 {
   return false;
 }
@@ -126,9 +125,12 @@ void nop_notify_database_fetch(uint32_t field_count, const char **table_names,
 {
 }
 
-void init_event_handler(zend_opcode_monitor_t *monitor)
+void init_event_handler()
 {
   // scarray_unit_test();
+
+  dataflow_hooks = get_dataflow_monitor();
+  opcode_hooks = get_opcode_monitor();
 
   if (IS_CFI_DB() && !IS_REQUEST_ID_SYNCH_DB()) {
     ERROR("The cfi mode is incompatible with the request id synch!\n");
@@ -153,40 +155,37 @@ void init_event_handler(zend_opcode_monitor_t *monitor)
   if (IS_OPCODE_DUMP_ENABLED())
     init_dataflow_analysis();
 
-  vm_hooks = monitor;
-
-  monitor->set_top_level_script = init_top_level_script;
-  monitor->notify_worker_startup = init_worker;
-  monitor->opmon_tokenize = NULL; //tokenize_file;
-  monitor->opmon_dataflow = start_dataflow_analysis;
+  opcode_hooks->set_top_level_script = init_top_level_script;
+  opcode_hooks->notify_worker_startup = init_worker;
+  opcode_hooks->opmon_tokenize = NULL; //tokenize_file;
+  opcode_hooks->opmon_dataflow = start_dataflow_analysis;
 
   /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
   enable_request_taint_tracking(false);
 
     // switch here
   if (false) { // overrides for performance testing
-    monitor->notify_http_request = nop_request_boundary;
-    monitor->notify_function_created = nop_notify_function_created;
-    monitor->notify_call = nop_notify_call;
+    opcode_hooks->notify_http_request = nop_request_boundary;
+    opcode_hooks->notify_function_created = nop_notify_function_created;
+    opcode_hooks->notify_call = nop_notify_call;
   } else if (false) { // overrides for performance testing
-    monitor->notify_http_request = request_boundary;
-    monitor->notify_function_created = function_created;
-    monitor->notify_call = nop_notify_call;
+    opcode_hooks->notify_http_request = request_boundary;
+    opcode_hooks->notify_function_created = function_created;
+    opcode_hooks->notify_call = nop_notify_call;
 
-    monitor->has_taint = nop_has_taint;
-    monitor->dataflow.notify_dataflow = nop_notify_dataflow;
-    monitor->notify_zval_free = nop_notify_zval_free;
-    monitor->notify_database_fetch = nop_notify_database_fetch;
-    monitor->notify_database_query = nop_notify_database_query;
+    opcode_hooks->has_taint = nop_has_taint;
+    // opcode_hooks->notify_zval_free = nop_notify_zval_free;
+    opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
+    opcode_hooks->notify_database_query = nop_notify_database_query;
   } else { // normal mode
-    monitor->notify_http_request = request_boundary;
-    monitor->notify_function_created = function_created;
-    monitor->notify_call = monitor_call_quick;
+    opcode_hooks->notify_http_request = request_boundary;
+    opcode_hooks->notify_function_created = function_created;
+    opcode_hooks->notify_call = monitor_call_quick;
   }
 
   if (IS_CFI_TRAINING()) {
     zend_execute_ex = execute_opcode_monitor_all;
-    monitor->notify_call = monitor_call;
+    opcode_hooks->notify_call = monitor_call;
   }
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
@@ -200,23 +199,23 @@ void enable_request_taint_tracking(bool enabled)
   if (enabled) {
     zend_execute_ex = execute_opcode_monitor_all;
 
-    vm_hooks->has_taint = zval_has_taint;
-    vm_hooks->dataflow.is_enabled = true;
-    vm_hooks->dataflow.notify_dataflow = internal_dataflow;
-    vm_hooks->notify_zval_free = taint_var_free;
-    vm_hooks->notify_database_fetch = db_fetch_trigger;
-    vm_hooks->notify_database_query = db_query;
+    opcode_hooks->has_taint = zval_has_taint;
+    dataflow_hooks->is_enabled = true;
+    // dataflow_hooks->notify_dataflow = internal_dataflow;
+    //opcode_hooks->notify_zval_free = taint_var_free;
+    opcode_hooks->notify_database_fetch = db_fetch_trigger;
+    opcode_hooks->notify_database_query = db_query;
   } else {
     // switch here
     zend_execute_ex = execute_opcode_monitor_calls;
     // zend_execute_ex = execute_opcode_direct;
 
-    vm_hooks->has_taint = nop_has_taint;
-    vm_hooks->dataflow.is_enabled = false;
-    vm_hooks->dataflow.notify_dataflow = nop_notify_dataflow;
-    vm_hooks->notify_zval_free = nop_notify_zval_free;
-    vm_hooks->notify_database_fetch = nop_notify_database_fetch;
-    vm_hooks->notify_database_query = nop_notify_database_query;
+    opcode_hooks->has_taint = nop_has_taint;
+    dataflow_hooks->is_enabled = false;
+    // dataflow_hooks->notify_dataflow = nop_notify_dataflow;
+    //opcode_hooks->notify_zval_free = nop_notify_zval_free;
+    opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
+    opcode_hooks->notify_database_query = nop_notify_database_query;
   }
 }
 
@@ -224,11 +223,11 @@ void enable_monitor(bool enabled)
 {
   // switch here
   if (/* false && */ enabled) {
-    vm_hooks->notify_call = monitor_call_quick; // alpha: but not in taint mode
+    opcode_hooks->notify_call = monitor_call_quick; // alpha: but not in taint mode
     zend_execute_ex = execute_opcode_monitor_calls;
     // zend_execute_ex = execute_opcode_direct;
   } else {
-    vm_hooks->notify_call = nop_notify_call;
+    opcode_hooks->notify_call = nop_notify_call;
     zend_execute_ex = execute_opcode_direct;
   }
 }

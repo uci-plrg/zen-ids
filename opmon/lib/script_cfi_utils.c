@@ -95,7 +95,7 @@ bool is_php_session_active()
   return PS(id) != NULL && IS_SESSION(PS(http_session_vars));
 }
 
-zend_dataflow_monitor_t *dataflow_monitor = NULL;
+// zend_dataflow_monitor_t *dataflow_monitor = NULL;
 
 zval *php_session_set_var(zend_string *key, zval *value)
 {
