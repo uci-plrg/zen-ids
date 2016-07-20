@@ -1989,7 +1989,7 @@ void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
 
     monitor_opcode(execute_data, opline, monitor_all_stack_motion);
 
-    monitor_all_stack_motion = STACK_MOTION_NONE; // clear early--may become a call @monitor_call()
+    monitor_all_stack_motion = STACK_MOTION_NONE; // clear early--may become a call @vm_monitor_call()
 
     original_handler(); // on ZEND_VM_ENTER(): `op_context.cfm = NULL`
 
@@ -2017,12 +2017,12 @@ static void block_edge(zend_execute_data *from_execute_data, zend_execute_data *
   block_request(from_execute_data, from_cfm, &from_op, to_cfm, 0);
 }
 
-static void monitor_call_from(zend_execute_data *from_execute_data, const zend_op *opline)
+static inline void monitor_call_from_user(zend_execute_data *from_execute_data, const zend_op *opline)
 {
   bool block = false;
+  uint to_routine_hash;
   zend_op_array *to_op_array;
-  zend_execute_data *to_execute_data;
-  control_flow_metadata_t *to_cfm = NULL; // better to separate them than waste init?
+  control_flow_metadata_t *to_cfm = NULL;
   control_flow_metadata_t *from_cfm = NULL;
   dataset_target_routines_t *targets = NULL;
   uint64 routine_edges_index, routine_edge_metadata = p2int(opline->handler);
@@ -2062,24 +2062,29 @@ static void monitor_call_from(zend_execute_data *from_execute_data, const zend_o
     block = (targets == NULL);
   }
 
-  to_execute_data = EG(current_execute_data);
-
   if (!block) {
-    to_op_array = &to_execute_data->func->op_array;
-    to_cfm = lookup_cfm(to_execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+    to_op_array = &execute_data->func->op_array;
 
-    if (to_cfm == NULL) {
-      SPOT("Skipping verification of call to non-existent routine %s:%s()\n",
-           to_op_array->filename->val, to_op_array->function_name->val);
-      return;
+    // the proper way to get the reserved slot is:
+    //    zend_extension temp;
+    //    uint index = zend_get_resource_handle(&temp);
+    to_routine_hash = (uint) (uint64) to_op_array->reserved[1];
+    if (to_routine_hash == 0) {
+      to_cfm = lookup_cfm(execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+      if (to_cfm == NULL) {
+        SPOT("Skipping verification of call to non-existent routine %s:%s()\n",
+             to_op_array->filename->val, to_op_array->function_name->val);
+        return;
+      }
+      to_routine_hash = to_cfm->cfg->routine_hash;
+      to_op_array->reserved[1] = int2p((uint64) to_routine_hash);
     }
 
-    block = !dataset_verify_routine_target(targets, to_cfm->cfg->routine_hash, 0,
-                                           current_session.user_level,
+    block = !dataset_verify_routine_target(targets, to_routine_hash, 0, current_session.user_level,
                                            to_op_array->type == ZEND_EVAL_CODE);
   } else if (targets == NULL) {
-    to_op_array = &to_execute_data->func->op_array;
-    to_cfm = lookup_cfm(to_execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+    to_op_array = &execute_data->func->op_array;
+    to_cfm = lookup_cfm(execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
     SPOT_DECL( zend_op_array *from_op_array = &from_execute_data->func->op_array; )
     SPOT_DECL( uint from_index = opline - from_op_array->opcodes; )
 
@@ -2099,16 +2104,15 @@ static void monitor_call_from(zend_execute_data *from_execute_data, const zend_o
   }
 
   if (block)
-    block_edge(from_execute_data, to_execute_data);
+    block_edge(from_execute_data, execute_data);
 }
 
 static void monitor_call_from_system(control_flow_metadata_t *from_cfm, uint edges_index)
 {
   bool block;
   dataset_target_routines_t *targets = current_app->routine_edge_targets.data[edges_index];
-  zend_execute_data *to_execute_data = EG(current_execute_data);
-  zend_op_array *to_op_array = &to_execute_data->func->op_array;
-  control_flow_metadata_t *to_cfm = lookup_cfm(to_execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+  zend_op_array *to_op_array = &execute_data->func->op_array;
+  control_flow_metadata_t *to_cfm = lookup_cfm(execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
 
   if (to_cfm == NULL) {
     SPOT("Skipping verification of call from system to non-existent routine %s:%s()\n",
@@ -2128,18 +2132,31 @@ static void monitor_call_from_system(control_flow_metadata_t *from_cfm, uint edg
     block_request(NULL, from_cfm, NULL, to_cfm, 0);
 }
 
-void monitor_call()
+void vm_call_plain()
+{
+  execute_data = EG(current_execute_data);
+  opline = EX(opline);
+}
+
+void vm_monitor_call()
 {
   monitor_all_stack_motion = STACK_MOTION_CALL;
+
+  vm_call_plain();
 }
 
 // alpha: missing try/catch edges in quick mode
-void monitor_call_quick()
+void vm_monitor_call_quick()
 {
-  monitor_call_from(execute_data, opline);
+  zend_execute_data *from_execute_data = execute_data;
+  execute_data = EG(current_execute_data);
+
+  monitor_call_from_user(from_execute_data, opline);
+
+  opline = EX(opline);
 }
 
-static void monitor_top_entry()
+static inline void monitor_top_entry()
 {
   zend_execute_data *user_caller_execute_data = execute_data->prev_execute_data;
 
@@ -2155,7 +2172,7 @@ static void monitor_top_entry()
     }
 
     if (user_caller_execute_data->func != NULL &&
-        user_caller_execute_data->func == EG(autoload_func)) {
+        user_caller_execute_data->func == EG(autoload_func)) { // seems like we could cache this to avoid the remote load
       monitor_call_from_system((control_flow_metadata_t *) current_app->system_frame,
                                SYSTEM_ROUTINE_EDGES_INDEX);
       return;
@@ -2164,7 +2181,7 @@ static void monitor_top_entry()
     if (user_caller_execute_data->func != NULL &&
         user_caller_execute_data->func->type != ZEND_INTERNAL_FUNCTION)
     {
-      monitor_call_from(user_caller_execute_data, user_caller_execute_data->opline);
+      monitor_call_from_user(user_caller_execute_data, user_caller_execute_data->opline);
       return;
     }
 
@@ -2188,7 +2205,7 @@ void execute_opcode_monitor_calls(zend_execute_data *cur_execute_data)
     uint64 original_handler_addr = p2int(opline->handler) & ORIGINAL_HANDLER_BITS;
     opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
 
-    original_handler(); // ZEND_VM_ENTER() hooked to `monitor_call()`
+    original_handler(); // ZEND_VM_ENTER() hooked to `vm_monitor_call*()`
 
     if (UNEXPECTED(!opline)) {
       execute_data = caller_execute_data;

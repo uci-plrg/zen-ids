@@ -8,26 +8,6 @@
 
 // todo: edges may also need a type { call, exception }
 
-typedef struct _dataset_call_target_t {
-  uint routine_hash;
-  uint index;
-} dataset_call_target_t;
-
-typedef struct _dataset_eval_target_t {
-  uint eval_id;
-  uint index;
-} dataset_eval_target_t;
-
-typedef struct _dataset_call_targets_t {
-  uint target_count;
-  dataset_call_target_t targets[1];
-} dataset_call_targets_t;
-
-typedef struct _dataset_eval_targets_t {
-  uint target_count;
-  dataset_eval_target_t targets[1];
-} dataset_eval_targets_t;
-
 typedef enum _dataset_node_type_flags_t {
   DATASET_NODE_TYPE_BRANCH = 0x1,
   DATASET_NODE_TYPE_CALL   = 0x2,
@@ -78,9 +58,6 @@ typedef struct _dataset_app_t {
 
 #define RESOLVE_PTR(app, ptr, type) ((type *)((app)->dataset_mapping + ((uint_ptr_t)(ptr) * 4)))
 #define IS_CHAIN_TERMINUS(chain) (*(uint *)chain == 0)
-#define MASK_TARGET_INDEX(to_index) ((to_index) & 0x3ffffff)
-#define MASK_USER_LEVEL(to_index) ((to_index) >> 0x1a)
-
 #define SET_USER_LEVEL(node, user_level) ((node)->user_level
 
 static bool is_fall_through(zend_uchar opcode, uint from_index, uint to_index) {
@@ -236,13 +213,6 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
   return false;
 }
 
-#define TARGET_ROUTINE_ID_MASK 0xffffffff
-#define TARGET_INDEX_SHIFT 0x20
-#define TARGET_INDEX_MASK 0x1ffffff
-#define TARGET_USER_LEVEL_SHIFT 0x39
-#define TARGET_USER_LEVEL_MASK 0x3f
-#define TARGET_SINGLETON_FLAG 0x8000000000000000
-
 static dataset_target_routines_t *pack_singleton_call_target(dataset_call_target_t *target)
 {
   uint64 metadata = target->routine_hash;
@@ -293,42 +263,6 @@ dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, u
     }
   }
   return NULL;
-}
-
-bool dataset_verify_routine_target(dataset_target_routines_t *targets, uint target_id,
-                                   uint to_index, uint user_level, bool is_eval)
-{
-  uint i;
-  uint64 metadata = p2int(targets);
-
-  if ((metadata & TARGET_SINGLETON_FLAG) == 0) {
-    if (is_eval) {
-      dataset_eval_targets_t *eval_targets = (dataset_eval_targets_t *) targets;
-
-      for (i = 0; i < eval_targets->target_count; i++) { // shouldn't we check the eval id?
-        if (MASK_TARGET_INDEX(eval_targets->targets[i].index) == to_index &&
-            MASK_USER_LEVEL(eval_targets->targets[i].index) <= user_level)
-          return true;
-      }
-    } else {
-      dataset_call_targets_t *call_targets = (dataset_call_targets_t *) targets;
-
-      for (i = 0; i < call_targets->target_count; i++) {
-        if (call_targets->targets[i].routine_hash == target_id &&
-            MASK_TARGET_INDEX(call_targets->targets[i].index) == to_index &&
-            MASK_USER_LEVEL(call_targets->targets[i].index) <= user_level)
-          return true;
-      }
-      return false; // for debug stopping
-    }
-  } else {
-    uint index = (metadata >> TARGET_INDEX_SHIFT) & TARGET_INDEX_MASK;
-    uint min_trusted_user_level = (metadata >> TARGET_USER_LEVEL_SHIFT) & TARGET_USER_LEVEL_MASK;
-    uint routine_id = metadata & TARGET_ROUTINE_ID_MASK;
-
-    return (routine_id == target_id && index == to_index && min_trusted_user_level <= user_level);
-  }
-  return false;
 }
 
 uint dataset_get_call_target_count(application_t *app, dataset_routine_t *routine, uint from_index)

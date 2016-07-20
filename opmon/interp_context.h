@@ -15,8 +15,9 @@ void set_opmon_user_level(long user_level);
 
 void push_interp_context(zend_op* op_array, uint branch_index, control_flow_metadata_t cfm);
 void pop_interp_context();
-void monitor_call();
-void monitor_call_quick();
+void vm_call_plain();         /* no monitor */
+void vm_monitor_call();       /* slow taint monitor */
+void vm_monitor_call_quick(); /* fast monitor */
 void execute_opcode_monitor_all(zend_execute_data *execute_data TSRMLS_DC);
 void execute_opcode_monitor_calls(zend_execute_data *execute_data TSRMLS_DC);
 void execute_opcode_direct(zend_execute_data *execute_data TSRMLS_DC);

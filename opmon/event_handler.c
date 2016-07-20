@@ -105,15 +105,9 @@ void nop_notify_function_created(zend_op *src, zend_op_array *dst)
 {
 }
 
-void nop_notify_call(zend_execute_data *from, zend_execute_data *to)
-{
-}
-
 void nop_notify_zval_free(const zval *zv)
 {
 }
-
-//static void nop_notify_http_request(zend_bool start);
 
 monitor_query_flags_t nop_notify_database_query(const char *query)
 {
@@ -167,11 +161,11 @@ void init_event_handler()
   if (false) { // overrides for performance testing
     opcode_hooks->notify_http_request = nop_request_boundary;
     opcode_hooks->notify_function_created = nop_notify_function_created;
-    opcode_hooks->notify_call = nop_notify_call;
+    opcode_hooks->vm_call = vm_call_plain;
   } else if (false) { // overrides for performance testing
     opcode_hooks->notify_http_request = request_boundary;
     opcode_hooks->notify_function_created = function_created;
-    opcode_hooks->notify_call = nop_notify_call;
+    opcode_hooks->vm_call = vm_call_plain;
 
     opcode_hooks->has_taint = nop_has_taint;
     // opcode_hooks->notify_zval_free = nop_notify_zval_free;
@@ -180,12 +174,12 @@ void init_event_handler()
   } else { // normal mode
     opcode_hooks->notify_http_request = request_boundary;
     opcode_hooks->notify_function_created = function_created;
-    opcode_hooks->notify_call = monitor_call_quick;
+    opcode_hooks->vm_call = vm_monitor_call_quick;
   }
 
   if (IS_CFI_TRAINING()) {
     zend_execute_ex = execute_opcode_monitor_all;
-    opcode_hooks->notify_call = monitor_call;
+    opcode_hooks->vm_call = vm_monitor_call;
   }
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
@@ -201,8 +195,6 @@ void enable_request_taint_tracking(bool enabled)
 
     opcode_hooks->has_taint = zval_has_taint;
     dataflow_hooks->is_enabled = true;
-    // dataflow_hooks->notify_dataflow = internal_dataflow;
-    //opcode_hooks->notify_zval_free = taint_var_free;
     opcode_hooks->notify_database_fetch = db_fetch_trigger;
     opcode_hooks->notify_database_query = db_query;
   } else {
@@ -212,8 +204,6 @@ void enable_request_taint_tracking(bool enabled)
 
     opcode_hooks->has_taint = nop_has_taint;
     dataflow_hooks->is_enabled = false;
-    // dataflow_hooks->notify_dataflow = nop_notify_dataflow;
-    //opcode_hooks->notify_zval_free = nop_notify_zval_free;
     opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
     opcode_hooks->notify_database_query = nop_notify_database_query;
   }
@@ -223,11 +213,10 @@ void enable_monitor(bool enabled)
 {
   // switch here
   if (/* false && */ enabled) {
-    opcode_hooks->notify_call = monitor_call_quick; // alpha: but not in taint mode
+    opcode_hooks->vm_call = vm_monitor_call_quick; // alpha: but not in taint mode
     zend_execute_ex = execute_opcode_monitor_calls;
-    // zend_execute_ex = execute_opcode_direct;
   } else {
-    opcode_hooks->notify_call = nop_notify_call;
+    opcode_hooks->vm_call = vm_call_plain;
     zend_execute_ex = execute_opcode_direct;
   }
 }

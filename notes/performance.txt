@@ -150,65 +150,70 @@ Summary:
   ------------------------- log.21.gor ----------------------
 
 
- === Native on log.21.gor: 189.081s
+ === Native on log.21.gor: 189.589s
 
-Wall time: 192.40
-Wall time: 186.72
-Wall time: 189.62
-Wall time: 188.19
-Wall time: 187.18
-Wall time: 189.52
-Wall time: 189.28
-Wall time: 189.40
-Wall time: 188.69
-Wall time: 189.81
+Wall time: 193.40
+Wall time: 187.94
+Wall time: 188.23
+Wall time: 188.34
+Wall time: 190.24
+Wall time: 188.54
+Wall time: 188.14
+Wall time: 189.10
+Wall time: 189.99
+Wall time: 191.97
 
+ === Opmon complete on log.21.gor: 197.418s (4.1%)
 
- === Opmon complete on log.21.gor: 213.340s (12.8%)
-
-Wall time: 210.19
-Wall time: 210.49
-Wall time: 210.90
-Wall time: 212.90
-Wall time: 213.26
-Wall time: 212.75
-Wall time: 215.76
-Wall time: 216.22
-Wall time: 214.73
-Wall time: 216.20
+Wall time: 197.42
+Wall time: 195.41
+Wall time: 196.47
+Wall time: 197.21
+Wall time: 197.10
+Wall time: 196.90
+Wall time: 197.16
+Wall time: 197.54
+Wall time: 198.34
+Wall time: 200.63
 
 
   ------------------------- log.21.gor (WP only) ----------------------
 
 
- === Native on log.21.gor: 137.783s
+ === Native: 137.015s
 
-Wall time: 137.44
-Wall time: 137.75
-Wall time: 138.16
-
-
- === Opmon complete on log.21.gor: ~145.603 (5.6%)
-
-Wall time: 145.85
-Wall time: 145.44
-Wall time: 145.52
+Wall time: 136.79
+Wall time: 137.33
+Wall time: 136.59
+Wall time: 137.35
 
 
- === Opmon core on log.21.gor: 143.230s (4%)
+ === Opmon complete: 143.223s (4.5%)
 
-Wall time: 144.03
-Wall time: 142.87
-Wall time: 142.79
-
-
- === Opmon core w/o call hook on log.21.gor: 138.500s (0.5%)
-
-Wall time: 139.93
-Wall time: 137.49
-Wall time: 138.08
+Wall time: 143.50
+Wall time: 142.54
+Wall time: 143.63
 
 
+ === Opmon w/o monitor_call_from(): ~141.676 (3.4%)
+
+Wall time: 142.71
+Wall time: 140.62
+Wall time: 141.70
+
+
+ === Opmon core: 140.176s (2.3%)
+
+Wall time: 140.39
+Wall time: 140.17
+Wall time: 139.97
+
+
+ === Opmon core w/o call hook: 140.726s (2.7%)
+
+Wall time: 140.13
+Wall time: 141.55
+Wall time: 140.50
 
 
 
@@ -330,6 +335,14 @@ ZEND_API void execute_ex(zend_execute_data *ex)
   · Initialize opmon structs in zend_compile.c somehow
 
 ---------------------
+
+  Optimizing monitor_call_from()
+
+  · change `*current_app` to `current_app`
+  ·
+
+---------------------
+
 
 
 
