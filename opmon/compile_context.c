@@ -91,6 +91,7 @@ static inline bool has_fcall_init(uint index)
 static inline fcall_init_t *pop_fcall_init()
 {
   fcall_init_t *top = fcall_frame;
+
   DECREMENT_STACK(fcall_stack, fcall_frame); // alpha: hitting bottom
   return top;
 }
@@ -149,8 +150,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
   bool spot = false;
 #endif
 
-  SPOT("register_new_function("PX"): %s:%s\n", p2int(op_array->opcodes), op_array->filename->val,
-       op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
+  PRINT("register_new_function("PX"): %s:%s\n", p2int(op_array->opcodes), op_array->filename->val,
+        op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
 
   /******************************** 60s ************************************/
 
@@ -263,6 +264,11 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
     cfm.dataset = dataset_routine_lookup(cfm.app, fqn->function.callee_hash);
     cfm.cfg = cfg_routine_lookup(cfm.app->cfg, fqn->function.callee_hash);
 
+    if (cfm.cfg != NULL && cfm.cfg->opcodes.size != op_array->last) {
+      routine_cfg_free(cfm.cfg); // recompile it
+      cfm.cfg = NULL;
+    }
+
     if (cfm.cfg == NULL) {
       cfm.cfg = routine_cfg_new(fqn->function.callee_hash);
       cfg_add_routine(cfm.app->cfg, cfm.cfg);
@@ -297,6 +303,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
   cfm.routine_name = buffer;
   buffer = NULL;
   fqn->function.cfm = cfm;
+
+  SET_OP_ARRAY_ROUTINE_HASH(op_array, cfm.cfg->routine_hash);
 
   if (is_eval)
     last_eval_cfm = cfm;
@@ -542,7 +550,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
         } break;
         case ZEND_INIT_FCALL:
         case ZEND_INIT_FCALL_BY_NAME:
-        case ZEND_INIT_NS_FCALL_BY_NAME: {
+        case ZEND_INIT_NS_FCALL_BY_NAME:
+        case ZEND_INIT_DYNAMIC_CALL: {
           if (op->op2_type == IS_CONST) {
             // in ZEND_INIT_FCALL_BY_NAME_SPEC_CONST_HANDLER:
             //   function_name = (zval*)(opline->op2.zv+1); // why +1 ???
@@ -689,15 +698,24 @@ static uint count = 0;
 
 void function_created(zend_op *src, zend_op_array *f)
 {
-  if (f == NULL)
+  if (f == NULL) {
+    SPOT("Remove opcodes "PX"\n", p2int(src));
+    sctable_remove(&routines_by_opcode_address, hash_addr(src));
     return;
+  }
 
   if ((++count % 10000) == 0)
     SPOT("%d calls to function_created\n", count);
 
   function_fqn_t *fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(f->opcodes));
-  if (fqn != NULL)
-    return;
+  if (fqn != NULL) {
+    if (fqn->function.cfm.cfg->routine_hash == GET_OP_ARRAY_ROUTINE_HASH(f)) {
+      return;
+    } else {
+      sctable_remove(&routines_by_opcode_address, hash_addr(f->opcodes));
+      fqn = NULL;
+    }
+  }
   if (src != NULL) {
     fqn = sctable_lookup(&routines_by_opcode_address, hash_addr(src));
     sctable_remove(&routines_by_opcode_address, hash_addr(src));
@@ -705,8 +723,8 @@ void function_created(zend_op *src, zend_op_array *f)
   if (fqn == NULL) {
     fqn = register_new_function(f);
   } else {
-    SPOT("copy opcodes "PX" to "PX" (%s:%s)\n", p2int(src), p2int(f->opcodes), f->filename->val,
-         f->function_name == NULL ? "<script-body>" : f->function_name->val);
+    PRINT("copy opcodes "PX" to "PX" (%s:%s)\n", p2int(src), p2int(f->opcodes), f->filename->val,
+          f->function_name == NULL ? "<script-body>" : f->function_name->val);
   }
 
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
@@ -737,6 +755,21 @@ control_flow_metadata_t *get_cfm_by_opcodes_address(zend_op *opcodes)
     return &fqn->function.cfm;
 }
 
+control_flow_metadata_t *establish_cfm(zend_op_array *f)
+{
+  function_fqn_t *fqn;
+
+  fqn = (function_fqn_t *) sctable_lookup(&routines_by_opcode_address, hash_addr(f->opcodes));
+  if (fqn == NULL) {
+    fqn = register_new_function(f);
+    sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
+
+    SPOT("Register opcodes "PX": %s\n", p2int(f->opcodes), fqn->function.cfm.routine_name);
+  }
+
+  return &fqn->function.cfm;
+}
+
 control_flow_metadata_t *get_last_eval_cfm()
 {
   return &last_eval_cfm;
@@ -765,7 +798,6 @@ compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
     case ZEND_INCLUDE_OR_EVAL:
       target.type = COMPILED_EDGE_CALL;
       break;
-    case ZEND_THROW:
     case ZEND_NEW:
       target.type = COMPILED_EDGE_DIRECT;
       target.index = op_index + 2;

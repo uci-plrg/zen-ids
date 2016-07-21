@@ -2,66 +2,14 @@
 
 =======================
 
-  · new_cur_frame.implicit_taint // never used outside IS_CFI_DATA()
   · identify builtins by something faster than name (lazy cache)
   · unplugging exception handling for now
-  · check for ZEND_NULL_HANDLER instead of zend_get_opcode_name(), though have to make it visible from zend_vm_execute.h
-  · handle or disable the opcache JIT
-  · how to un-optimize when taint appears during a query? I guess it can't, b/c admin is logged in...
-  · in compile_context.c:function_created(), f->opcodes and src->opcodes seem to always be the same...
-  · Bailout mode is not working--after a block, the next request has wonko edges that print garble in the plog
+  · check for ZEND_NULL_HANDLER instead of `(zend_get_opcode_name() == NULL)'
 
-
-    monitor->opmon_interp = execute_opcode_monitor;         < 1%
-    zval_copy_value() and zend_hash_do_resize()             < .5%
-
-
-
-
-Zend/zend.c
-Zend/zend_builtin_functions.c
-Zend/zend_compile.c
-Zend/zend_compile.h
-Zend/zend_constants.c
-Zend/zend_execute.c
-Zend/zend_execute.h
-Zend/zend_execute_API.c
-Zend/zend_globals.h
-Zend/zend_hash.c
-Zend/zend_hash.h
-Zend/zend_language_scanner.c
-Zend/zend_language_scanner.l
-Zend/zend_object_handlers.c
-Zend/zend_opcode.c
-Zend/zend_types.h
-Zend/zend_variables.c
-Zend/zend_vm_def.h
-Zend/zend_vm_execute.h
-Zend/zend_vm_gen.php
-ext/mysqli/mysqli_nonapi.c
-ext/mysqlnd/mysqlnd_result.c
-ext/opcache/ZendAccelerator.c
-ext/opcache/ZendAccelerator.h
-ext/opcache/zend_accelerator_util_funcs.c
-main/main.c
-
-
-
-
-The one thing I need to know for a return is whether a stack step is a return or not. So could I just
-keep the last user-space stack frame?
 
 ~100,000 opcodes per request
 
 =======================
-
-To try:
-
-  · prepared statement
-  · query w/o read lock?
-  · write evo status to flat file
-
--------------------------
 
 Switching PHP modes:
 
@@ -74,83 +22,11 @@ Switching PHP modes:
 
 ================== WordPress ===================
 
- === Native on log.9.top8500.gor: ~14.4s
-
-Wall time: 14.21
-Wall time: 14.01
-Wall time: 14.56
-Wall time: 14.28
-Wall time: 15.10
-Wall time: 14.40
-
-
-=== Native on log.9.top27k.gor: ~26.162s
-
-Wall time: 26.60
-Wall time: 26.09
-Wall time: 26.28
-Wall time: 26.21
-Wall time: 26.06
-Wall time: 25.98
-Wall time: 25.99
-Wall time: 25.87
-Wall time: 26.12
-Wall time: 26.42
-
-
- === Opmon nop core on log.9.top27k.gor: 28.075s (7% core hooks)
-
-Wall time: 28.73
-Wall time: 28.01
-Wall time: 27.99
-Wall time: 28.00
-Wall time: 28.12
-Wall time: 27.91
-Wall time: 28.15
-Wall time: 28.32
-Wall time: 28.21
-Wall time: 27.97
-
-
- === Opmon complete on log.9.top27k.gor: 29.107s (11.3%) (+4.3% opmon module)
-
-Wall time: 31.21
-Wall time: 29.39
-Wall time: 29.05
-Wall time: 29.19
-Wall time: 29.16
-Wall time: 29.05
-Wall time: 29.07
-Wall time: 29.02
-Wall time: 29.05
-Wall time: 28.99
-
-
-=== Opmon request + compile log.9.top27k.gor: 27.954s (7%) (+0% opmon r+c)
-
-Wall time: 29.35
-Wall time: 27.91
-Wall time: 27.83
-Wall time: 28.32
-Wall time: 28.08
-Wall time: 27.89
-Wall time: 27.58
-Wall time: 27.92
-Wall time: 27.99
-Wall time: 28.07
-
-
-
-Summary:
-
-4.3% monitor
-7% core
-
 
   ------------------------- log.21.gor ----------------------
 
 
- === Native on log.21.gor: 189.589s
+ === Native on log.21.gor: 189.581s (+/-1.84)
 
 Wall time: 193.40
 Wall time: 187.94
@@ -163,7 +39,8 @@ Wall time: 189.10
 Wall time: 189.99
 Wall time: 191.97
 
- === Opmon complete on log.21.gor: 197.418s (4.1%)
+
+ === Opmon complete on log.21.gor: 197.414s (+/-1.36) (4.1% | 2.4% <-> 5.8%)
 
 Wall time: 197.42
 Wall time: 195.41
@@ -219,91 +96,53 @@ Wall time: 140.50
 
 ================== GitList ===================
 
- === Native 7.1.0alpha3 on log.16.gor: ~13.4s
 
-Wall time: 13.96
-Wall time: 13.70
-Wall time: 15.24
-Wall time: 13.57
-Wall time: 14.54
-Wall time: 12.99
-Wall time: 13.39
-Wall time: 13.80
-Wall time: 13.39
-Wall time: 12.83
-Wall time: 13.33
-Wall time: 14.10
-Wall time: 13.74
-Wall time: 14.37
+  ------------------------- log.19.gor ----------------------
 
+ === Native: 84.966s
 
- === Native 7.1.0alpha3 on log.17.gor: ~141s
-
-Wall time: 139.81
-Wall time: 142.35
-Wall time: 143.40
-Wall time: 143.92
-Wall time: 140.15
+Wall time: 87.81
+Wall time: 85.08
+Wall time: 84.71
+Wall time: 84.43
+Wall time: 84.99
+Wall time: 84.50
+Wall time: 85.43
+Wall time: 84.65
+Wall time: 84.24
+Wall time: 83.82
 
 
- === Opmon 7.1.0alpha3 on log.16.gor: ~14.5s (8%)
+ === Opmon complete: 87.724s (3.2%)
 
-Wall time: 15.56
-Wall time: 14.51
-Wall time: 15.54
-Wall time: 14.44
-Wall time: 14.50
-Wall time: 14.11
-Wall time: 14.66
-Wall time: 14.73
-Wall time: 14.57
-Wall time: 14.87
-Wall time: 14.73
-Wall time: 14.01
-Wall time: 14.26
+Wall time: 88.80
+Wall time: 89.21
+Wall time: 87.44
+Wall time: 87.60
+Wall time: 87.37
+Wall time: 89.09
+Wall time: 85.50
+Wall time: 86.64
+Wall time: 87.98
+Wall time: 87.52
+Wall time: 87.82
 
 
- === Opmon 7.1.0alpha3 on log.17.gor: ~150s (6%)
+ === Opmon complete (after doku changes): 88.945s (4.6%)
+
+Wall time: 89.85
+Wall time: 89.74
+Wall time: 89.35
+Wall time: 88.93
+Wall time: 88.09
+Wall time: 88.29
+Wall time: 88.92
+Wall time: 89.57
+Wall time: 88.05
+Wall time: 88.66
 
 
 -------------------------
-
- === zval_copy off
-
-17.49
-18.62
-17.89
-17.78
-
-
- === HT and zval_copy off
-
-17.64
-17.61
-17.63
-
-
- === HT and zval_copy on (5% vs. off)
-
-18.59
-18.43
-18.27
-
-
- === Opmon, HT and zval_copy on (10% vs. all off)
-
-19.38
-19.37
-19.29
-
-
-
--------------------
-
-
- > #debug# Append 0x5cf2f667:12 -> { 0x8000000002d8ee54 } at index 1057
-
-
 
 
 ZEND_API void execute_ex(zend_execute_data *ex)
@@ -339,9 +178,34 @@ ZEND_API void execute_ex(zend_execute_data *ex)
   Optimizing monitor_call_from()
 
   · change `*current_app` to `current_app`
-  ·
+  · wasting a little time on calls to non-existent methods
 
 ---------------------
+
+doku requests:
+
+gor-logs/log.14.gor:63
+gor-logs/log.15.gor:74
+gor-logs/log.16.gor:496
+gor-logs/log.17.gor:431
+gor-logs/log.18.gor:0
+gor-logs/log.19.gor:1105
+gor-logs/log.1.gor:0
+gor-logs/log.20.gor:128
+gor-logs/log.21.gor:4380
+gor-logs/log.22.gor:337
+gor-logs/log.23.gor:403
+gor-logs/log.24.gor:475
+gor-logs/log.25.gor:1934
+gor-logs/log.26.gor:339
+gor-logs/log.27.gor:16016
+gor-logs/log.28.gor:2766
+gor-logs/log.29.gor:944
+gor-logs/log.2.gor:0
+gor-logs/log.30.gor:1217
+gor-logs/log.31.gor:13
+gor-logs/log.32.gor:1471
+gor-logs/log.33.gor:1568
 
 
 

@@ -26,6 +26,7 @@ void function_created(zend_op *src, zend_op_array *f);
 
 control_flow_metadata_t *get_cfm_by_name(const char *routine_name);
 control_flow_metadata_t *get_cfm_by_opcodes_address(zend_op *opcodes);
+control_flow_metadata_t *establish_cfm(zend_op_array *f);
 control_flow_metadata_t *get_last_eval_cfm();
 
 compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index);

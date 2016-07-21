@@ -117,6 +117,15 @@ typedef enum _request_id_synch_t {
 #define ENTRY_POINT_EXTENDED_VALUE 0xff
 #define USER_SESSION_KEY "__opmon_user_session"
 
+// the proper way to get the reserved slot is:
+//    zend_extension temp;
+//    uint index = zend_get_resource_handle(&temp);
+#define OP_ARRAY_RESERVED_SLOT 1
+#define GET_OP_ARRAY_ROUTINE_HASH(ops) \
+  ((uint) p2int((ops)->reserved[OP_ARRAY_RESERVED_SLOT]))
+#define SET_OP_ARRAY_ROUTINE_HASH(ops, hash) \
+  (ops)->reserved[OP_ARRAY_RESERVED_SLOT] = int2p((uint64) hash)
+
 #define UNKNOWN_CONTEXT_ID 0xffffffffU
 
 #define ASSERT(b) do { \

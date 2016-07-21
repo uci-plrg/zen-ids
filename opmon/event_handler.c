@@ -180,6 +180,7 @@ void init_event_handler()
   if (IS_CFI_TRAINING()) {
     zend_execute_ex = execute_opcode_monitor_all;
     opcode_hooks->vm_call = vm_monitor_call;
+    dataflow_hooks->is_training = true;
   }
 
   SPOT("SAPI type: %s\n", EG(sapi_type));
