@@ -179,6 +179,10 @@ ZEND_API void execute_ex(zend_execute_data *ex)
 
   · change `*current_app` to `current_app`
   · wasting a little time on calls to non-existent methods
+  · could move the assignment of op targets to the compile phase
+    · may have conflict with core handler assignments
+  · check if core late handler assignments are clobbering the target index
+  · verify that target index is getting copied in opcache
 
 ---------------------
 
@@ -208,5 +212,4 @@ gor-logs/log.32.gor:1471
 gor-logs/log.33.gor:1568
 
 
-
-
+0x7fffeea68100

@@ -120,11 +120,19 @@ typedef enum _request_id_synch_t {
 // the proper way to get the reserved slot is:
 //    zend_extension temp;
 //    uint index = zend_get_resource_handle(&temp);
-#define OP_ARRAY_RESERVED_SLOT 1
-#define GET_OP_ARRAY_ROUTINE_HASH(ops) \
-  ((uint) p2int((ops)->reserved[OP_ARRAY_RESERVED_SLOT]))
+#define OP_ARRAY_HASH_SLOT 1
+#define GET_OP_ARRAY_ROUTINE_HASH(ops) ((uint) p2int((ops)->reserved[OP_ARRAY_HASH_SLOT]))
 #define SET_OP_ARRAY_ROUTINE_HASH(ops, hash) \
-  (ops)->reserved[OP_ARRAY_RESERVED_SLOT] = int2p((uint64) hash)
+do { \
+  (ops)->reserved[OP_ARRAY_HASH_SLOT] = int2p((uint64) hash); \
+} while (0)
+
+#define OP_ARRAY_CFM_SLOT 2
+#define GET_OP_ARRAY_CFM(ops) ((control_flow_metadata_t *) (ops)->reserved[OP_ARRAY_CFM_SLOT])
+#define SET_OP_ARRAY_CFM(ops, cfm) \
+do { \
+  (ops)->reserved[OP_ARRAY_CFM_SLOT] = (void *) cfm; \
+} while (0)
 
 #define UNKNOWN_CONTEXT_ID 0xffffffffU
 

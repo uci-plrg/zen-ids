@@ -918,6 +918,7 @@ static bool is_alias(zend_uchar first_opcode, zend_uchar second_opcode)
   return false;
 }
 
+#if 0
 static control_flow_metadata_t *lookup_cfm_by_name(zend_execute_data *execute_data,
                                                    zend_op_array *op_array)
 {
@@ -977,6 +978,7 @@ static control_flow_metadata_t *lookup_cfm(zend_execute_data *execute_data, zend
   }
   return monitored_cfm;
 }
+#endif
 
 static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op_array)
 {
@@ -984,6 +986,10 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
   op_context.last_builtin_arg = NULL;
   op_context.last_builtin_original_arg = NULL;
 #endif
+
+  op_context.cfm = GET_OP_ARRAY_CFM(op_array);
+
+#if 0
   if (op_array->type == ZEND_EVAL_CODE) { // eval or lambda
     op_context.cfm = get_last_eval_cfm();
   } else {
@@ -995,6 +1001,7 @@ static inline void stack_step(zend_execute_data *execute_data, zend_op_array *op
     */
     op_context.cfm = lookup_cfm(execute_data, op_array); // hash lookup
   }
+#endif
 
   PRINT("Stack step to "PX": %s\n", p2int(op_array->opcodes), op_context.cfm->routine_name);
 }
@@ -1035,7 +1042,8 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
       if (prev_execute_data->func->op_array.type != ZEND_INTERNAL_FUNCTION) {
         zend_op_array *prev_op_array = &prev_execute_data->func->op_array;
 
-        from_cfm = lookup_cfm(prev_execute_data, prev_op_array);
+        // from_cfm = lookup_cfm(prev_execute_data, prev_op_array);
+        from_cfm = GET_OP_ARRAY_CFM(prev_op_array);
         prev.op = prev_execute_data->opline;
         prev.index = (prev.op - prev_op_array->opcodes);
         break;
@@ -1445,6 +1453,9 @@ static void create_request_input(zend_op_array *op_array, const zend_op *op, con
 static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, int stack_motion)
 {
   zend_op_array *op_array;
+
+  if (op->opcode == ZEND_CALL_TRAMPOLINE)
+    return; // meta
 
   if (execute_data->func != NULL && execute_data->func->type == ZEND_INTERNAL_FUNCTION) {
     ERROR("Cannot monitor an internal stack frame! Rewinding to the previous frame.\n");
@@ -2016,14 +2027,16 @@ void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
 static void block_edge(zend_execute_data *from_execute_data, zend_execute_data *to_execute_data)
 {
   zend_op_array *from_op_array = &from_execute_data->func->op_array;
-  control_flow_metadata_t *from_cfm = lookup_cfm(from_execute_data, from_op_array);
+  // control_flow_metadata_t *from_cfm = lookup_cfm(from_execute_data, from_op_array);
+  control_flow_metadata_t *from_cfm = GET_OP_ARRAY_CFM(from_op_array);
   op_t from_op = {
     from_execute_data->opline,
     from_execute_data->opline - from_op_array->opcodes
   };
 
   zend_op_array *to_op_array = &to_execute_data->func->op_array;
-  control_flow_metadata_t *to_cfm = lookup_cfm(to_execute_data, to_op_array);
+  // control_flow_metadata_t *to_cfm = lookup_cfm(to_execute_data, to_op_array);
+  control_flow_metadata_t *to_cfm = GET_OP_ARRAY_CFM(to_op_array);
   block_request(from_execute_data, from_cfm, &from_op, to_cfm, 0);
 }
 
@@ -2046,7 +2059,8 @@ static inline void monitor_call_from_user(zend_execute_data *from_execute_data, 
     //  return;
 
     original_handler_addr |= ROUTINE_EDGE_INDEX_CACHED;
-    from_cfm = lookup_cfm(from_execute_data, op_array);
+    from_cfm = GET_OP_ARRAY_CFM(op_array);
+    // from_cfm = lookup_cfm(from_execute_data, op_array);
     if (from_cfm == NULL || from_cfm->dataset == NULL) {
       block = true;
     } else {
@@ -2084,7 +2098,8 @@ static inline void monitor_call_from_user(zend_execute_data *from_execute_data, 
                                            to_op_array->type == ZEND_EVAL_CODE);
   } else if (targets == NULL) {
     to_op_array = &execute_data->func->op_array;
-    to_cfm = lookup_cfm(execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+    to_cfm = GET_OP_ARRAY_CFM(to_op_array);
+    // to_cfm = lookup_cfm(execute_data, to_op_array);
     SPOT_DECL( zend_op_array *from_op_array = &from_execute_data->func->op_array; )
     SPOT_DECL( uint from_index = opline - from_op_array->opcodes; )
 
@@ -2112,7 +2127,9 @@ static void monitor_call_from_system(control_flow_metadata_t *from_cfm, uint edg
   bool block;
   dataset_target_routines_t *targets = current_app->routine_edge_targets.data[edges_index];
   zend_op_array *to_op_array = &execute_data->func->op_array;
-  control_flow_metadata_t *to_cfm = lookup_cfm(execute_data, to_op_array); // could cache the routine hash in an op_array reserved field
+  control_flow_metadata_t *to_cfm = GET_OP_ARRAY_CFM(to_op_array);
+  // control_flow_metadata_t *to_cfm = lookup_cfm(execute_data, to_op_array);
+
 
   if (to_cfm == NULL) {
     SPOT("Skipping verification of call from system to non-existent routine %s:%s()\n",

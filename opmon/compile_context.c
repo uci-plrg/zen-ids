@@ -304,8 +304,6 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
   buffer = NULL;
   fqn->function.cfm = cfm;
 
-  SET_OP_ARRAY_ROUTINE_HASH(op_array, cfm.cfg->routine_hash);
-
   if (is_eval)
     last_eval_cfm = cfm;
 
@@ -726,6 +724,9 @@ void function_created(zend_op *src, zend_op_array *f)
     PRINT("copy opcodes "PX" to "PX" (%s:%s)\n", p2int(src), p2int(f->opcodes), f->filename->val,
           f->function_name == NULL ? "<script-body>" : f->function_name->val);
   }
+
+  SET_OP_ARRAY_ROUTINE_HASH(f, fqn->function.cfm.cfg->routine_hash);
+  SET_OP_ARRAY_CFM(f, &fqn->function.cfm);
 
   sctable_add_or_replace(&routines_by_opcode_address, hash_addr(f->opcodes), fqn);
 
