@@ -615,8 +615,7 @@ bool write_request_edge(bool is_new_in_process, application_t *app, uint from_ro
 
       fwrite(&request_header_tag, sizeof(uint), 1, cfg_files->request_edge);
       fwrite(&request_state.request_id, sizeof(uint), 1, cfg_files->request_edge);
-      fwrite(&session.hash, sizeof(uint), 1, cfg_files->request_edge);
-      fwrite(&timestamp, sizeof(uint), 1, cfg_files->request_edge);
+      fwrite(&request_state.r->request_time, sizeof(uint64), 1, cfg_files->request_edge);
 
       /* Make an entry point if the stack policy didn't see it */
       if (from_routine_hash != BASE_FRAME_HASH) {

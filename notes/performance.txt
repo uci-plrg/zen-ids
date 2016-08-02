@@ -1,10 +1,42 @@
 
+  === Procedure ===
+
+1. build PHP like:
+
+      > ./scrub-build; buildconf --force; ./current-config  # or -plain for native
+      > make -j7
+    R!> (cd /hd/script-safe/php && chmod u+x scripts/phpize && make -j7 install)
+
+2. for native runs, remove calls to set_user_level()
+3. build opmon like:
+
+      > make clean
+      > phpize
+      > ./current-config
+      > make -j7 install
+
+4. configure opmon like:
+
+      > opmon-config -xyz
+
+5. train a usable dataset
+6. time the benchmarks like:
+
+      > $(which time) -f "Wall time: %e" replay-<app> -b gor-logs/log.{x..y}.gor"
+
+7. reset the app correctly before each run:
+
+      > mysql -u root wordpress < file.sql
+      > refresh-eecs221 -t <tarball>
+
+
 
 =======================
 
   · identify builtins by something faster than name (lazy cache)
-  · unplugging exception handling for now
+  · missing exception edges
   · check for ZEND_NULL_HANDLER instead of `(zend_get_opcode_name() == NULL)'
+  · Instrumentation overhead: could lighten the #define forms (e.g., null-define things in native mode)
 
 
 ~100,000 opcodes per request
@@ -14,16 +46,17 @@
 Switching PHP modes:
 
   · wp-config.php:74
-  · (ext/opcache/ZendAccelerator.h:50)
   · ./current-config[-plain]
   · opmon-config: -c <cfi> -r <request-synch> (disable other stuff)
 
--------------------------
+
 
 ================== WordPress ===================
 
 
   ------------------------- log.21.gor ----------------------
+
+  · trained on log.{1..7}.gor
 
 
  === Native on log.21.gor: 189.581s (+/-1.84)
@@ -54,63 +87,25 @@ Wall time: 198.34
 Wall time: 200.63
 
 
-  ------------------------- log.21.gor (WP only) ----------------------
-
-
- === Native: 137.015s
-
-Wall time: 136.79
-Wall time: 137.33
-Wall time: 136.59
-Wall time: 137.35
-
-
- === Opmon complete: 143.223s (4.5%)
-
-Wall time: 143.50
-Wall time: 142.54
-Wall time: 143.63
-
-
- === Opmon w/o monitor_call_from(): ~141.676 (3.4%)
-
-Wall time: 142.71
-Wall time: 140.62
-Wall time: 141.70
-
-
- === Opmon core: 140.176s (2.3%)
-
-Wall time: 140.39
-Wall time: 140.17
-Wall time: 139.97
-
-
- === Opmon core w/o call hook: 140.726s (2.7%)
-
-Wall time: 140.13
-Wall time: 141.55
-Wall time: 140.50
-
-
-
 ================== GitList ===================
+
+  · trained on log.{1..8}.gor and gitlist/log.9top10k.gor
 
 
   ------------------------- log.19.gor ----------------------
 
- === Native: 84.966s
+ === Native: 83.949s
 
-Wall time: 87.81
-Wall time: 85.08
-Wall time: 84.71
-Wall time: 84.43
-Wall time: 84.99
-Wall time: 84.50
-Wall time: 85.43
-Wall time: 84.65
-Wall time: 84.24
-Wall time: 83.82
+Wall time 87.79
+Wall time 82.70
+Wall time 83.06
+Wall time 84.09
+Wall time 83.29
+Wall time 82.70
+Wall time 85.39
+Wall time 82.01
+Wall time 84.15
+Wall time 84.31
 
 
  === Opmon complete: 87.724s (3.2%)
@@ -128,18 +123,57 @@ Wall time: 87.52
 Wall time: 87.82
 
 
- === Opmon complete (after doku changes): 88.945s (4.6%)
+ === Opmon complete (after doku changes): 88.076s (4.9%)
 
-Wall time: 89.85
-Wall time: 89.74
-Wall time: 89.35
-Wall time: 88.93
-Wall time: 88.09
-Wall time: 88.29
-Wall time: 88.92
-Wall time: 89.57
-Wall time: 88.05
-Wall time: 88.66
+Wall time 88.54
+Wall time 88.35
+Wall time 88.06
+Wall time 88.02
+Wall time 87.78
+Wall time 87.96
+Wall time 89.35
+Wall time 87.66
+Wall time 86.75
+Wall time 88.29
+
+
+================== Doku ===================
+
+  · trained on all
+    · better to train on log.{14..26}.gor and test on log.{27..33}.gor (must refresh site tree correctly)
+
+
+  ---------------------- all ----------------------
+
+
+ === Native: 113.086
+
+Wall time 105.42
+Wall time 122.51
+Wall time 108.30
+Wall time 116.32
+Wall time 125.45
+Wall time 109.98
+Wall time 111.56
+Wall time 109.82
+Wall time 110.11
+Wall time 111.39
+
+
+ === Opmon blocking everything 118.109 (4.5%)
+
+Wall time 113.86
+Wall time 127.44
+Wall time 117.18
+Wall time 113.75
+Wall time 117.49
+Wall time 116.80
+Wall time 117.30
+Wall time 113.92
+Wall time 112.85
+Wall time 130.50
+
+
 
 
 -------------------------
@@ -181,8 +215,8 @@ ZEND_API void execute_ex(zend_execute_data *ex)
   · wasting a little time on calls to non-existent methods
   · could move the assignment of op targets to the compile phase
     · may have conflict with core handler assignments
-  · check if core late handler assignments are clobbering the target index
-  · verify that target index is getting copied in opcache
+  · check if late handler assignments in the core are clobbering the target index
+  · verify that the `zend_op_array.reserved` slots are getting copied in opcache
 
 ---------------------
 
@@ -212,4 +246,32 @@ gor-logs/log.32.gor:1471
 gor-logs/log.33.gor:1568
 
 
-0x7fffeea68100
+----------------------
+
+
+
+I think there may be a psychological element that helps to explain the human penchant for destruction. When a person suffers severe violence, at some point it becomes incomprehensible--especially at a young age--and one common coping mechanism is for the victim to (attempt to) dominate suffering by becoming devoted to destruction. The idea is, "I'll be the one who decides what gets destroyed, and then I'll be safe while others suffer!" Extreme outbursts of this psychology are shooting rampages and the madness of serial killers. But since this phenomenon propagates along so many channels, for example child abuse and child slavery, it's typical for a large segment of any population to have a mild case of "destroyer persona." They feel uncomfortable with civilian life and experience a deeply disturbing restlessness during long periods of peace. Pain from past experience haunts their dreams and every waking moment, and they feel a constant compulsion to force that inner suffering out onto some other person. As I understand it, the destructive outbursts of war are just a composition of this smoldering energy mass than has never learned to seek an inward resolution. They are itching to kill, and when a visceral and violent leader like Trump establishes a mutual channel for taking "action", they heed nothing but rush to the call. Rational thinking is angrily rejected, almost as if it were the enemy, because it impedes the flow of destructive energy--a flow which in their experience promises relief: "we'll finally feel safe!"
+
+
+
+Hi, I'm working on a security research project at the University of California that is able to automatically detect and prevent exploits on PHP applications like WordPress. We have demonstrated the effectiveness of our tool on some small sites hosted by our lab, and now we are hoping to collaborate with a company to try our tool on larger sites with more traffic. I noticed your recent article on WordPress security (http://torquemag.io/2016/03/wordpress-sites-hacked/) and thought you might be interested in our research. The latest draft of our publication will give you more details about what our tool can do to protect your sites: https://drive.google.com/open?id=0BzBFig3Q8-o6SmNfS3VQdzI5aXM. Please let me know if you are interested in working with us on this project. Thanks!
+
+Hi, I'm working on a security research project at the University of California that is able to automatically detect and prevent exploits on PHP applications like WordPress. We have demonstrated the effectiveness of our tool on some small sites hosted by our lab, and now we are hoping to collaborate with a company to try our tool on larger sites with more traffic. The latest draft of our publication will give you more details about what our tool can do to protect PHP websites: https://drive.google.com/open?id=0BzBFig3Q8-o6SmNfS3VQdzI5aXM. Our goal is to run some more experiments like those described in section 6 of the paper, but using more complex websites that have more frequent and diverse traffic. Please let me know if you are interested in working with us on this project. Thanks!
+
+
+
+I'm working on a security research project at the University of California that is able to automatically detect and prevent exploits on PHP applications like WordPress. I read your article on Forbes about small websites getting hacked, and thought you might be interested in our project.
+
+We have demonstrated the effectiveness of our tool on some small sites hosted by our lab, and now we are hoping to collaborate with a company to try our tool on larger sites with more traffic. The latest draft of our publication will give you more details about what our tool can do to protect PHP websites: https://drive.google.com/open?id=0BzBFig3Q8-o6SmNfS3VQdzI5aXM. Our goal is to run some more experiments like those described in section 6 of the paper, but using more complex websites that have more frequent and diverse traffic. Please let me know if you are interested in working with us on this project. Thanks!
+
+Byron
+
+
+
+
+
+
+
+
+
+

@@ -865,9 +865,6 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
 static bool generate_routine_edge(control_flow_metadata_t *from_cfm, uint from_index,
                                   routine_cfg_t *to_cfg, uint to_index)
 {
-  if (from_cfm->cfg->routine_hash == 0x1e2b8ac9 && from_index == 11)
-    SPOT("wait\n");
-
   bool add_routine_edge = !cfg_has_routine_edge(current_app->cfg, from_cfm->cfg, from_index,
                                                 to_cfg, to_index, current_session.user_level);
 
