@@ -135,7 +135,7 @@ typedef struct _evo_key_t {
 
 #define EVO_STATE_QUERY "SELECT request_id, table_name, column_name, table_key " \
                         "FROM opmon_evolution "                                  \
-                        "WHERE request_id > ?"
+                        "WHERE request_id >= ?"
 #define EVO_STATE_QUERY_FIELD_COUNT 4
 
 static MYSQL_STMT *evo_state_query_stmt = NULL;
@@ -148,7 +148,7 @@ static uint64 evo_state_request_id, evo_state_table_key;
 static char evo_state_table_name[MYSQL_IDENTIFIER_MAX_LENGTH], evo_state_column_name[MYSQL_IDENTIFIER_MAX_LENGTH];
 static evo_taint_t evo_update_taint_id = { 0, evo_state_table_name, { evo_state_column_name }, 0, NULL};
 
-#define EVO_START_QUERY "SELECT count(*) FROM opmon_evolution WHERE request_id = ?"
+#define EVO_START_QUERY "SELECT count(*) FROM opmon_evolution WHERE request_id >= ?"
 #define EVO_START_QUERY_FIELD_COUNT 1
 
 static MYSQL_STMT *evo_start_query_stmt = NULL;
@@ -230,6 +230,9 @@ static int monitor_all_stack_motion = STACK_MOTION_CALL;
 static user_session_t current_session;
 
 static uint64 current_request_id = 0;
+static uint64 last_written_db_request_id = 0;
+
+#define DB_REQUEST_ID_SYNCH_INTERVAL 50
 
 static sctable_t builtin_cfgs;
 
@@ -272,6 +275,9 @@ static bool request_has_taint = false;
 static size_t taint_log_synch_pos = 0;
 
 #define CONTEXT_ENTRY 0xffffffffU
+
+extern zend_dataflow_monitor_t *dataflow_hooks;
+extern zend_dataflow_t *dataflow_stack_base;
 
 static bool increment_file_synch_request_id();
 static void evo_db_state_synch();
@@ -360,9 +366,11 @@ static void prepare_evo_queries()
 
     bind_evo_state_result[1].buffer_type = MYSQL_TYPE_VAR_STRING;
     bind_evo_state_result[1].buffer = &evo_state_table_name;
+    bind_evo_state_result[1].buffer_length = MYSQL_IDENTIFIER_MAX_LENGTH;
 
-    bind_evo_state_result[2].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind_evo_state_result[2].buffer_type = MYSQL_TYPE_VAR_STRING;
     bind_evo_state_result[2].buffer = &evo_state_column_name;
+    bind_evo_state_result[2].buffer_length = MYSQL_IDENTIFIER_MAX_LENGTH;
 
     bind_evo_state_result[3].buffer_type = MYSQL_TYPE_LONGLONG;
     bind_evo_state_result[3].buffer = &evo_state_table_key;
@@ -380,8 +388,8 @@ static void prepare_evo_queries()
   if (result == 0) {
     memset(bind_evo_start_request_id, 0, sizeof(bind_evo_start_request_id));
     bind_evo_start_request_id[0].buffer_type = MYSQL_TYPE_LONGLONG;
-    bind_evo_start_request_id[0].buffer = &current_request_id;
-    bind_evo_start_request_id[0].buffer_length = sizeof(current_request_id);
+    bind_evo_start_request_id[0].buffer = &last_written_db_request_id;
+    bind_evo_start_request_id[0].buffer_length = sizeof(last_written_db_request_id);
     bind_evo_start_request_id[0].length = NULL;
     bind_evo_start_request_id[0].is_null = 0;
     bind_evo_start_request_id[0].is_unsigned = 1;
@@ -604,7 +612,7 @@ uint64 interp_request_boundary(bool is_request_start)
 
     update_user_session();
   } else {
-    if (IS_CFI_DB() && request_had_admin)
+    if (IS_CFI_DB() && request_had_admin && !request_has_taint)
       evo_db_state_notify();
 
     request_blocked = false;
@@ -616,7 +624,7 @@ uint64 interp_request_boundary(bool is_request_start)
   if (IS_CFI_DATA()) {
     if (is_request_start) {
       if (IS_REQUEST_ID_SYNCH_DB()) {
-        if (current_request_id % 50 == 0) {
+        if (current_request_id % DB_REQUEST_ID_SYNCH_INTERVAL == 0) {
           int len;
           char buffer[EVO_UPDATE_REQUEST_ID_BUFFER_LEN];
 
@@ -625,7 +633,11 @@ uint64 interp_request_boundary(bool is_request_start)
           if (mysql_real_query(db_connection, buffer, len) != 0) {
             ERROR("Failed to update the evo request id: %s: %s.\n",
                   mysql_sqlstate(db_connection), mysql_error(db_connection));
+          } else {
+            last_written_db_request_id = current_request_id;
           }
+        } else if ((current_request_id - last_written_db_request_id) > DB_REQUEST_ID_SYNCH_INTERVAL) {
+          last_written_db_request_id = current_request_id;
         }
 
         if (current_session.user_level < 2)
@@ -2011,6 +2023,8 @@ void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
 
     original_handler(); // on ZEND_VM_ENTER(): `op_context.cfm = NULL`
 
+    dataflow_hooks->dataflow_stack = dataflow_stack_base; // taint: just reset the taint stack for now
+
     if (UNEXPECTED(!opline)) {
       op_context.cfm = NULL;
       execute_data = caller_execute_data;
@@ -2073,8 +2087,8 @@ static inline void monitor_call_from_user(zend_execute_data *from_execute_data, 
 
         scarray_append(&current_app->routine_edge_targets, targets);
 
-        SPOT("Append 0x%x:%d -> { "PX" } at index %d\n", from_cfm->cfg->routine_hash,
-             from_index, p2int(targets), (int) routine_edges_index);
+        PRINT("Append 0x%x:%d -> { "PX" } at index %d\n", from_cfm->cfg->routine_hash,
+              from_index, p2int(targets), (int) routine_edges_index);
       } else {
         block = true;
       }
@@ -2573,7 +2587,7 @@ static void evo_db_state_synch()
         status = mysql_stmt_fetch(evo_state_query_stmt);
         if (status == 0) {
           if (evo_state_request_id > evo_last_synch_request_id)
-            evo_last_synch_request_id = evo_state_request_id;
+            evo_last_synch_request_id = evo_state_request_id + 1;
 
           admin_site_modification(evo_state_request_id, evo_state_table_key, &evo_update_taint_id);
         } else {
@@ -2857,7 +2871,7 @@ static inline bool is_db_write(const char *query) {
 monitor_query_flags_t db_query(const char *query)
 {
   monitor_query_flags_t flags = 0;
-  bool is_admin = current_session.user_level > 2, is_write = is_db_write(query);
+  bool is_admin = current_session.user_level >= 2, is_write = is_db_write(query);
 
   if (IS_CFI_DB() && is_admin) { // && TAINT_ALL) {
     if (is_write) {

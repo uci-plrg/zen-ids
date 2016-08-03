@@ -74,6 +74,7 @@ static inline void fopcode(cfg_opcode_t *opcode, FILE *file)
   fwrite(&opcode->line_number, sizeof(ushort), 1, file);
 }
 
+#if 0
 static uint get_timestamp(void)
 {
   uint lo, hi;
@@ -81,6 +82,7 @@ static uint get_timestamp(void)
 
   return (hi << 0xc) | (lo >> 0x14);
 }
+#endif
 
 static bool is_media_file(char *buffer)
 {
@@ -611,8 +613,6 @@ bool write_request_edge(bool is_new_in_process, application_t *app, uint from_ro
     packed_from_index = from_index | (user_level << USER_LEVEL_SHIFT);
 
     if (request_state.is_new_request) {
-      uint timestamp = get_timestamp();
-
       fwrite(&request_header_tag, sizeof(uint), 1, cfg_files->request_edge);
       fwrite(&request_state.request_id, sizeof(uint), 1, cfg_files->request_edge);
       fwrite(&request_state.r->request_time, sizeof(uint64), 1, cfg_files->request_edge);

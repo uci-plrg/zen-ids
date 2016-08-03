@@ -28,8 +28,12 @@ typedef enum _opmon_run_type {
 
 static const char *static_analysis = NULL;
 static opmon_run_type run_type = OPMON_RUN_EXECUTION;
-static zend_dataflow_monitor_t *dataflow_hooks = NULL;
+zend_dataflow_t *dataflow_stack_base = NULL;
+zend_dataflow_monitor_t *dataflow_hooks = NULL;
 static zend_opcode_monitor_t *opcode_hooks = NULL;
+
+#define DATAFLOW_STACK_ENTRY_COUNT 0x20
+#define DATAFLOW_STACK_SIZE (sizeof(zend_dataflow_t) * DATAFLOW_STACK_ENTRY_COUNT)
 
 static void init_top_level_script(const char *script_path)
 {
@@ -124,6 +128,10 @@ void init_event_handler()
   // scarray_unit_test();
 
   dataflow_hooks = get_dataflow_monitor();
+  dataflow_stack_base = PROCESS_ALLOC(DATAFLOW_STACK_SIZE);
+  dataflow_hooks->dataflow_stack = dataflow_stack_base;
+  memset(dataflow_hooks->dataflow_stack, 0, DATAFLOW_STACK_SIZE);
+
   opcode_hooks = get_opcode_monitor();
 
   if (IS_CFI_DB() && !IS_REQUEST_ID_SYNCH_DB()) {
@@ -153,6 +161,7 @@ void init_event_handler()
   opcode_hooks->notify_worker_startup = init_worker;
   opcode_hooks->opmon_tokenize = NULL; //tokenize_file;
   opcode_hooks->opmon_dataflow = start_dataflow_analysis;
+  opcode_hooks->notify_database_query = db_query; // taint: always enabled
 
   /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
   enable_request_taint_tracking(false);
@@ -197,7 +206,7 @@ void enable_request_taint_tracking(bool enabled)
     opcode_hooks->has_taint = zval_has_taint;
     dataflow_hooks->is_enabled = true;
     opcode_hooks->notify_database_fetch = db_fetch_trigger;
-    opcode_hooks->notify_database_query = db_query;
+    // opcode_hooks->notify_database_query = db_query; // taint: always enabled
   } else {
     // switch here
     zend_execute_ex = execute_opcode_monitor_calls;
@@ -206,7 +215,7 @@ void enable_request_taint_tracking(bool enabled)
     opcode_hooks->has_taint = nop_has_taint;
     dataflow_hooks->is_enabled = false;
     opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
-    opcode_hooks->notify_database_query = nop_notify_database_query;
+    // opcode_hooks->notify_database_query = nop_notify_database_query; // taint: always enabled
   }
 }
 
