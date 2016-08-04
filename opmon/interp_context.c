@@ -299,9 +299,9 @@ static void update_process_auth_state()
   if (!IS_CFI_TRAINING()) {
     if (current_session.user_level < 2 || !current_session.active) {
       op_context.cfm = NULL;
-      enable_monitor(true);
+      set_monitor_mode(MONITOR_MODE_CALLS); // may be updated again during evo synch
     } else {
-      enable_monitor(false);
+      set_monitor_mode(MONITOR_MODE_NONE);
       request_had_admin = true;
     }
   }
@@ -610,6 +610,8 @@ uint64 interp_request_boundary(bool is_request_start)
 
     if (local_request_id)
       current_request_id++;
+
+    dataflow_hooks->dataflow_stack = dataflow_stack_base;
 
     update_user_session();
   } else {
@@ -2609,7 +2611,7 @@ static void evo_db_state_synch()
   }
 
   request_has_taint = (evo_taint_queue.head != NULL);
-  enable_request_taint_tracking(request_has_taint);
+  set_monitor_mode(request_has_taint ? MONITOR_MODE_ALL : MONITOR_MODE_CALLS);
 }
 
 static void notify_evo_start()
@@ -2713,7 +2715,7 @@ static void evo_file_state_synch()
     ERROR("Failed to unlock the evo taint log file!\n");
 
   request_has_taint = (evo_taint_queue.head != NULL);
-  enable_request_taint_tracking(request_has_taint);
+  set_monitor_mode(request_has_taint ? MONITOR_MODE_ALL : MONITOR_MODE_CALLS);
 }
 
 static void evo_commit_request_patches()

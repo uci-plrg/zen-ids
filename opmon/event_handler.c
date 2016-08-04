@@ -32,7 +32,7 @@ zend_dataflow_t *dataflow_stack_base = NULL;
 zend_dataflow_monitor_t *dataflow_hooks = NULL;
 static zend_opcode_monitor_t *opcode_hooks = NULL;
 
-#define DATAFLOW_STACK_ENTRY_COUNT 0x200
+#define DATAFLOW_STACK_ENTRY_COUNT 0x2000
 #define DATAFLOW_STACK_SIZE (sizeof(zend_dataflow_t) * DATAFLOW_STACK_ENTRY_COUNT)
 
 static void init_top_level_script(const char *script_path)
@@ -163,8 +163,8 @@ void init_event_handler()
   opcode_hooks->opmon_dataflow = start_dataflow_analysis;
   opcode_hooks->notify_database_query = db_query; // taint: always enabled
 
-  /* always nop to begin--enabled (if ever) below in enable_request_taint_tracking() */
-  enable_request_taint_tracking(false);
+  /* always nop to begin--enabled (if ever) below in set_monitor_mode() */
+  set_monitor_mode(MONITOR_MODE_NONE);
 
     // switch here
   if (false) { // overrides for performance testing
@@ -198,42 +198,42 @@ void init_event_handler()
     server_startup();
 }
 
-void enable_request_taint_tracking(bool enabled)
+void set_monitor_mode(monitor_mode_t mode)
 {
-  if (enabled == dataflow_hooks->is_enabled)
-    return;
+  switch (mode) {
+    case MONITOR_MODE_NONE:
+      zend_execute_ex = execute_opcode_direct;
 
-  SPOT("enable_request_taint_tracking(%s)\n", enabled ? "enabled" : "disabled");
+      opcode_hooks->vm_call = vm_call_plain;
 
-  dataflow_hooks->is_enabled = enabled;
+      dataflow_hooks->is_enabled = false;
 
-  if (enabled) {
-    zend_execute_ex = execute_opcode_monitor_all;
+      SPOT("set_monitor_mode(MONITOR_MODE_NONE)\n");
+      break;
+    case MONITOR_MODE_CALLS:
+      zend_execute_ex = execute_opcode_monitor_calls;
 
-    opcode_hooks->has_taint = zval_has_taint;
-    opcode_hooks->notify_database_fetch = db_fetch_trigger;
-    // opcode_hooks->notify_database_query = db_query; // taint: always enabled
-  } else {
-    // switch here
-    zend_execute_ex = execute_opcode_monitor_calls;
-    // zend_execute_ex = execute_opcode_direct;
+      opcode_hooks->vm_call = vm_monitor_call_quick;
+      opcode_hooks->has_taint = nop_has_taint;
+      opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
 
-    opcode_hooks->has_taint = nop_has_taint;
-    opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
-    // opcode_hooks->notify_database_query = nop_notify_database_query; // taint: always enabled
+      dataflow_hooks->is_enabled = false;
+
+      SPOT("set_monitor_mode(MONITOR_MODE_CALLS)\n");
+      break;
+    case MONITOR_MODE_ALL:
+      zend_execute_ex = execute_opcode_monitor_all;
+
+      opcode_hooks->has_taint = zval_has_taint;
+      opcode_hooks->notify_database_fetch = db_fetch_trigger;
+
+      dataflow_hooks->is_enabled = true;
+
+      SPOT("set_monitor_mode(MONITOR_MODE_ALL)\n");
+      break;
   }
-}
 
-void enable_monitor(bool enabled)
-{
-  // switch here
-  if (/* false && */ enabled) {
-    opcode_hooks->vm_call = vm_monitor_call_quick; // alpha: but not in taint mode
-    zend_execute_ex = execute_opcode_monitor_calls;
-  } else {
-    opcode_hooks->vm_call = vm_call_plain;
-    zend_execute_ex = execute_opcode_direct;
-  }
+  dataflow_hooks->dataflow_stack = dataflow_stack_base;
 }
 
 void destroy_event_handler()
