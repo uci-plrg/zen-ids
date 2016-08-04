@@ -25,7 +25,6 @@ void execute_opcode_direct(zend_execute_data *execute_data TSRMLS_DC);
 void db_fetch_trigger(uint32_t field_count, const char **table_names, const char **column_names,
                       const zval **values);
 monitor_query_flags_t db_query(const char *query);
-zend_bool internal_dataflow(const zval *src, const zval *dst, zend_bool is_internal_transfer);
 user_level_t get_current_user_level();
 
 #endif

@@ -32,7 +32,7 @@ zend_dataflow_t *dataflow_stack_base = NULL;
 zend_dataflow_monitor_t *dataflow_hooks = NULL;
 static zend_opcode_monitor_t *opcode_hooks = NULL;
 
-#define DATAFLOW_STACK_ENTRY_COUNT 0x20
+#define DATAFLOW_STACK_ENTRY_COUNT 0x200
 #define DATAFLOW_STACK_SIZE (sizeof(zend_dataflow_t) * DATAFLOW_STACK_ENTRY_COUNT)
 
 static void init_top_level_script(const char *script_path)
@@ -200,11 +200,17 @@ void init_event_handler()
 
 void enable_request_taint_tracking(bool enabled)
 {
+  if (enabled == dataflow_hooks->is_enabled)
+    return;
+
+  SPOT("enable_request_taint_tracking(%s)\n", enabled ? "enabled" : "disabled");
+
+  dataflow_hooks->is_enabled = enabled;
+
   if (enabled) {
     zend_execute_ex = execute_opcode_monitor_all;
 
     opcode_hooks->has_taint = zval_has_taint;
-    dataflow_hooks->is_enabled = true;
     opcode_hooks->notify_database_fetch = db_fetch_trigger;
     // opcode_hooks->notify_database_query = db_query; // taint: always enabled
   } else {
@@ -213,7 +219,6 @@ void enable_request_taint_tracking(bool enabled)
     // zend_execute_ex = execute_opcode_direct;
 
     opcode_hooks->has_taint = nop_has_taint;
-    dataflow_hooks->is_enabled = false;
     opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
     // opcode_hooks->notify_database_query = nop_notify_database_query; // taint: always enabled
   }

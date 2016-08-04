@@ -230,7 +230,7 @@ static int monitor_all_stack_motion = STACK_MOTION_CALL;
 static user_session_t current_session;
 
 static uint64 current_request_id = 0;
-static uint64 last_written_db_request_id = 0;
+static uint64 evo_last_unchecked_request_id = 0;
 
 #define DB_REQUEST_ID_SYNCH_INTERVAL 50
 
@@ -292,6 +292,7 @@ static void file_read_trigger(zend_execute_data *execute_data, const char *sysca
                               const zval *return_value, const zend_op **args, uint arg_count);
 static void file_write_trigger(zend_execute_data *execute_data, const char *syscall,
                                const zend_op **args, uint arg_count);
+static void propagate_internal_dataflow();
 
 static void update_process_auth_state()
 {
@@ -388,8 +389,8 @@ static void prepare_evo_queries()
   if (result == 0) {
     memset(bind_evo_start_request_id, 0, sizeof(bind_evo_start_request_id));
     bind_evo_start_request_id[0].buffer_type = MYSQL_TYPE_LONGLONG;
-    bind_evo_start_request_id[0].buffer = &last_written_db_request_id;
-    bind_evo_start_request_id[0].buffer_length = sizeof(last_written_db_request_id);
+    bind_evo_start_request_id[0].buffer = &evo_last_unchecked_request_id;
+    bind_evo_start_request_id[0].buffer_length = sizeof(evo_last_unchecked_request_id);
     bind_evo_start_request_id[0].length = NULL;
     bind_evo_start_request_id[0].is_null = 0;
     bind_evo_start_request_id[0].is_unsigned = 1;
@@ -634,10 +635,10 @@ uint64 interp_request_boundary(bool is_request_start)
             ERROR("Failed to update the evo request id: %s: %s.\n",
                   mysql_sqlstate(db_connection), mysql_error(db_connection));
           } else {
-            last_written_db_request_id = current_request_id;
+            evo_last_unchecked_request_id = current_request_id;
           }
-        } else if ((current_request_id - last_written_db_request_id) > DB_REQUEST_ID_SYNCH_INTERVAL) {
-          last_written_db_request_id = current_request_id;
+        } else if ((current_request_id - evo_last_unchecked_request_id) > DB_REQUEST_ID_SYNCH_INTERVAL) {
+          evo_last_unchecked_request_id = current_request_id; // this is really just for starting a PHP instance
         }
 
         if (current_session.user_level < 2)
@@ -2014,6 +2015,8 @@ void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
     if (execute_data != cur_execute_data) {
       if (is_prev_frame(cur_execute_data, execute_data))
         monitor_all_stack_motion = STACK_MOTION_LEAVE;
+      else
+        monitor_all_stack_motion = STACK_MOTION_CALL;
       cur_execute_data = execute_data;
     }
 
@@ -2023,7 +2026,7 @@ void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
 
     original_handler(); // on ZEND_VM_ENTER(): `op_context.cfm = NULL`
 
-    dataflow_hooks->dataflow_stack = dataflow_stack_base; // taint: just reset the taint stack for now
+    propagate_internal_dataflow();
 
     if (UNEXPECTED(!opline)) {
       op_context.cfm = NULL;
@@ -2586,8 +2589,10 @@ static void evo_db_state_synch()
       while (true) {
         status = mysql_stmt_fetch(evo_state_query_stmt);
         if (status == 0) {
-          if (evo_state_request_id > evo_last_synch_request_id)
+          if (evo_state_request_id > evo_last_synch_request_id) {
             evo_last_synch_request_id = evo_state_request_id + 1;
+            evo_last_unchecked_request_id = evo_last_synch_request_id;
+          }
 
           admin_site_modification(evo_state_request_id, evo_state_table_key, &evo_update_taint_id);
         } else {
@@ -2604,6 +2609,7 @@ static void evo_db_state_synch()
   }
 
   request_has_taint = (evo_taint_queue.head != NULL);
+  enable_request_taint_tracking(request_has_taint);
 }
 
 static void notify_evo_start()
@@ -2894,44 +2900,51 @@ monitor_query_flags_t db_query(const char *query)
   return flags;
 }
 
-zend_bool internal_dataflow(const zval *src, const zval *dst, zend_bool is_internal_transfer)
+static void propagate_internal_dataflow()
 {
   zend_bool has_taint = false;
+  zend_dataflow_t *dataflow_frame = dataflow_stack_base;
 
   if (!IS_CFI_EVO() || op_context.execute_data == NULL || !request_has_taint)
-    return has_taint;
+    return;
 
-  if (is_return(op_context.cur.op->opcode)) {
-    /* N.B.: must be in a builtin function: cannot ref cur_frame.execute_data! */
-    if (op_context.implicit_taint != NULL && !is_internal_transfer) {
-      plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at a builtin\n",
-           op_context.implicit_taint->id, (uint64) dst);
-      taint_var_add(current_app, dst, op_context.implicit_taint->taint);
-      op_context.implicit_taint->last_applied_op_index = 0; /* not at any op */
-      has_taint = true;
+  for (; dataflow_frame < dataflow_hooks->dataflow_stack; dataflow_frame++) {
+    if (is_return(op_context.cur.op->opcode)) {
+      /* N.B.: must be in a builtin function: cannot ref cur_frame.execute_data! */
+      if (op_context.implicit_taint != NULL && dataflow_frame->container == NULL) {
+        plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at a builtin\n",
+             op_context.implicit_taint->id, (uint64) dataflow_frame->dst);
+        taint_var_add(current_app, dataflow_frame->dst, op_context.implicit_taint->taint);
+        op_context.implicit_taint->last_applied_op_index = 0; /* not at any op */
+        has_taint = true;
+      } else {
+        has_taint = propagate_zval_taint_quiet(current_app, true, dataflow_frame->src, "internal",
+                                               dataflow_frame->dst, "internal");
+      }
     } else {
-      has_taint = propagate_zval_taint_quiet(current_app, true, src, "internal", dst, "internal");
+      zend_op_array *stack_frame = &op_context.execute_data->func->op_array;
+
+      if (op_context.implicit_taint != NULL && dataflow_frame->container == NULL &&
+          op_context.implicit_taint->last_applied_op_index != op_context.cur.index) {
+
+        plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at %04d(L%04d)%s\n",
+             op_context.implicit_taint->id, (uint64) dataflow_frame->dst, op_context.cur.index,
+             op_context.cur.op->lineno, site_relative_path(current_app, stack_frame));
+        taint_var_add(current_app, dataflow_frame->dst, op_context.implicit_taint->taint);
+        op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
+        has_taint = true;
+      } else {
+        has_taint = propagate_zval_taint(current_app, op_context.execute_data, stack_frame,
+                                         op_context.cur.op, true, dataflow_frame->src, "internal",
+                                         dataflow_frame->dst, "internal");
+      }
     }
-  } else {
-    zend_op_array *stack_frame = &op_context.execute_data->func->op_array;
 
-    if (op_context.implicit_taint != NULL && !is_internal_transfer &&
-        op_context.implicit_taint->last_applied_op_index != op_context.cur.index) {
-
-      plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at %04d(L%04d)%s\n",
-           op_context.implicit_taint->id, (uint64) dst, op_context.cur.index,
-           op_context.cur.op->lineno, site_relative_path(current_app, stack_frame));
-      taint_var_add(current_app, dst, op_context.implicit_taint->taint);
-      op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
-      has_taint = true;
-    } else {
-      has_taint = propagate_zval_taint(current_app, op_context.execute_data, stack_frame,
-                                       op_context.cur.op, true, src, "internal", dst, "internal");
+    if (has_taint && dataflow_frame->container != NULL) {
+      taint_var_remove(dataflow_frame->src);
+      dataflow_frame->container->u.v.reserve |= HASH_RESERVE_TAINT;
     }
   }
 
-  if (has_taint && is_internal_transfer)
-    taint_var_remove(src);
-
-  return has_taint;
+  dataflow_hooks->dataflow_stack = dataflow_stack_base;
 }

@@ -35,10 +35,11 @@
 
 Problems with evo:
 
-1. How to identify that the current request has taint, when the database request id lags %50?
-2. Hashtables are not immediately marked as tainted
+1. Hashtables are not immediately marked as tainted
    · Could mark them in the macro, but that may add register pressure
-3. Last benchmark runs did not include check for admin on every query (should be trivial)
+   · Could mark them as possibly tainted and check the dataflow stack if a copy occurs
+2. Last benchmark runs did not include check for admin on every query (should be trivial)
+
 
 =======================
 
