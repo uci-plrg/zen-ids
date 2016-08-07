@@ -233,7 +233,15 @@ void set_monitor_mode(monitor_mode_t mode)
       break;
   }
 
-  dataflow_hooks->dataflow_stack = dataflow_stack_base;
+  reset_dataflow_stack();
+}
+
+void reset_dataflow_stack()
+{
+  if (dataflow_hooks->dataflow_stack > dataflow_stack_base) {
+    memset(dataflow_stack_base, 0, (char *) dataflow_hooks->dataflow_stack - (char *) dataflow_stack_base);
+    dataflow_hooks->dataflow_stack = dataflow_stack_base;
+  }
 }
 
 void destroy_event_handler()

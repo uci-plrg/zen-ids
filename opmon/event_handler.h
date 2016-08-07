@@ -16,5 +16,6 @@ const char *get_static_analysis();
 bool is_static_analysis();
 bool is_dataflow_analysis();
 void set_monitor_mode(monitor_mode_t mode);
+void reset_dataflow_stack();
 
 #endif

@@ -512,6 +512,21 @@ static void load_entry_points(control_flow_metadata_t *entry_cfm)
   scarray_append(&current_app->routine_edge_targets, targets);
 }
 
+static void update_request_id()
+{
+  int len;
+  char buffer[EVO_UPDATE_REQUEST_ID_BUFFER_LEN];
+
+  len = snprintf(buffer, EVO_UPDATE_REQUEST_ID_BUFFER_LEN, EVO_UPDATE_REQUEST_ID,
+                 current_request_id);
+  if (mysql_real_query(db_connection, buffer, len) != 0) {
+    ERROR("Failed to update the evo request id: %s: %s.\n",
+          mysql_sqlstate(db_connection), mysql_error(db_connection));
+  } else {
+    evo_last_unchecked_request_id = current_request_id;
+  }
+}
+
 void initialize_interp_app_context(application_t *app)
 {
   current_app = app;
@@ -558,6 +573,9 @@ uint64 interp_request_boundary(bool is_request_start)
     char filename[CONFIG_FILENAME_LENGTH] = { 0 };
     bool local_request_id = (!HAS_REQUEST_ID_SYNCH() || IS_CFI_TRAINING());
     current_app = locate_application(((php_server_context_t *) SG(server_context))->r->filename);
+
+    if (strcmp("/lab/www/html/index.php", ((php_server_context_t *) SG(server_context))->r->filename) == 0)
+      SPOT("wait\n");
 
     if (current_app->routine_edge_targets.capacity == 0) {
       scarray_init_ex(&current_app->routine_edge_targets, 1000);
@@ -611,11 +629,11 @@ uint64 interp_request_boundary(bool is_request_start)
     if (local_request_id)
       current_request_id++;
 
-    dataflow_hooks->dataflow_stack = dataflow_stack_base;
+    reset_dataflow_stack();
 
     update_user_session();
   } else {
-    if (IS_CFI_DB() && request_had_admin && !request_has_taint)
+    if (IS_CFI_DB() && request_had_admin) //  && !request_has_taint)
       evo_db_state_notify();
 
     request_blocked = false;
@@ -627,21 +645,10 @@ uint64 interp_request_boundary(bool is_request_start)
   if (IS_CFI_DATA()) {
     if (is_request_start) {
       if (IS_REQUEST_ID_SYNCH_DB()) {
-        if (current_request_id % DB_REQUEST_ID_SYNCH_INTERVAL == 0) {
-          int len;
-          char buffer[EVO_UPDATE_REQUEST_ID_BUFFER_LEN];
-
-          len = snprintf(buffer, EVO_UPDATE_REQUEST_ID_BUFFER_LEN, EVO_UPDATE_REQUEST_ID,
-                         current_request_id);
-          if (mysql_real_query(db_connection, buffer, len) != 0) {
-            ERROR("Failed to update the evo request id: %s: %s.\n",
-                  mysql_sqlstate(db_connection), mysql_error(db_connection));
-          } else {
-            evo_last_unchecked_request_id = current_request_id;
-          }
-        } else if ((current_request_id - evo_last_unchecked_request_id) > DB_REQUEST_ID_SYNCH_INTERVAL) {
+        if (current_request_id % DB_REQUEST_ID_SYNCH_INTERVAL == 0)
+          update_request_id();
+        else if ((current_request_id - evo_last_unchecked_request_id) > DB_REQUEST_ID_SYNCH_INTERVAL)
           evo_last_unchecked_request_id = current_request_id; // this is really just for starting a PHP instance
-        }
 
         if (current_session.user_level < 2)
           evo_db_state_synch();
@@ -1532,7 +1539,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
   }
 
   if (op->opcode == ZEND_CALL_TRAMPOLINE)
-    return; // meta opcode--let's wait till we get there
+    return; // meta opcode--skip it: will process the destination next
 
   switch (stack_motion) {
     case STACK_MOTION_LEAVE:
@@ -1586,6 +1593,13 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
         op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
   PRINT("    op_context at op %d in %s\n", op_context.cur.index,
          op_context.cfm == NULL ? "<missing>" : op_context.cfm->routine_name);
+
+  if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
+      op_context.cfm->cfg->routine_hash == 0x12fc6372 && op_context.cur.index == 8)
+    SPOT("wait\n");
+  if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
+      op_context.cfm->cfg->routine_hash == 0x2ed50d60 && op_context.cur.index == 42)
+    SPOT("wait\n"); // in get_option() where it reads from `alloptions`
 
   switch (op->opcode) {
     case ZEND_DO_FCALL:
@@ -2500,7 +2514,7 @@ static bool increment_file_synch_request_id()
   return true;
 }
 
-static void admin_site_modification(uint request_id, uint table_key, evo_taint_t *taint_id)
+static void admin_site_modification(uint request_id, evo_taint_t *taint_id)
 {
   uint64 hash = hash_evo_taint(taint_id);
 
@@ -2509,7 +2523,7 @@ static void admin_site_modification(uint request_id, uint table_key, evo_taint_t
 
     memset(taint, 0, sizeof(evo_taint_t));
     if (is_db_taint(taint_id)) {
-      taint->table_key = table_key;
+      taint->table_key = taint_id->table_key;
       taint->table_name = strdup(taint_id->table_name);  /* alloc process scope: until expiration */
       taint->column_name = strdup(taint_id->column_name);
     } else {
@@ -2525,7 +2539,8 @@ static void admin_site_modification(uint request_id, uint table_key, evo_taint_t
   if (current_app != NULL) {
     if (is_db_taint(taint_id)) {
       plog(current_app, PLOG_TYPE_DB_MOD,
-           "%s.%s[%lld]\n", taint_id->table_name, taint_id->column_name, table_key);
+           "%s.%s[%lld] with hash 0x%llx at request id %lld\n", taint_id->table_name,
+           taint_id->column_name, taint_id->table_key, hash, current_request_id);
     } else {
       plog(current_app, PLOG_TYPE_FILE_MOD, "%s\n", taint_id->file_path);
     }
@@ -2580,11 +2595,15 @@ static void evo_db_state_synch()
   }
 
   if (last_evo_start == 0 || last_evo_start < evo_last_synch_request_id) {
-    SPOT("No evo at request id %lld (last evo at request %lld)\n", current_request_id, last_evo_start);
+    //plog(current_app, PLOG_TYPE_AD_HOC, "No evo at request id %lld (last evo start at %lld, "
+    //     "last synch from %lld)\n", current_request_id, last_evo_start, evo_last_synch_request_id);
     return;
   }
 
-  status = mysql_stmt_execute(evo_state_query_stmt);
+  //plog(current_app, PLOG_TYPE_AD_HOC, "Evo DB state synch at request id %lld from last synch point %lld\n",
+  //     current_request_id, evo_last_synch_request_id);
+
+  status = mysql_stmt_execute(evo_state_query_stmt); /* evo_last_synch_request_id */
   if (status == 0) {
     status = mysql_stmt_bind_result(evo_state_query_stmt, bind_evo_state_result);
     if (status == 0) {
@@ -2596,7 +2615,8 @@ static void evo_db_state_synch()
             evo_last_unchecked_request_id = evo_last_synch_request_id;
           }
 
-          admin_site_modification(evo_state_request_id, evo_state_table_key, &evo_update_taint_id);
+          evo_update_taint_id.table_key = evo_state_table_key;
+          admin_site_modification(evo_state_request_id, &evo_update_taint_id);
         } else {
           if (status == 1)
             ERROR("Failed to fetch results from the evo synch statement: %d\n", status);
@@ -2612,6 +2632,7 @@ static void evo_db_state_synch()
 
   request_has_taint = (evo_taint_queue.head != NULL);
   set_monitor_mode(request_has_taint ? MONITOR_MODE_ALL : MONITOR_MODE_CALLS);
+  update_request_id();
 }
 
 static void notify_evo_start()
@@ -2704,7 +2725,7 @@ static void evo_file_state_synch()
 
       {
         evo_taint_t taint_id = { 0, NULL, { file_path }, 0ULL, NULL };
-        admin_site_modification(request_id, 0ULL, &taint_id);
+        admin_site_modification(request_id, &taint_id);
       }
     }
   }
@@ -2796,6 +2817,12 @@ void db_fetch_trigger(uint32_t field_count, const char **table_names, const char
     if (evo_key == NULL || field_count < (evo_key->column_count + 1))
       return; /* not a taintable table, or no key, or only key */
 
+    for (i = 0; i < field_count; i++) {
+      if (strcmp(table_names[0], "wp_options") == 0 && strcmp(column_names[i], "option_value") == 0 &&
+          strcmp(Z_STRVAL_P(values[i]), "/%postname%/") == 0)
+      SPOT("wait\n");
+    }
+
     for (j = 0; j < evo_key->column_count; j++) {
       for (i = 0; i < field_count; i++) {
         if (strcmp(column_names[i], evo_key->column_names[j]) == 0) {
@@ -2838,6 +2865,9 @@ void db_fetch_trigger(uint32_t field_count, const char **table_names, const char
         evo_taint_t *found, lookup = { 0, table_names[0], { column_names[i] }, key, NULL };
         field_hash = hash_evo_taint(&lookup);
 
+        // plog(current_app, PLOG_TYPE_AD_HOC, "Looking for evo %s.%s[%lld] with hash 0x%llx\n",
+        //      table_names[0], column_names[i], key, field_hash);
+
         found = (evo_taint_t *) sctable_lookup_value(&evo_taint_table, field_hash, &lookup);
         if (found == NULL)
           continue;
@@ -2859,6 +2889,7 @@ void db_fetch_trigger(uint32_t field_count, const char **table_names, const char
 
         plog(current_app, PLOG_TYPE_TAINT, "db-fetch at %04d(L%04d)%s\n",
              op_context.cur.index, op->lineno, site_relative_path(current_app, op_array));
+
         taint_var_add(current_app, values[i], var);
       }
     }
@@ -2904,49 +2935,69 @@ monitor_query_flags_t db_query(const char *query)
 
 static void propagate_internal_dataflow()
 {
-  zend_bool has_taint = false;
+  zend_bool has_taint = false, is_transfer = false, free_src = false;
   zend_dataflow_t *dataflow_frame = dataflow_stack_base;
 
   if (!IS_CFI_EVO() || op_context.execute_data == NULL || !request_has_taint)
     return;
 
   for (; dataflow_frame < dataflow_hooks->dataflow_stack; dataflow_frame++) {
-    if (is_return(op_context.cur.op->opcode)) {
-      /* N.B.: must be in a builtin function: cannot ref cur_frame.execute_data! */
-      if (op_context.implicit_taint != NULL && dataflow_frame->container == NULL) {
-        plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at a builtin\n",
-             op_context.implicit_taint->id, (uint64) dataflow_frame->dst);
-        taint_var_add(current_app, dataflow_frame->dst, op_context.implicit_taint->taint);
-        op_context.implicit_taint->last_applied_op_index = 0; /* not at any op */
-        has_taint = true;
-      } else {
-        has_taint = propagate_zval_taint_quiet(current_app, true, dataflow_frame->src, "internal",
-                                               dataflow_frame->dst, "internal");
-      }
+    if (dataflow_frame->src == NULL) {
+      has_taint = true; // just mark the hashtable
+    } else if (dataflow_frame->dst == NULL) {
+      free_src = true; // just free taint from the src
     } else {
-      zend_op_array *stack_frame = &op_context.execute_data->func->op_array;
+      if (dataflow_frame->container == (HashTable *) int2p(1ULL)) {
+        dataflow_frame->container = NULL; // indicates a taint transfer within already-marked ht
+        is_transfer = true;
+      }
 
-      if (op_context.implicit_taint != NULL && dataflow_frame->container == NULL &&
-          op_context.implicit_taint->last_applied_op_index != op_context.cur.index) {
-
-        plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at %04d(L%04d)%s\n",
-             op_context.implicit_taint->id, (uint64) dataflow_frame->dst, op_context.cur.index,
-             op_context.cur.op->lineno, site_relative_path(current_app, stack_frame));
-        taint_var_add(current_app, dataflow_frame->dst, op_context.implicit_taint->taint);
-        op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
-        has_taint = true;
+      if (is_return(op_context.cur.op->opcode)) {
+        /* N.B.: must be in a builtin function: cannot ref cur_frame.execute_data! */
+        if (op_context.implicit_taint != NULL && !is_transfer) {
+          plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at a builtin\n",
+               op_context.implicit_taint->id, (uint64) dataflow_frame->dst);
+          taint_var_add(current_app, dataflow_frame->dst, op_context.implicit_taint->taint);
+          op_context.implicit_taint->last_applied_op_index = 0; /* not at any op */
+          has_taint = true;
+        } else {
+          has_taint = propagate_zval_taint_quiet(current_app, true, dataflow_frame->src, "internal",
+                                                 dataflow_frame->dst, "internal");
+        }
       } else {
-        has_taint = propagate_zval_taint(current_app, op_context.execute_data, stack_frame,
-                                         op_context.cur.op, true, dataflow_frame->src, "internal",
-                                         dataflow_frame->dst, "internal");
+        zend_op_array *stack_frame = &op_context.execute_data->func->op_array;
+
+        if (op_context.implicit_taint != NULL && !is_transfer &&
+            op_context.implicit_taint->last_applied_op_index != op_context.cur.index) {
+          plog(current_app, PLOG_TYPE_TAINT, "implicit I%d->0x%llx at %04d(L%04d)%s\n",
+               op_context.implicit_taint->id, (uint64) dataflow_frame->dst, op_context.cur.index,
+               op_context.cur.op->lineno, site_relative_path(current_app, stack_frame));
+
+          taint_var_add(current_app, dataflow_frame->dst, op_context.implicit_taint->taint);
+          op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
+          has_taint = true;
+        } else {
+          if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
+              op_context.cfm->cfg->routine_hash == 0x63be5693 &&
+              Z_TYPE_P(dataflow_frame->src) == IS_STRING &&
+              (strncmp(Z_STRVAL_P(dataflow_frame->src), "a:69:{s:47:", 11) == 0 ||
+               strcmp(Z_STRVAL_P(dataflow_frame->src), "/%postname%/") == 0))
+            SPOT("wait\n"); // in get_option() where writes to `alloptions`
+
+          has_taint = propagate_zval_taint(current_app, op_context.execute_data, stack_frame,
+                                           op_context.cur.op, true, dataflow_frame->src, "internal",
+                                           dataflow_frame->dst, "internal");
+        }
       }
     }
 
-    if (has_taint && dataflow_frame->container != NULL) {
+    if (is_transfer || free_src) {
       taint_var_remove(dataflow_frame->src);
+      is_transfer = free_src = false;
+    } else if (has_taint && dataflow_frame->container != NULL) {
       dataflow_frame->container->u.v.reserve |= HASH_RESERVE_TAINT;
     }
   }
 
-  dataflow_hooks->dataflow_stack = dataflow_stack_base;
+  reset_dataflow_stack();
 }

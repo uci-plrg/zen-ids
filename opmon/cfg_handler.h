@@ -17,7 +17,7 @@
 //#define PLOG_SYS_WRITE 1
 //#define PLOG_SYS_READ 1
 //#define PLOG_WARN 1
-//#define PLOG_AD_HOC 1
+#define PLOG_AD_HOC 1
 
 typedef struct _php_server_context_t { // type window
   int opaque;

@@ -259,7 +259,6 @@ static bool is_derived_class(zend_class_entry *child_class, zend_class_entry *pa
 }
 */
 
-/*
 void propagate_taint_from_array(application_t *app, zend_execute_data *execute_data,
                                 zend_op_array *stack_frame, const zend_op *op, uint flags)
 {
@@ -271,6 +270,12 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
 
   if (key == NULL)
     return; // ignore--will handle this via internal callback
+
+  if (true) {
+    //plog(app, PLOG_TYPE_TAINT, "Skipping propagation from array at %04d(L%04d)%s\n",
+    //      OP_INDEX(stack_frame, op), op->lineno, site_relative_path(app, stack_frame));
+    return;
+  }
 
   key_long = Z_LVAL_P(key);
   Z_UNWRAP_P(map);
@@ -286,20 +291,20 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
           }
           ZEND_HANDLE_NUMERIC(key_string, key_long);
         }
-        case IS_LONG: / * FT * /
+        case IS_LONG: /* FT */
           src = zend_hash_index_find(Z_ARRVAL_P(map), key_long);
           propagate_zval_taint(app, execute_data, stack_frame, op, true, src, "[mapped]", dst, "R");
       }
       break;
     case IS_OBJECT:
-      propagate_taint_from_object(app, execute_data, stack_frame, op, flags);
+      // propagate_taint_from_object(app, execute_data, stack_frame, op, flags);
       break;
     case IS_STRING:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
       break;
     case IS_NULL:
     case IS_FALSE:
-      break; / * ignore * /
+      break; /* ignore */
     default:
       ERROR("<taint> Error propagating from %s: found an unknown array type %d at %04d(L%04d)%s\n",
             zend_get_opcode_name(op->opcode), Z_TYPE_P(map),
@@ -308,7 +313,7 @@ void propagate_taint_from_array(application_t *app, zend_execute_data *execute_d
 
   merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
 }
-*/
+
 /*
 void propagate_taint_into_array(application_t *app, zend_execute_data *execute_data,
                                 zend_op_array *stack_frame, const zend_op *op, uint flags)
@@ -607,12 +612,12 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       mapping_flags |= MAPPING_BY_REF;
     case ZEND_FETCH_DIM_R:
     case ZEND_FETCH_DIM_IS:
-      //propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
+      propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_FETCH_DIM_FUNC_ARG:
       if (ARG_SHOULD_BE_SENT_BY_REF(execute_data->call->func, op->extended_value & ZEND_FETCH_ARG_MASK))
         mapping_flags |= MAPPING_BY_REF;
-      //propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
+      propagate_taint_from_array(app, execute_data, stack_frame, op, mapping_flags);
       break;
     case ZEND_ASSIGN_DIM:
       // if (!skip_arrays) /* fail here */
