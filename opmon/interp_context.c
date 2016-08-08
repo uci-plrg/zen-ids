@@ -166,6 +166,13 @@ static uint evo_start_count;
 
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
+#define DEBUG_PERMALINK 1
+
+#ifdef DEBUG_PERMALINK
+static bool is_post_permalink = false;
+static bool is_homepage_request;
+#endif
+
 typedef enum _routine_edge_status_t {
   ROUTINE_EDGE_VERIFIED       = 1,
   ROUTINE_EDGE_NEW_IN_REQUEST = 2
@@ -574,8 +581,12 @@ uint64 interp_request_boundary(bool is_request_start)
     bool local_request_id = (!HAS_REQUEST_ID_SYNCH() || IS_CFI_TRAINING());
     current_app = locate_application(((php_server_context_t *) SG(server_context))->r->filename);
 
-    if (strcmp("/lab/www/html/index.php", ((php_server_context_t *) SG(server_context))->r->filename) == 0)
-      SPOT("wait\n");
+#ifdef DEBUG_PERMALINK
+    if (strcmp("GET / HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
+      is_homepage_request = true;
+    else
+      is_homepage_request = false;
+#endif
 
     if (current_app->routine_edge_targets.capacity == 0) {
       scarray_init_ex(&current_app->routine_edge_targets, 1000);
@@ -817,7 +828,7 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
 
         plog(current_app, PLOG_TYPE_CFG_DETAIL, "call chain allows %04d(L%04d) %s -> %s\n",
              from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
-         plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
+        plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
       }
     }
   }
@@ -1594,12 +1605,16 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
   PRINT("    op_context at op %d in %s\n", op_context.cur.index,
          op_context.cfm == NULL ? "<missing>" : op_context.cfm->routine_name);
 
-  if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
-      op_context.cfm->cfg->routine_hash == 0x12fc6372 && op_context.cur.index == 8)
-    SPOT("wait\n");
-  if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
-      op_context.cfm->cfg->routine_hash == 0x2ed50d60 && op_context.cur.index == 42)
-    SPOT("wait\n"); // in get_option() where it reads from `alloptions`
+#ifdef DEBUG_PERMALINK
+  if (is_post_permalink && is_homepage_request && op_context.cfm != NULL && op_context.cfm->cfg != NULL) {
+    if (op_context.cfm->cfg->routine_hash == 0x12fc6372 && op_context.cur.index == 8)
+      SPOT("wait\n"); // in WP_Rewrite::init() where it calls `get_option('permalink_structure')`
+    if (op_context.cfm->cfg->routine_hash == 0x2ed50d60 && op_context.cur.index == 42)
+      SPOT("wait\n"); // in get_option() where it reads from `alloptions`
+    if (op_context.cfm->cfg->routine_hash == 0x60abbe22 && op_context.cur.index == 79)
+      SPOT("wait\n"); // in register_taxonomy() where it branches on non-empty permastruct
+  }
+#endif
 
   switch (op->opcode) {
     case ZEND_DO_FCALL:
@@ -2594,40 +2609,39 @@ static void evo_db_state_synch()
       evo_last_synch_request_id = (current_request_id - EVO_TAINT_EXPIRATION);
   }
 
-  if (last_evo_start == 0 || last_evo_start < evo_last_synch_request_id) {
-    //plog(current_app, PLOG_TYPE_AD_HOC, "No evo at request id %lld (last evo start at %lld, "
-    //     "last synch from %lld)\n", current_request_id, last_evo_start, evo_last_synch_request_id);
-    return;
-  }
+  if (last_evo_start > 0 && last_evo_start >= evo_last_synch_request_id) {
+    //plog(current_app, PLOG_TYPE_AD_HOC, "Evo DB state synch at request id %lld from last synch point %lld\n",
+    //     current_request_id, evo_last_synch_request_id);
 
-  //plog(current_app, PLOG_TYPE_AD_HOC, "Evo DB state synch at request id %lld from last synch point %lld\n",
-  //     current_request_id, evo_last_synch_request_id);
-
-  status = mysql_stmt_execute(evo_state_query_stmt); /* evo_last_synch_request_id */
-  if (status == 0) {
-    status = mysql_stmt_bind_result(evo_state_query_stmt, bind_evo_state_result);
+    status = mysql_stmt_execute(evo_state_query_stmt); /* evo_last_synch_request_id */
     if (status == 0) {
-      while (true) {
-        status = mysql_stmt_fetch(evo_state_query_stmt);
-        if (status == 0) {
-          if (evo_state_request_id > evo_last_synch_request_id) {
-            evo_last_synch_request_id = evo_state_request_id + 1;
-            evo_last_unchecked_request_id = evo_last_synch_request_id;
-          }
+      status = mysql_stmt_bind_result(evo_state_query_stmt, bind_evo_state_result);
+      if (status == 0) {
+        while (true) {
+          status = mysql_stmt_fetch(evo_state_query_stmt);
+          if (status == 0) {
+            if (evo_state_request_id > evo_last_synch_request_id) {
+              evo_last_synch_request_id = evo_state_request_id + 1;
+              evo_last_unchecked_request_id = evo_last_synch_request_id;
+            }
 
-          evo_update_taint_id.table_key = evo_state_table_key;
-          admin_site_modification(evo_state_request_id, &evo_update_taint_id);
-        } else {
-          if (status == 1)
-            ERROR("Failed to fetch results from the evo synch statement: %d\n", status);
-          break;
+            evo_update_taint_id.table_key = evo_state_table_key;
+            admin_site_modification(evo_state_request_id, &evo_update_taint_id);
+          } else {
+            if (status == 1)
+              ERROR("Failed to fetch results from the evo synch statement: %d\n", status);
+            break;
+          }
         }
+      } else {
+        ERROR("Failed to bind results from the evo synch statement: %d\n", status);
       }
     } else {
-      ERROR("Failed to bind results from the evo synch statement: %d\n", status);
+      ERROR("Failed to execute the evo synch statement: %d\n", status);
     }
   } else {
-    ERROR("Failed to execute the evo synch statement: %d\n", status);
+    //plog(current_app, PLOG_TYPE_AD_HOC, "No evo at request id %lld (last evo start at %lld, "
+    //     "last synch from %lld)\n", current_request_id, last_evo_start, evo_last_synch_request_id);
   }
 
   request_has_taint = (evo_taint_queue.head != NULL);
@@ -2817,11 +2831,13 @@ void db_fetch_trigger(uint32_t field_count, const char **table_names, const char
     if (evo_key == NULL || field_count < (evo_key->column_count + 1))
       return; /* not a taintable table, or no key, or only key */
 
+#ifdef DEBUG_PERMALINK
     for (i = 0; i < field_count; i++) {
       if (strcmp(table_names[0], "wp_options") == 0 && strcmp(column_names[i], "option_value") == 0 &&
           strcmp(Z_STRVAL_P(values[i]), "/%postname%/") == 0)
-      SPOT("wait\n");
+        is_post_permalink = true;
     }
+#endif
 
     for (j = 0; j < evo_key->column_count; j++) {
       for (i = 0; i < field_count; i++) {
