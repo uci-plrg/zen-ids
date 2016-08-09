@@ -515,6 +515,47 @@ void propagate_taint_into_object(application_t *app, zend_execute_data *execute_
 }
 */
 
+static inline void plog_taint_propagation(application_t *app, zend_execute_data *execute_data,
+                                          zend_op_array *stack_frame, const zend_op *op)
+{
+#ifdef PLOG_TAINT
+  taint_variable_t *taint_var;
+  const zval *operand = get_zval(execute_data, &op->op1, op->op1_type);
+  if (operand != NULL) {
+    taint_var = taint_var_get(operand);
+    if (taint_var != NULL) {
+      plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+           get_operand_index_name(op, TAINT_OPERAND_1), OP_INDEX(stack_frame, op),
+           op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+      plog_taint(app, taint_var);
+      plog_append(app, PLOG_TYPE_TAINT, "\n");
+    }
+  }
+  operand = get_zval(execute_data, &op->op2, op->op2_type);
+  if (operand != NULL) {
+    taint_var = taint_var_get(operand);
+    if (taint_var != NULL) {
+      plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+           get_operand_index_name(op, TAINT_OPERAND_2), OP_INDEX(stack_frame, op),
+           op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+      plog_taint(app, taint_var);
+      plog_append(app, PLOG_TYPE_TAINT, "\n");
+    }
+  }
+  operand = get_zval(execute_data, &op->result, op->result_type);
+  if (operand != NULL) {
+    taint_var = taint_var_get(operand);
+    if (taint_var != NULL) {
+      plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
+           get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
+           op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
+      plog_taint(app, taint_var);
+      plog_append(app, PLOG_TYPE_TAINT, "\n");
+    }
+  }
+#endif
+}
+
 void propagate_taint(application_t *app, zend_execute_data *execute_data,
                      zend_op_array *stack_frame, const zend_op *op)
 {
@@ -543,14 +584,14 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_FAST_CONCAT:
     case ZEND_BOOL_XOR:
     case ZEND_INSTANCEOF:
+    case ZEND_CASE:
+    case ZEND_ROPE_END:
     case ZEND_IS_IDENTICAL:
     case ZEND_IS_NOT_IDENTICAL:
     case ZEND_IS_EQUAL:
     case ZEND_IS_NOT_EQUAL:
     case ZEND_IS_SMALLER:
     case ZEND_IS_SMALLER_OR_EQUAL:
-    case ZEND_CASE:
-    case ZEND_ROPE_END:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       break;
@@ -606,6 +647,21 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
       // clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_RESULT);
       break;
+    case ZEND_ISSET_ISEMPTY_VAR:
+      clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
+      break;
+    case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+    case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+      /* both merge because the value itself is propagated to the result internally */
+      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_KEY, TAINT_OPERAND_RESULT);
+      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
+      break;
+    //case ZEND_ISSET_ISEMPTY_STATIC_PROP: // flow handled by stack
+    //  break;
+    case ZEND_ISSET_ISEMPTY_THIS:
+      propagate_zval_taint(app, execute_data, stack_frame, op, true, &EX(This), "this",
+                           get_operand_zval(execute_data, op, TAINT_OPERAND_RESULT), "R");
+      break;
     /****************** arrays and objects *****************/
     case ZEND_FETCH_DIM_W:
     case ZEND_FETCH_DIM_RW:
@@ -648,15 +704,6 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_UNSET_OBJ:
       // TODO: remove taint
       break;
-    case ZEND_ISSET_ISEMPTY_VAR:
-      clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_1, TAINT_OPERAND_RESULT);
-      break;
-    case ZEND_ISSET_ISEMPTY_DIM_OBJ:
-    case ZEND_ISSET_ISEMPTY_PROP_OBJ:
-      /* both merge because the value itself is propagated to the result internally */
-      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_KEY, TAINT_OPERAND_RESULT);
-      merge_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_MAP, TAINT_OPERAND_RESULT);
-      break;
     /****************** calls *****************/
     case ZEND_DO_FCALL:
       // pop args
@@ -686,44 +733,7 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     } break;
   }
 
-#ifdef PLOG_TAINT
-  {
-    taint_variable_t *taint_var;
-    const zval *operand = get_zval(execute_data, &op->op1, op->op1_type);
-    if (operand != NULL) {
-      taint_var = taint_var_get(operand);
-      if (taint_var != NULL) {
-        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
-             get_operand_index_name(op, TAINT_OPERAND_1), OP_INDEX(stack_frame, op),
-             op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
-        plog_taint(app, taint_var);
-        plog_append(app, PLOG_TYPE_TAINT, "\n");
-      }
-    }
-    operand = get_zval(execute_data, &op->op2, op->op2_type);
-    if (operand != NULL) {
-      taint_var = taint_var_get(operand);
-      if (taint_var != NULL) {
-        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
-             get_operand_index_name(op, TAINT_OPERAND_2), OP_INDEX(stack_frame, op),
-             op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
-        plog_taint(app, taint_var);
-        plog_append(app, PLOG_TYPE_TAINT, "\n");
-      }
-    }
-    operand = get_zval(execute_data, &op->result, op->result_type);
-    if (operand != NULL) {
-      taint_var = taint_var_get(operand);
-      if (taint_var != NULL) {
-        plog(app, PLOG_TYPE_TAINT, "on %s of %04d(L%04d)%s (0x%llx) | ",
-             get_operand_index_name(op, TAINT_OPERAND_RESULT), OP_INDEX(stack_frame, op),
-             op->lineno, site_relative_path(app, stack_frame), (uint64) operand);
-        plog_taint(app, taint_var);
-        plog_append(app, PLOG_TYPE_TAINT, "\n");
-      }
-    }
-  }
-#endif
+  plog_taint_propagation(app, execute_data, stack_frame, op);
 }
 
 void taint_prepare_call(application_t *app, zend_execute_data *execute_data,

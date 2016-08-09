@@ -224,6 +224,7 @@ void set_monitor_mode(monitor_mode_t mode)
     case MONITOR_MODE_ALL:
       zend_execute_ex = execute_opcode_monitor_all;
 
+      opcode_hooks->vm_call = vm_monitor_call;
       opcode_hooks->has_taint = zval_has_taint;
       opcode_hooks->notify_database_fetch = db_fetch_trigger;
 

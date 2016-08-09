@@ -58,6 +58,7 @@ typedef struct _op_context_t {
   op_t cur;  // updated on entry to `monitor_opcode()`
   bool is_unconditional_fallthrough; // set similarly to is_call_continuation
   bool is_call_continuation;
+  bool is_prev_propagated;
   const char *last_builtin_name; // todo: really need a stack of these, or associate to frame
   implicit_taint_t *implicit_taint;
 #ifdef TRANSACTIONAL_SUBPROCESS
@@ -581,13 +582,6 @@ uint64 interp_request_boundary(bool is_request_start)
     bool local_request_id = (!HAS_REQUEST_ID_SYNCH() || IS_CFI_TRAINING());
     current_app = locate_application(((php_server_context_t *) SG(server_context))->r->filename);
 
-#ifdef DEBUG_PERMALINK
-    if (strcmp("GET / HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
-      is_homepage_request = true;
-    else
-      is_homepage_request = false;
-#endif
-
     if (current_app->routine_edge_targets.capacity == 0) {
       scarray_init_ex(&current_app->routine_edge_targets, 1000);
       load_entry_points((control_flow_metadata_t *) current_app->base_frame);
@@ -643,6 +637,14 @@ uint64 interp_request_boundary(bool is_request_start)
     reset_dataflow_stack();
 
     update_user_session();
+
+#ifdef DEBUG_PERMALINK
+    if (current_session.user_level < 2 &&
+        strcmp("GET / HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
+      is_homepage_request = true;
+    else
+      is_homepage_request = false;
+#endif
   } else {
     if (IS_CFI_DB() && request_had_admin) //  && !request_has_taint)
       evo_db_state_notify();
@@ -762,8 +764,10 @@ static void block_request(zend_execute_data *from_execute_data, control_flow_met
     }
   }
 
+#ifdef OPMON_DEBUG
   if (from_execute_data != NULL)
     plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
+#endif
 
   if (block_now && IS_CFI_BAILOUT_ENABLED()) {
     zend_error(E_CFI_CONSTRAINT, "block request %08lld 0x%llx: %s\n",
@@ -809,7 +813,9 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
         plog(current_app, PLOG_TYPE_CFG_DETAIL,
              "call chain would be suspended at %04d(L%04d) %s -> %s\n", from_op->index,
              from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+#ifdef OPMON_DEBUG
         plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
+#endif
       }
     } else {
       if (implicit_taint_call_chain.start_frame == NULL) {
@@ -828,7 +834,9 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
 
         plog(current_app, PLOG_TYPE_CFG_DETAIL, "call chain allows %04d(L%04d) %s -> %s\n",
              from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
+#ifdef OPMON_DEBUG
         plog_stacktrace(current_app, PLOG_TYPE_CFG_DETAIL, from_execute_data);
+#endif
       }
     }
   }
@@ -1041,13 +1049,6 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
   zend_execute_data *prev_execute_data = execute_data;
   control_flow_metadata_t *from_cfm;
   op_t prev = { 0 };
-
-  if (IS_CFI_DATA()) {
-    op_context.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
-                                                                        hash_addr(execute_data));
-  } else {
-    op_context.implicit_taint /* never used outside IS_CFI_DATA() */ = NULL;
-  }
 
   if ((execute_data->func->common.fn_flags & ZEND_ACC_DTOR) != 0 &&
       execute_data->prev_execute_data->func == NULL &&
@@ -1480,6 +1481,47 @@ static void create_request_input(zend_op_array *op_array, const zend_op *op, con
   taint_var_add(current_app, value, taint_var);
 }
 
+static void init_implicit_taint(zend_execute_data *execute_data, const zend_op *jump_op)
+{
+  const zend_op *jump_target = NULL;
+  const zval *jump_predicate = NULL;
+
+  if (op_context.implicit_taint != NULL)
+    return;
+
+  while (true) {
+    switch (jump_op->opcode) {
+      case ZEND_JMPZ:
+      case ZEND_JMPZNZ:
+        if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) { // alpha check
+          jump_target = OP_JMP_ADDR(jump_op, jump_op->op2);
+          if (jump_predicate == NULL)
+            jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
+        }
+        break;
+      case ZEND_JMPZ_EX:
+      case ZEND_JMPNZ_EX:
+        if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) {
+          jump_op = OP_JMP_ADDR(jump_op, jump_op->op2);
+          if (jump_predicate == NULL)
+            jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
+          continue;
+        } /* else ignore back edges */
+        break;
+    }
+    break;
+  }
+
+  if (jump_target != NULL) {
+    taint_variable_t *taint = taint_var_get(jump_predicate);
+    if (taint != NULL) {
+      pending_implicit_taint.end_op = jump_target;
+      pending_implicit_taint.taint = taint;
+      pending_implicit_taint.last_applied_op_index = -1;
+    }
+  }
+}
+
 static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, int stack_motion)
 {
   zend_op_array *op_array;
@@ -1496,6 +1538,35 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
   op_context.execute_data = execute_data;
   op_context.cur.op = op;
   op_context.cur.index = (op - op_array->opcodes);
+
+  /* check if ZEND_VM_SMART_BRANCH skipped a branch after the previous op */
+  if (op_context.prev.op != NULL) {
+    switch (op_context.prev.op->opcode) {
+      case ZEND_CASE:
+      case ZEND_INSTANCEOF:
+      case ZEND_TYPE_CHECK:
+      case ZEND_DEFINED:
+      case ZEND_CHECK_VAR:
+      case ZEND_IS_IDENTICAL:
+      case ZEND_IS_NOT_IDENTICAL:
+      case ZEND_IS_EQUAL:
+      case ZEND_IS_NOT_EQUAL:
+      case ZEND_IS_SMALLER:
+      case ZEND_IS_SMALLER_OR_EQUAL:
+      case ZEND_ISSET_ISEMPTY_VAR:
+      case ZEND_ISSET_ISEMPTY_STATIC_PROP:
+      case ZEND_ISSET_ISEMPTY_DIM_OBJ:
+      case ZEND_ISSET_ISEMPTY_PROP_OBJ:
+      case ZEND_ISSET_ISEMPTY_THIS: {
+        const zend_op *skipped_branch = op_context.prev.op + 1;
+        propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
+        propagate_taint(current_app, execute_data, op_array, skipped_branch);
+        init_implicit_taint(execute_data, skipped_branch);
+        op_context.is_unconditional_fallthrough = false;
+        op_context.is_prev_propagated = true;
+      }
+    }
+  }
 
   if (GET_OP_ARRAY_ROUTINE_HASH(op_array) == 0) {
     ERROR("No CFM for %s:%s\n", op_array->filename->val,
@@ -1538,6 +1609,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
     push_exception_frame(op_array);
 
     op_context.prev.op = NULL;
+    op_context.is_prev_propagated = false;
     op_context.is_call_continuation = false;
     op_context.is_unconditional_fallthrough = false;
     return;
@@ -1554,14 +1626,20 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
 
   switch (stack_motion) {
     case STACK_MOTION_LEAVE:
+      remove_implicit_taint();
+      pending_implicit_taint.end_op = NULL;
+
       stack_step(execute_data, op_array);
       op_context.prev.op = op-1;
+      op_context.is_prev_propagated = false;
       op_context.prev.index = op_context.cur.index-1; // todo: could there be a magic call from a 2-op instruction?
       op_context.is_call_continuation = true;
       op_context.is_unconditional_fallthrough = false;
 
-      remove_implicit_taint();
-      pending_implicit_taint.end_op = NULL;
+      if (IS_CFI_DATA()) {
+        op_context.implicit_taint = (implicit_taint_t *) sctable_lookup(&implicit_taint_table,
+                                                                        hash_addr(execute_data));
+      }
 
       if (IS_CFI_EVO()) {
         if ((op-1)->opcode == ZEND_DO_FCALL && op_context.last_builtin_name != NULL)
@@ -1586,14 +1664,15 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
         SPOT("Skipping call to non-existent routine %s:%s\n",
              op_array->filename->val, op_array->function_name->val);
       } else {
-        edge_executing(execute_data, op_array); // hot!
+        edge_executing(execute_data, op_array);
       }
 
       op_context.prev.op = NULL;
+      op_context.is_prev_propagated = false;
       op_context.is_call_continuation = false;
       op_context.is_unconditional_fallthrough = true;
 
-      remove_implicit_taint();
+      op_context.implicit_taint = NULL; // reset for new frame
       pending_implicit_taint.end_op = NULL;
       break;
     }
@@ -1606,13 +1685,22 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
          op_context.cfm == NULL ? "<missing>" : op_context.cfm->routine_name);
 
 #ifdef DEBUG_PERMALINK
+  if (is_post_permalink && is_homepage_request && op_context.cfm != NULL &&
+      op_context.cfm->cfg != NULL && op_context.cfm->cfg->routine_hash == 0x60abbe22)
+  {
+    plog(current_app, PLOG_TYPE_AD_HOC, "register_taxonomy at %04d(L%04d)%s\n",
+         OP_INDEX(op_array, op), op->lineno, site_relative_path(current_app, op_array));
+  }
+
   if (is_post_permalink && is_homepage_request && op_context.cfm != NULL && op_context.cfm->cfg != NULL) {
     if (op_context.cfm->cfg->routine_hash == 0x12fc6372 && op_context.cur.index == 8)
       SPOT("wait\n"); // in WP_Rewrite::init() where it calls `get_option('permalink_structure')`
     if (op_context.cfm->cfg->routine_hash == 0x2ed50d60 && op_context.cur.index == 42)
       SPOT("wait\n"); // in get_option() where it reads from `alloptions`
-    if (op_context.cfm->cfg->routine_hash == 0x60abbe22 && op_context.cur.index == 79)
+    if (op_context.cfm->cfg->routine_hash == 0x60abbe22 && (op_context.cur.index == 78 || op_context.cur.index == 88))
       SPOT("wait\n"); // in register_taxonomy() where it branches on non-empty permastruct
+    if (op_context.cfm->cfg->routine_hash == 0x356d7234 && op_context.cur.index == 0)
+      SPOT("wait\n"); // top of using_permalinks()
   }
 #endif
 
@@ -1688,8 +1776,6 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
 static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op_array *op_array,
                                           const zend_op *op, int stack_motion)
 {
-  const zend_op *jump_target = NULL;
-  const zval *jump_predicate = NULL;
   bool is_loopback, opcode_verified = false, opcode_edge_needs_update = false;
   taint_variable_t *taint_lowers_op_user_level = NULL;
   uint op_user_level = USER_LEVEL_TOP;
@@ -1719,7 +1805,8 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
       PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, op_context.prev.op), op_context.prev.op->lineno,
             site_relative_path(current_app, op_array), op_context.cfm->routine_name);
 
-      propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
+      if (!op_context.is_prev_propagated)
+        propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
     }
   }
 
@@ -1870,41 +1957,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
       }
     }
 
-    if (op_context.implicit_taint == NULL) {
-      const zend_op *jump_op = op;
-
-      while (true) {
-        switch (jump_op->opcode) {
-          case ZEND_JMPZ:
-          case ZEND_JMPZNZ:
-            if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) { // alpha check
-              jump_target = OP_JMP_ADDR(jump_op, jump_op->op2);
-              if (jump_predicate == NULL)
-                jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
-            }
-            break;
-          case ZEND_JMPZ_EX:
-          case ZEND_JMPNZ_EX:
-            if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) {
-              jump_op = OP_JMP_ADDR(jump_op, jump_op->op2);
-              if (jump_predicate == NULL)
-                jump_predicate = get_zval(execute_data, &jump_op->op1, jump_op->op1_type);
-              continue;
-            } /* else ignore back edges */
-            break;
-        }
-        break;
-      }
-
-      if (jump_target != NULL) {
-        taint_variable_t *taint = taint_var_get(jump_predicate);
-        if (taint != NULL) {
-          pending_implicit_taint.end_op = jump_target;
-          pending_implicit_taint.taint = taint;
-          pending_implicit_taint.last_applied_op_index = -1;
-        }
-      }
-    }
+    init_implicit_taint(execute_data, op);
 
 #ifdef PLOG_CFG
     if (!opcode_verified && current_session.user_level < 2) {
@@ -2006,6 +2059,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   op_context.prev.index = op_context.cur.index;
   op_context.is_call_continuation = false;
   op_context.is_unconditional_fallthrough = is_unconditional_fallthrough(op_context.cur.op);
+  op_context.is_prev_propagated = false;
 }
 
 #define ZEND_VM_FP_GLOBAL_REG "%r14"
@@ -2025,6 +2079,25 @@ static bool is_prev_frame(zend_execute_data *walk, zend_execute_data *potential_
   } while (walk != NULL);
 
   return false;
+}
+
+static void execute_opcode_direct_patch(zend_execute_data *caller_execute_data, const zend_op *caller_opline)
+{
+  // ZEND_VM_LOOP_INTERRUPT_CHECK(); // alpha
+
+  while (1) {
+    uint64 original_handler_addr = p2int(opline->handler) & ORIGINAL_HANDLER_BITS;
+    opcode_handler_t original_handler = (opcode_handler_t) int2p(original_handler_addr);
+
+    original_handler();
+
+    if (UNEXPECTED(!opline)) {
+      execute_data = caller_execute_data;
+      opline = caller_opline;
+      return;
+    }
+  }
+  zend_error_noreturn(E_ERROR, "Arrived at end of main loop which shouldn't happen");
 }
 
 void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
@@ -2056,6 +2129,11 @@ void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
     monitor_all_stack_motion = STACK_MOTION_NONE; // clear early--may become a call @vm_monitor_call()
 
     original_handler(); // on ZEND_VM_ENTER(): `op_context.cfm = NULL`
+
+    if (current_session.user_level >= 2) { /* last opcode elevated */
+      execute_opcode_direct_patch(caller_execute_data, caller_opline);
+      return;
+    }
 
     propagate_internal_dataflow();
 
