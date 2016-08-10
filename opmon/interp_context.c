@@ -167,7 +167,7 @@ static uint evo_start_count;
 
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
-#define DEBUG_PERMALINK 1
+// #define DEBUG_PERMALINK 1
 
 #ifdef DEBUG_PERMALINK
 static bool is_post_permalink = false;
@@ -1440,19 +1440,24 @@ static void fcall_executing(zend_execute_data *execute_data, zend_op_array *op_a
 
 static zend_op *find_spanning_block_tail(const zend_op *cur_op, zend_op_array *op_array)
 {
-  zend_op *top = op_array->opcodes, *walk = &op_array->opcodes[op_context.prev.index - 1];
+  zend_op *top = op_array->opcodes;
 
-  while (walk > top) {
-    switch (walk->opcode) {
-      case ZEND_JMPZ:
-      case ZEND_JMPZNZ:
-      case ZEND_JMPZ_EX:
-      case ZEND_JMPNZ_EX:
-        if (OP_JMP_ADDR(walk, walk->op2) > cur_op) // alpha check
-          return OP_JMP_ADDR(walk, walk->op2);
+  if (op_context.prev.index > 0) {
+    zend_op *walk = &op_array->opcodes[op_context.prev.index - 1];
+
+    while (walk > top) {
+      switch (walk->opcode) {
+        case ZEND_JMPZ:
+        case ZEND_JMPZNZ:
+        case ZEND_JMPZ_EX:
+        case ZEND_JMPNZ_EX:
+          if (OP_JMP_ADDR(walk, walk->op2) > cur_op) // alpha check
+            return OP_JMP_ADDR(walk, walk->op2);
+      }
+      walk--;
     }
-    walk--;
   }
+
   return &op_array->opcodes[op_array->last - 1];
 }
 
@@ -1492,6 +1497,7 @@ static void init_implicit_taint(zend_execute_data *execute_data, const zend_op *
   while (true) {
     switch (jump_op->opcode) {
       case ZEND_JMPZ:
+      case ZEND_JMPNZ:
       case ZEND_JMPZNZ:
         if (OP_JMP_ADDR(jump_op, jump_op->op2) > jump_op) { // alpha check
           jump_target = OP_JMP_ADDR(jump_op, jump_op->op2);
@@ -1534,8 +1540,8 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
     execute_data = execute_data->prev_execute_data;
   }
 
+  /* N.B.: do not assign `op_context.execute_data` until after processing stack motion */
   op_array = &execute_data->func->op_array;
-  op_context.execute_data = execute_data;
   op_context.cur.op = op;
   op_context.cur.index = (op - op_array->opcodes);
 
@@ -1678,6 +1684,8 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
     }
   }
 
+  op_context.execute_data = execute_data; /* N.B.: only after processing stack motion */
+
   PRINT("Stack motion %d at op %d in "PX" %s:%s\n", stack_motion, (int)(op - op_array->opcodes),
         p2int(op_array->opcodes), op_array->filename->val,
         op_array->function_name == NULL ? "<script-body>" : op_array->function_name->val);
@@ -1701,6 +1709,12 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       SPOT("wait\n"); // in register_taxonomy() where it branches on non-empty permastruct
     if (op_context.cfm->cfg->routine_hash == 0x356d7234 && op_context.cur.index == 0)
       SPOT("wait\n"); // top of using_permalinks()
+    if (op_context.cfm->cfg->routine_hash == 0x261893c9 && op_context.cur.index > 1482)
+      SPOT("wait\n"); // redirect_canonical() where it lost an implicit taint span after some calls
+    if (op_context.cfm->cfg->routine_hash == 0x545a7ae3 && op_context.cur.index == 13)
+      SPOT("wait\n"); // get_feed_permastruct() where it didn't assign taint to a field
+    if (op_context.cfm->cfg->routine_hash == 0x74996041 && op_context.cur.index == 16)
+      SPOT("wait\n"); // _get_page_link() where it didn't activate implicit taint
   }
 #endif
 
@@ -1895,7 +1909,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
         implicit_taint_t *implicit = REQUEST_NEW(implicit_taint_t);
 
         *implicit = pending_implicit_taint;
-        if (op == pending_implicit_taint.end_op)
+        if (op == pending_implicit_taint.end_op) /* pending branch was taken, so extend to dominator */
           implicit->end_op = find_spanning_block_tail(op, op_array);
         implicit->id = implicit_taint_id++;
         sctable_add(&implicit_taint_table, hash_addr(execute_data), implicit);
