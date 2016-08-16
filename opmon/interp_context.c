@@ -1668,7 +1668,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       stack_step(execute_data, op_array);
       if (op_context.cfm == NULL) {
         SPOT("Skipping call to non-existent routine %s:%s\n",
-             op_array->filename->val, op_array->function_name->val);
+             op_array->filename->val, (op_array->function_name == NULL) ? "<script-body>" : op_array->function_name->val);
       } else {
         edge_executing(execute_data, op_array);
       }
