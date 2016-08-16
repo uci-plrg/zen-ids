@@ -83,18 +83,18 @@ Wall time: 189.99
 Wall time: 191.97
 
 
- === Opmon complete on log.21.gor: 197.414s (+/-1.36) (4.1% | 2.4% <-> 5.8%)
+ === Opmon complete on log.21.gor: 199.324s (+/-1.73) (5.14%)
 
-Wall time: 197.42
-Wall time: 195.41
-Wall time: 196.47
-Wall time: 197.21
-Wall time: 197.10
-Wall time: 196.90
-Wall time: 197.16
-Wall time: 197.54
-Wall time: 198.34
-Wall time: 200.63
+Wall time: 196.92 3.9%
+Wall time: 197.69
+Wall time: 197.84
+Wall time: 198.07
+Wall time: 201.53 6.5%
+Wall time: 199.82
+Wall time: 201.89
+Wall time: 200.49
+Wall time: 200.40
+Wall time: 198.66
 
 
 ================== GitList ===================
@@ -275,9 +275,6 @@ I'm working on a security research project at the University of California that 
 We have demonstrated the effectiveness of our tool on some small sites hosted by our lab, and now we are hoping to collaborate with a company to try our tool on larger sites with more traffic. The latest draft of our publication will give you more details about what our tool can do to protect PHP websites: https://drive.google.com/open?id=0BzBFig3Q8-o6SmNfS3VQdzI5aXM. Our goal is to run some more experiments like those described in section 6 of the paper, but using more complex websites that have more frequent and diverse traffic. Please let me know if you are interested in working with us on this project. Thanks!
 
 Byron
-
-
-
 
 
 

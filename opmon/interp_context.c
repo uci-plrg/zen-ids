@@ -58,7 +58,7 @@ typedef struct _op_context_t {
   op_t cur;  // updated on entry to `monitor_opcode()`
   bool is_unconditional_fallthrough; // set similarly to is_call_continuation
   bool is_call_continuation;
-  bool is_prev_propagated;
+  bool is_smart_branch;
   const char *last_builtin_name; // todo: really need a stack of these, or associate to frame
   implicit_taint_t *implicit_taint;
 #ifdef TRANSACTIONAL_SUBPROCESS
@@ -1448,6 +1448,7 @@ static zend_op *find_spanning_block_tail(const zend_op *cur_op, zend_op_array *o
     while (walk > top) {
       switch (walk->opcode) {
         case ZEND_JMPZ:
+        case ZEND_JMPNZ:
         case ZEND_JMPZNZ:
         case ZEND_JMPZ_EX:
         case ZEND_JMPNZ_EX:
@@ -1564,12 +1565,19 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       case ZEND_ISSET_ISEMPTY_DIM_OBJ:
       case ZEND_ISSET_ISEMPTY_PROP_OBJ:
       case ZEND_ISSET_ISEMPTY_THIS: {
-        const zend_op *skipped_branch = op_context.prev.op + 1;
-        propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
-        propagate_taint(current_app, execute_data, op_array, skipped_branch);
-        init_implicit_taint(execute_data, skipped_branch);
-        op_context.is_unconditional_fallthrough = false;
-        op_context.is_prev_propagated = true;
+        const zend_op *successor = op_context.prev.op + 1;
+        switch (successor->opcode) {
+          case ZEND_JMPNZ:
+          case ZEND_JMPZNZ:
+          case ZEND_JMPZ_EX:
+          case ZEND_JMPNZ_EX: {
+            propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
+            propagate_taint(current_app, execute_data, op_array, successor);
+            init_implicit_taint(execute_data, successor);
+            op_context.is_unconditional_fallthrough = false;
+            op_context.is_smart_branch = true;
+          }
+        }
       }
     }
   }
@@ -1615,7 +1623,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
     push_exception_frame(op_array);
 
     op_context.prev.op = NULL;
-    op_context.is_prev_propagated = false;
+    op_context.is_smart_branch = false;
     op_context.is_call_continuation = false;
     op_context.is_unconditional_fallthrough = false;
     return;
@@ -1637,7 +1645,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
 
       stack_step(execute_data, op_array);
       op_context.prev.op = op-1;
-      op_context.is_prev_propagated = false;
+      op_context.is_smart_branch = false;
       op_context.prev.index = op_context.cur.index-1; // todo: could there be a magic call from a 2-op instruction?
       op_context.is_call_continuation = true;
       op_context.is_unconditional_fallthrough = false;
@@ -1674,7 +1682,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       }
 
       op_context.prev.op = NULL;
-      op_context.is_prev_propagated = false;
+      op_context.is_smart_branch = false;
       op_context.is_call_continuation = false;
       op_context.is_unconditional_fallthrough = true;
 
@@ -1790,6 +1798,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
 static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op_array *op_array,
                                           const zend_op *op, int stack_motion)
 {
+  uint from_index = op_context.prev.index + (op_context.is_smart_branch ? 1 : 0);
   bool is_loopback, opcode_verified = false, opcode_edge_needs_update = false;
   taint_variable_t *taint_lowers_op_user_level = NULL;
   uint op_user_level = USER_LEVEL_TOP;
@@ -1819,7 +1828,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
       PRINT("T %04d(L%04d)%s:%s\n\t", OP_INDEX(op_array, op_context.prev.op), op_context.prev.op->lineno,
             site_relative_path(current_app, op_array), op_context.cfm->routine_name);
 
-      if (!op_context.is_prev_propagated)
+      if (!op_context.is_smart_branch)
         propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
     }
   }
@@ -1883,21 +1892,20 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
     if (op_context.is_call_continuation || is_loopback/*safe w/o goto*/ ||
         op_context.is_unconditional_fallthrough || current_session.user_level >= op_user_level) {
       if (op_context.is_unconditional_fallthrough) {
-        PRINT("@ Verified fall-through %u -> %u in 0x%x\n",
-              op_context.prev.index, op_context.cur.index,
+        PRINT("@ Verified fall-through %u -> %u in 0x%x\n", from_index, op_context.cur.index,
               op_context.cfm->cfg->routine_hash);
       } else {
         PRINT("@ Verified node %u in 0x%x\n", op_context.cur.index, op_context.cfm->cfg->routine_hash);
       }
       opcode_verified = true;
     } else {
-      opcode_edge = routine_cfg_lookup_opcode_edge(op_context.cfm->cfg, op_context.prev.index,
+      opcode_edge = routine_cfg_lookup_opcode_edge(op_context.cfm->cfg, from_index,
                                                    op_context.cur.index);
 
       opcode_edge_needs_update = ((opcode_edge == NULL) ||
                                   (current_session.user_level < opcode_edge->user_level));
       if (!opcode_edge_needs_update) {
-        PRINT("@ Verified opcode edge %u -> %u\n", op_context.prev.index, op_context.cur.index);
+        PRINT("@ Verified opcode edge %u -> %u\n", from_index, op_context.cur.index);
         /* not marking `opcode_verified` because taint is required on every pass */
       }
     }
@@ -2012,12 +2020,13 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   if (IS_CFI_TRAINING()) {
     if (opcode_edge_needs_update) {
       if (opcode_edge == NULL) {
-        routine_cfg_add_opcode_edge(op_context.cfm->cfg, op_context.prev.index, op_context.cur.index,
+        routine_cfg_add_opcode_edge(op_context.cfm->cfg, from_index, op_context.cur.index,
                                     current_session.user_level);
       } else {
         opcode_edge->user_level = current_session.user_level;
       }
-      write_op_edge(current_app, op_context.cfm->cfg->routine_hash, op_context.prev.index,
+
+      write_op_edge(current_app, op_context.cfm->cfg->routine_hash, from_index,
                     op_context.cur.index, current_session.user_level);
     }
   } else {
@@ -2027,7 +2036,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
       patch->taint_source = GET_TAINT_VAR_EVO_SOURCE(taint_lowers_op_user_level);
       patch->app = current_app;
       patch->routine = op_context.cfm->cfg;
-      patch->from_index = op_context.prev.index;
+      patch->from_index = from_index;
       patch->to_index = op_context.cur.index;
       patch->user_level = current_session.user_level;
       patch->next_pending = NULL;
@@ -2037,7 +2046,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
       {
         compiled_edge_target_t compiled_target;
         // todo: also allow conditional branches to have op edges
-        compiled_target = get_compiled_edge_target(op_context.prev.op, op_context.prev.index);
+        compiled_target = get_compiled_edge_target(op_context.prev.op, from_index);
         if (compiled_target.type != COMPILED_EDGE_DIRECT &&
             compiled_target.type != COMPILED_EDGE_INDIRECT) {
           ERROR("Generating opcode edge from compiled target type %d (opcode 0x%x)\n",
@@ -2073,7 +2082,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   op_context.prev.index = op_context.cur.index;
   op_context.is_call_continuation = false;
   op_context.is_unconditional_fallthrough = is_unconditional_fallthrough(op_context.cur.op);
-  op_context.is_prev_propagated = false;
+  op_context.is_smart_branch = false;
 }
 
 #define ZEND_VM_FP_GLOBAL_REG "%r14"
@@ -2144,7 +2153,7 @@ void execute_opcode_monitor_all(zend_execute_data *cur_execute_data)
 
     original_handler(); // on ZEND_VM_ENTER(): `op_context.cfm = NULL`
 
-    if (current_session.user_level >= 2) { /* last opcode elevated */
+    if (current_session.user_level >= 2 && !IS_CFI_TRAINING()) { /* last opcode elevated */
       execute_opcode_direct_patch(caller_execute_data, caller_opline);
       return;
     }
@@ -2737,8 +2746,12 @@ static void evo_db_state_synch()
   }
 
   request_has_taint = (evo_taint_queue.head != NULL);
-  set_monitor_mode(request_has_taint ? MONITOR_MODE_ALL : MONITOR_MODE_CALLS);
-  update_request_id();
+  if (request_has_taint) {
+    set_monitor_mode(MONITOR_MODE_ALL);
+    update_request_id();
+  } else {
+    set_monitor_mode(MONITOR_MODE_CALLS);
+  }
 }
 
 static void notify_evo_start()
