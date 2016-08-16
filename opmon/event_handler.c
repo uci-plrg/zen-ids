@@ -35,6 +35,9 @@ static zend_opcode_monitor_t *opcode_hooks = NULL;
 #define DATAFLOW_STACK_ENTRY_COUNT 0x2000
 #define DATAFLOW_STACK_SIZE (sizeof(zend_dataflow_t) * DATAFLOW_STACK_ENTRY_COUNT)
 
+// #define DEBUG_NOP 1
+// #define DEBUG_PHASES 1
+
 static void init_top_level_script(const char *script_path)
 {
   starting_script(script_path);
@@ -166,25 +169,23 @@ void init_event_handler()
   /* always nop to begin--enabled (if ever) below in set_monitor_mode() */
   set_monitor_mode(MONITOR_MODE_NONE);
 
-    // switch here
-  if (false) { // overrides for performance testing
-    opcode_hooks->notify_http_request = nop_request_boundary;
-    opcode_hooks->notify_function_created = nop_notify_function_created;
-    opcode_hooks->vm_call = vm_call_plain;
-  } else if (false) { // overrides for performance testing
-    opcode_hooks->notify_http_request = request_boundary;
-    opcode_hooks->notify_function_created = function_created;
-    opcode_hooks->vm_call = vm_call_plain;
+#if defined(DEBUG_NOP)
+  opcode_hooks->notify_http_request = nop_request_boundary;
+  opcode_hooks->notify_function_created = nop_notify_function_created;
+  opcode_hooks->vm_call = vm_call_plain;
+#elif defined(DEBUG_PHASES)
+  opcode_hooks->notify_http_request = request_boundary;
+  opcode_hooks->notify_function_created = function_created;
+  opcode_hooks->vm_call = vm_call_plain;
 
-    opcode_hooks->has_taint = nop_has_taint;
-    // opcode_hooks->notify_zval_free = nop_notify_zval_free;
-    opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
-    opcode_hooks->notify_database_query = nop_notify_database_query;
-  } else { // normal mode
-    opcode_hooks->notify_http_request = request_boundary;
-    opcode_hooks->notify_function_created = function_created;
-    opcode_hooks->vm_call = vm_monitor_call_quick;
-  }
+  opcode_hooks->has_taint = nop_has_taint;
+  opcode_hooks->notify_database_fetch = nop_notify_database_fetch;
+  opcode_hooks->notify_database_query = nop_notify_database_query;
+#else
+  opcode_hooks->notify_http_request = request_boundary;
+  opcode_hooks->notify_function_created = function_created;
+  opcode_hooks->vm_call = vm_monitor_call_quick;
+#endif
 
   if (IS_CFI_TRAINING()) {
     zend_execute_ex = execute_opcode_monitor_all;
@@ -200,6 +201,12 @@ void init_event_handler()
 
 void set_monitor_mode(monitor_mode_t mode)
 {
+#if defined(DEBUG_NOP)
+  mode = MONITOR_MODE_NONE;
+#elif defined(DEBUG_PHASES)
+  mode = MONITOR_MODE_NONE;
+#endif
+
   switch (mode) {
     case MONITOR_MODE_NONE:
       zend_execute_ex = execute_opcode_direct;
