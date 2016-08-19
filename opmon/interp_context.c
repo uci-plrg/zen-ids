@@ -3114,12 +3114,14 @@ static void propagate_internal_dataflow()
           op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
           has_taint = true;
         } else {
+#ifdef DEBUG_PERMALINK
           if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
               op_context.cfm->cfg->routine_hash == 0x63be5693 &&
               Z_TYPE_P(dataflow_frame->src) == IS_STRING &&
               (strncmp(Z_STRVAL_P(dataflow_frame->src), "a:69:{s:47:", 11) == 0 ||
                strcmp(Z_STRVAL_P(dataflow_frame->src), "/%postname%/") == 0))
             SPOT("wait\n"); // in get_option() where writes to `alloptions`
+#endif
 
           has_taint = propagate_zval_taint(current_app, op_context.execute_data, stack_frame,
                                            op_context.cur.op, true, dataflow_frame->src, "internal",
