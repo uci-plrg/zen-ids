@@ -7,7 +7,7 @@
 #include "taint.h"
 
 //#define PLOG_TAINT 1
-//#define PLOG_CFG 1
+#define PLOG_CFG 1
 #define PLOG_CFG_BLOCK 1
 //#define PLOG_CFG_DETAIL 1
 //#define PLOG_DB 1
@@ -39,7 +39,7 @@ typedef struct _cfg_files_t {
 typedef enum _plog_type_t {
   PLOG_TYPE_TAINT,
   PLOG_TYPE_CFG,
-  PLOG_TYPE_CFG_BLOCK,
+  PLOG_TYPE_CFG_ALERT,
   PLOG_TYPE_CFG_DETAIL,
   PLOG_TYPE_DB,
   PLOG_TYPE_DB_MOD,

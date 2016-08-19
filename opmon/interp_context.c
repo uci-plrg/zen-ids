@@ -717,6 +717,7 @@ void set_opmon_user_level(long user_level)
   update_process_auth_state();
 }
 
+#if 0
 static void push_exception_frame(zend_op_array *op_array)
 {
   INCREMENT_STACK(exception_stack, exception_frame);
@@ -727,6 +728,7 @@ static void push_exception_frame(zend_op_array *op_array)
   exception_frame->op.index = (exception_frame->op.op - op_array->opcodes);
   exception_frame->cfm = op_context.cfm;
 }
+#endif
 
 static void block_request(zend_execute_data *from_execute_data, control_flow_metadata_t *from_cfm,
                           op_t *from_op, control_flow_metadata_t *to_cfm, uint to_index)
@@ -738,7 +740,7 @@ static void block_request(zend_execute_data *from_execute_data, control_flow_met
     request_blocked = true;
     address = get_current_request_address();
 
-    plog(current_app, PLOG_TYPE_CFG_BLOCK, "block request %08lld 0x%llx: %s\n",
+    plog(current_app, PLOG_TYPE_CFG_ALERT, "alert on request %08lld 0x%llx: %s\n",
          current_request_id, get_current_request_start_time(), address);
   }
 
@@ -1050,11 +1052,12 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
   control_flow_metadata_t *from_cfm;
   op_t prev = { 0 };
 
-  if ((execute_data->func->common.fn_flags & ZEND_ACC_DTOR) != 0 &&
-      execute_data->prev_execute_data->func == NULL &&
-      execute_data->prev_execute_data->opline == NULL) {
+  if (dataflow_hooks->is_destructor_call) {
+    if ((execute_data->func->common.fn_flags & ZEND_ACC_DTOR) == 0)
+      ERROR("Destructor call to method not flagged as a destructor: %s\n", op_context.cfm->routine_name);
     from_cfm = (control_flow_metadata_t *) current_app->system_frame;
     prev_execute_data = NULL;
+    dataflow_hooks->is_destructor_call = false;
   } else while (true) {
     prev_execute_data = prev_execute_data->prev_execute_data;
 
@@ -1081,6 +1084,11 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
       }
     }
   }
+
+  if (from_cfm != (control_flow_metadata_t *) current_app->system_frame &&
+      execute_data->func->common.function_name != NULL &&
+      strcmp(execute_data->func->common.function_name->val, "__destruct") == 0)
+    SPOT("wait\n");
 
   if (op_context.cfm->cfg != NULL) {
     if (IS_CFI_MONITOR()) {
@@ -1620,7 +1628,9 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
          cur_frame.op_index, p2int(execute_data), p2int(op_array->opcodes),
          op_context.cfm->cfg->routine_hash);
     */
+#if 0
     push_exception_frame(op_array);
+#endif
 
     op_context.prev.op = NULL;
     op_context.is_smart_branch = false;
@@ -1733,33 +1743,39 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       //  implicit_taint_call_chain.start_frame = execute_data;
       break;
     case ZEND_CATCH: {
-      WARN("Exception at op %d of 0x%x caught at op index %d in opcodes "PX"|"PX" of 0x%x\n",
-           exception_frame->op.index, exception_frame->cfm->cfg->routine_hash,
-           op_context.cur.index, p2int(op_context.execute_data), p2int(&op_array->opcodes),
-           op_context.cfm->cfg->routine_hash);
+      if (exception_frame->cfm == NULL) {
+        ERROR("Exception at op %d caught at op index %d of 0x%x has no CFM!\n",
+           exception_frame->op.index, op_context.cur.index, op_context.cfm->cfg->routine_hash);
+      } else {
+        WARN("Exception at op %d of 0x%x caught at op index %d in opcodes "PX"|"PX" of 0x%x\n",
+             exception_frame->op.index, exception_frame->cfm->cfg->routine_hash,
+             op_context.cur.index, p2int(op_context.execute_data), p2int(&op_array->opcodes),
+             op_context.cfm->cfg->routine_hash);
 
-      if (exception_frame->execute_data == op_context.execute_data) {
-        if (IS_CFI_DATA()) {
-          ERROR("Dataset evolution does not support Exception edges.\n");
-        } else if (IS_CFI_TRAINING()) {
-          if (!routine_cfg_has_opcode_edge(op_context.cfm->cfg, exception_frame->op.index,
-                                           op_context.cur.index)) {
-            generate_opcode_edge(op_context.cfm, exception_frame->op.index,
-                                 op_context.cur.index);
+        if (exception_frame->execute_data == op_context.execute_data) {
+          if (IS_CFI_DATA()) {
+            ERROR("Dataset evolution does not support Exception edges.\n");
+          } else if (IS_CFI_TRAINING()) {
+            if (!routine_cfg_has_opcode_edge(op_context.cfm->cfg, exception_frame->op.index,
+                                             op_context.cur.index)) {
+              generate_opcode_edge(op_context.cfm, exception_frame->op.index,
+                                   op_context.cur.index);
+            } else {
+              PRINT("(skipping existing exception edge)\n");
+            }
+          }
+        } else {
+          if (IS_CFI_MONITOR()) {
+            evaluate_routine_edge(exception_frame->execute_data, exception_frame->cfm,
+                                  &exception_frame->op, op_context.cfm, op_context.cur.index);
           } else {
-            PRINT("(skipping existing exception edge)\n");
+            generate_routine_edge(exception_frame->cfm, exception_frame->op.index,
+                                  op_context.cfm->cfg, op_context.cur.index);
           }
         }
-      } else {
-        if (IS_CFI_MONITOR()) {
-          evaluate_routine_edge(exception_frame->execute_data, exception_frame->cfm,
-                                &exception_frame->op, op_context.cfm, op_context.cur.index);
-        } else {
-          generate_routine_edge(exception_frame->cfm, exception_frame->op.index,
-                                op_context.cfm->cfg, op_context.cur.index);
-        }
+
+        DECREMENT_STACK(exception_stack, exception_frame);
       }
-      DECREMENT_STACK(exception_stack, exception_frame);
       // what to do with implicit taint here?
     } break;
   }
@@ -2323,17 +2339,14 @@ static inline void monitor_top_entry()
 {
   zend_execute_data *user_caller_execute_data = execute_data->prev_execute_data;
 
-  while (true) {
-    if (user_caller_execute_data == NULL) {
-      uint edge_set = SCRIPT_ENTRY_EDGES_INDEX;
+  if (dataflow_hooks->is_destructor_call) {
+    monitor_call_from_system((control_flow_metadata_t *) current_app->system_frame,
+                             SYSTEM_ROUTINE_EDGES_INDEX);
+    dataflow_hooks->is_destructor_call = false;
+    return;
+  }
 
-      if ((execute_data->func->common.fn_flags & ZEND_ACC_DTOR) == ZEND_ACC_DTOR)
-        edge_set = SYSTEM_ROUTINE_EDGES_INDEX;
-
-      monitor_call_from_system((control_flow_metadata_t *) current_app->base_frame, edge_set);
-      return;
-    }
-
+  while (user_caller_execute_data != NULL) {
     if (user_caller_execute_data->func != NULL &&
         user_caller_execute_data->func == EG(autoload_func)) { // seems like we could cache this to avoid the remote load
       monitor_call_from_system((control_flow_metadata_t *) current_app->system_frame,
@@ -2350,6 +2363,9 @@ static inline void monitor_top_entry()
 
     user_caller_execute_data = user_caller_execute_data->prev_execute_data;
   }
+
+  monitor_call_from_system((control_flow_metadata_t *) current_app->base_frame,
+                           SCRIPT_ENTRY_EDGES_INDEX);
 }
 
 void execute_opcode_monitor_calls(zend_execute_data *cur_execute_data)

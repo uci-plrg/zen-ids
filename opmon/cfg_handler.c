@@ -1036,7 +1036,7 @@ static inline bool is_plog_type_enabled(plog_type_t type)
     return true;
 #endif
 #ifdef PLOG_CFG_BLOCK
-  if (type == PLOG_TYPE_CFG_BLOCK)
+  if (type == PLOG_TYPE_CFG_ALERT)
     return true;
 #endif
 #ifdef PLOG_CFG_DETAIL
@@ -1104,7 +1104,7 @@ static inline void plog_type_tag(FILE *plog, plog_type_t type)
     case PLOG_TYPE_CFG:
       fprintf(plog, "<cfg> ");
       break;
-    case PLOG_TYPE_CFG_BLOCK:
+    case PLOG_TYPE_CFG_ALERT:
       fprintf(plog, "<cfg> ");
       break;
     case PLOG_TYPE_CFG_DETAIL:

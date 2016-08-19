@@ -11,7 +11,7 @@
 #define WARN_LEVEL 2
 #define MESSAGE_LEVEL 3
 
-// #define ENABLE_SPOT 1
+#define ENABLE_SPOT 1
 
 #ifdef ENABLE_SPOT
 # define SPOT(...) fprintf(stderr, "\t> #debug# "__VA_ARGS__)
