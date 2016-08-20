@@ -1053,8 +1053,6 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
   op_t prev = { 0 };
 
   if (dataflow_hooks->is_destructor_call) {
-    if ((execute_data->func->common.fn_flags & ZEND_ACC_DTOR) == 0)
-      ERROR("Destructor call to method not flagged as a destructor: %s\n", op_context.cfm->routine_name);
     from_cfm = (control_flow_metadata_t *) current_app->system_frame;
     prev_execute_data = NULL;
     dataflow_hooks->is_destructor_call = false;
@@ -1088,7 +1086,7 @@ static inline void edge_executing(zend_execute_data *execute_data, zend_op_array
   if (from_cfm != (control_flow_metadata_t *) current_app->system_frame &&
       execute_data->func->common.function_name != NULL &&
       strcmp(execute_data->func->common.function_name->val, "__destruct") == 0)
-    SPOT("wait\n");
+    ERROR("Call to destructor is not flagged!\n");
 
   if (op_context.cfm->cfg != NULL) {
     if (IS_CFI_MONITOR()) {
