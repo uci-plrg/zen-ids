@@ -213,15 +213,15 @@ bool dataset_verify_routine_edge(application_t *app, dataset_routine_t *routine,
   return false;
 }
 
-static dataset_target_routines_t *pack_singleton_call_target(dataset_call_target_t *target)
+static dataset_target_routines_t *pack_singleton_call_target(uint routine_hash, uint index)
 {
-  uint64 metadata = target->routine_hash;
-  uint64 user_level = MASK_USER_LEVEL(target->index);
-  uint64 index = MASK_TARGET_INDEX(target->index & TARGET_INDEX_MASK);
+  uint64 metadata = routine_hash;
+  uint64 metadata_user_level = MASK_USER_LEVEL(index);
+  uint64 metadata_index = MASK_TARGET_INDEX(index & TARGET_INDEX_MASK);
 
-  metadata |= TARGET_SINGLETON_FLAG;
-  metadata |= (index << TARGET_INDEX_SHIFT);
-  metadata |= (user_level << TARGET_USER_LEVEL_SHIFT);
+  metadata |= TARGET_TYPE_SINGLETON;
+  metadata |= (metadata_index << TARGET_INDEX_SHIFT);
+  metadata |= (metadata_user_level << TARGET_USER_LEVEL_SHIFT);
   return (dataset_target_routines_t *) (void *) metadata;
 }
 
@@ -231,7 +231,7 @@ static dataset_target_routines_t *pack_singleton_eval_target(dataset_eval_target
   uint64 user_level = MASK_USER_LEVEL(target->index);
   uint64 index = MASK_TARGET_INDEX(target->index & TARGET_INDEX_MASK);
 
-  metadata |= TARGET_SINGLETON_FLAG;
+  metadata |= TARGET_TYPE_SINGLETON;
   metadata |= (index << TARGET_INDEX_SHIFT);
   metadata |= (user_level << TARGET_USER_LEVEL_SHIFT);
   return (dataset_target_routines_t *) (void *) metadata;
@@ -249,7 +249,7 @@ dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, u
       targets = (dataset_call_targets_t *) RESOLVE_PTR(dataset, node->call_targets,
                                                        dataset_call_targets_t);
       if (targets->target_count == 1)
-        return pack_singleton_call_target(&targets->targets[0]);
+        return pack_singleton_call_target(targets->targets[0].routine_hash, targets->targets[0].index);
       else if (targets->target_count > 0)
         return (dataset_target_routines_t *) targets;
     } else if (TEST(DATASET_NODE_TYPE_EVAL, node->type_flags)) {
@@ -263,6 +263,62 @@ dataset_lookup_target_routines(application_t *app, dataset_routine_t *routine, u
     }
   }
   return NULL;
+}
+
+/* `original_targets` may be NULL, or a singleton, or an mmapped or expanded dataset_(eval|call)_targets */
+dataset_target_routines_t *
+dataset_expand_target_routines(dataset_target_routines_t *original_targets,
+                               uint routine_hash, uint to_index)
+{
+  uint i, original_target_count;
+  bool free_original_targets = false;
+  uint64 metadata = p2int(original_targets);
+  dataset_call_targets_t *original_call_targets, *expanded_routines;
+
+  if (original_targets == NULL || ((metadata & TARGET_TYPE_MASK) != TARGET_TYPE_SINGLETON &&
+                                   ((dataset_call_targets_t *) (metadata & ~TARGET_TYPE_MASK))->target_count == 0))
+    return pack_singleton_call_target(routine_hash, to_index);
+
+  switch (metadata & TARGET_TYPE_MASK) {
+    case TARGET_TYPE_EXPANDED:
+      free_original_targets = true;
+    case TARGET_TYPE_DATASET: /* FT */
+      original_call_targets = (dataset_call_targets_t *) (metadata & ~TARGET_TYPE_MASK);
+      original_target_count = original_call_targets->target_count;
+      break;
+    case TARGET_TYPE_SINGLETON:
+      original_target_count = 1;
+      break;
+  }
+
+  expanded_routines = PROCESS_ALLOC(sizeof(dataset_call_targets_t) + (sizeof(dataset_call_target_t) * original_target_count));
+  expanded_routines->target_count = original_target_count + 1;
+  expanded_routines->targets[0].routine_hash = routine_hash;
+  expanded_routines->targets[0].index = to_index;
+
+  switch (metadata & TARGET_TYPE_MASK) {
+    case TARGET_TYPE_EXPANDED:
+    case TARGET_TYPE_DATASET:
+      for (i = 0; i < original_call_targets->target_count; i++)
+        expanded_routines->targets[i+1] = original_call_targets->targets[i];
+      break;
+    case TARGET_TYPE_SINGLETON: {
+      uint singleton_index = (metadata >> TARGET_INDEX_SHIFT) & TARGET_INDEX_MASK;
+      uint singleton_user_level = (metadata >> TARGET_USER_LEVEL_SHIFT) & TARGET_USER_LEVEL_MASK;
+      uint singleton_routine_hash = metadata & TARGET_ROUTINE_ID_MASK;
+
+      expanded_routines->targets[1].routine_hash = singleton_routine_hash;
+      expanded_routines->targets[1].index = singleton_index | (singleton_user_level << MASK_USER_LEVEL_SHIFT);
+    } break;
+  }
+
+  metadata = p2int(expanded_routines);
+  expanded_routines = (dataset_call_targets_t *) (metadata | TARGET_TYPE_EXPANDED);
+
+  if (free_original_targets)
+    PROCESS_FREE(original_call_targets);
+
+  return (dataset_target_routines_t *) expanded_routines;
 }
 
 uint dataset_get_call_target_count(application_t *app, dataset_routine_t *routine, uint from_index)

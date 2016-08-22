@@ -160,7 +160,7 @@ static my_bool bind_evo_start_result_is_nulls[EVO_START_QUERY_FIELD_COUNT];
 static my_bool bind_evo_start_result_errors[EVO_START_QUERY_FIELD_COUNT];
 static uint evo_start_count;
 
-#define EVO_TAINT_EXPIRATION 2000
+#define EVO_TAINT_EXPIRATION 1000
 
 #define EVO_UPDATE_REQUEST_ID "UPDATE opmon_request_sequence SET request_id = %ld"
 #define EVO_UPDATE_REQUEST_ID_BUFFER_LEN sizeof(EVO_UPDATE_REQUEST_ID) + 20
@@ -779,6 +779,40 @@ static void block_request(zend_execute_data *from_execute_data, control_flow_met
   }
 }
 
+static inline void add_routine_edge_targets(control_flow_metadata_t *cfm, op_t *op,
+                                            pending_cfg_patch_t *patch)
+{
+  dataset_target_routines_t *targets, dataset_targets = NULL;
+  uint64 routine_edges_index, routine_edge_metadata = p2int(op->op->handler);
+  bool add_routine_edges = ((routine_edge_metadata & ROUTINE_EDGE_INDEX_CACHED) == 0);
+
+  if (add_routine_edges) {
+    uint64 original_handler_addr = p2int(op->op->handler) & ORIGINAL_HANDLER_BITS;
+
+    original_handler_addr |= ROUTINE_EDGE_INDEX_CACHED;
+    if (cfm->dataset != NULL)
+      dataset_targets = dataset_lookup_target_routines(current_app, cfm->dataset, op->index);
+
+    targets = dataset_expand_target_routines(dataset_targets, patch->to_routine->routine_hash,
+                                             patch->to_index);
+
+    routine_edges_index = current_app->routine_edge_targets.size;
+    original_handler_addr |= (routine_edges_index << ROUTINE_EDGE_INDEX_SHIFT);
+    ((zend_op *) op->op)->handler = (opcode_handler_t) int2p(original_handler_addr);
+
+    scarray_append(&current_app->routine_edge_targets, targets);
+  } else {
+    routine_edges_index = routine_edge_metadata >> ROUTINE_EDGE_INDEX_SHIFT;
+    dataset_targets = current_app->routine_edge_targets.data[routine_edges_index];
+    targets = dataset_expand_target_routines(dataset_targets, patch->to_routine->routine_hash,
+                                             patch->to_index);
+    current_app->routine_edge_targets.data[routine_edges_index] = targets;
+  }
+
+  PRINT("Expand 0x%x:%d -> { "PX" } at index %d\n", cfm->cfg->routine_hash,
+        op->index, p2int(targets), (int) routine_edges_index);
+}
+
 static void
 evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadata_t *from_cfm,
                       op_t *from_op, control_flow_metadata_t *to_cfm, uint to_index)
@@ -895,6 +929,8 @@ evaluate_routine_edge(zend_execute_data *from_execute_data, control_flow_metadat
         patch->user_level = current_session.user_level;
         patch->next_pending = NULL;
         scarray_append(&pending_cfg_patches, patch);
+
+        add_routine_edge_targets(from_cfm, from_op, patch);
 
         plog(current_app, PLOG_TYPE_CFG, "add (pending) taint-verified: %04d(L%04d) %s -> %s\n",
              from_op->index, from_op->op->lineno, from_cfm->routine_name, to_cfm->routine_name);
@@ -1573,16 +1609,18 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       case ZEND_ISSET_ISEMPTY_THIS: {
         const zend_op *successor = op_context.prev.op + 1;
         switch (successor->opcode) {
+          case ZEND_JMPZ:
           case ZEND_JMPNZ:
           case ZEND_JMPZNZ:
           case ZEND_JMPZ_EX:
-          case ZEND_JMPNZ_EX: {
-            propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
-            propagate_taint(current_app, execute_data, op_array, successor);
-            init_implicit_taint(execute_data, successor);
-            op_context.is_unconditional_fallthrough = false;
-            op_context.is_smart_branch = true;
-          }
+          case ZEND_JMPNZ_EX:
+            if (op_context.cur.index != (op_context.prev.index + 1)) {
+              propagate_taint(current_app, execute_data, op_array, op_context.prev.op);
+              propagate_taint(current_app, execute_data, op_array, successor);
+              init_implicit_taint(execute_data, successor);
+              op_context.is_unconditional_fallthrough = false;
+              op_context.is_smart_branch = true;
+            }
         }
       }
     }
@@ -1731,6 +1769,8 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       SPOT("wait\n"); // get_feed_permastruct() where it didn't assign taint to a field
     if (op_context.cfm->cfg->routine_hash == 0x74996041 && op_context.cur.index == 16)
       SPOT("wait\n"); // _get_page_link() where it didn't activate implicit taint
+    if (op_context.cfm->cfg->routine_hash == 0x3874b5f8 && op_context.cur.index == 5)
+      SPOT("wait\n"); // get_theme_mod() where it didn't activate implicit taint
   }
 #endif
 
@@ -1913,6 +1953,9 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
       }
       opcode_verified = true;
     } else {
+      if (from_index == op_context.cur.index)
+        SPOT("wait\n");
+
       opcode_edge = routine_cfg_lookup_opcode_edge(op_context.cfm->cfg, from_index,
                                                    op_context.cur.index);
 
@@ -2256,6 +2299,10 @@ static inline void monitor_call_from_user(zend_execute_data *from_execute_data, 
 
     block = !dataset_verify_routine_target(targets, to_routine_hash, 0, current_session.user_level,
                                            to_op_array->type == ZEND_EVAL_CODE);
+    if (block && strcmp("GET / HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0) {
+      block = !dataset_verify_routine_target(targets, to_routine_hash, 0, current_session.user_level,
+                                             to_op_array->type == ZEND_EVAL_CODE);
+    }
   } else if (targets == NULL) {
     to_op_array = &execute_data->func->op_array;
     to_cfm = GET_OP_ARRAY_CFM(to_op_array);
