@@ -410,6 +410,7 @@ void dump_opcode(application_t *app, zend_op_array *ops, zend_op *op)
   } else {
     switch (op->opcode) {
       case ZEND_JMPZ:
+      case ZEND_JMPNZ:
       case ZEND_JMPZNZ:
       case ZEND_JMPZ_EX:
       case ZEND_JMPNZ_EX:
@@ -623,6 +624,7 @@ void identify_sink_operands(application_t *app, zend_op_array *ops, zend_op *op,
       print_sink(oplog, "sink(edge) {1} =d=> {fcall-stack} (or skip via 2 => opline if no ctor)");
       break;
     case ZEND_DO_FCALL:
+    case ZEND_DO_ICALL:
       if (is_db_sink_function(NULL, id.call_target))
         print_sink(oplog, "sink(edge) {fcall-stack} =d=> {db,opline,result}");
       else if (is_file_sink_function(id.call_target))
@@ -2010,6 +2012,7 @@ static void link_operand_dataflow(FILE *oplog, dataflow_link_pass_t *pass)
       case ZEND_NEW: /* {1} =d=> {fcall-stack} (or skip via 2 => opline if no ctor) */
         break;
       case ZEND_DO_FCALL:
+      case ZEND_DO_ICALL:
         // if (is_db_sink_function(NULL, id.call_target))    /* {fcall-stack} => {db,opline,result} */
         // else if (is_file_sink_function(id.call_target))   /* {fcall-stack} => {file,opline,result} */
         // else if (is_system_sink_function(id.call_target)) /* {fcall-stack} => {system,opline,result} */
@@ -2566,6 +2569,7 @@ void add_dataflow_opcode(uint routine_hash, uint index, zend_op_array *zops)
       // dunno how this works
       break;
     case ZEND_DO_FCALL:
+    case ZEND_DO_ICALL:
       initialize_source(opcode, SOURCE_TYPE_RESULT);
       break;
     case ZEND_COALESCE:

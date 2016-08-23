@@ -160,18 +160,21 @@ static my_bool bind_evo_start_result_is_nulls[EVO_START_QUERY_FIELD_COUNT];
 static my_bool bind_evo_start_result_errors[EVO_START_QUERY_FIELD_COUNT];
 static uint evo_start_count;
 
-#define EVO_TAINT_EXPIRATION 1000
+#define EVO_TAINT_EXPIRATION 2000 /* N.B.: required for WordPress URL of the form "/?p=18" */
 
 #define EVO_UPDATE_REQUEST_ID "UPDATE opmon_request_sequence SET request_id = %ld"
 #define EVO_UPDATE_REQUEST_ID_BUFFER_LEN sizeof(EVO_UPDATE_REQUEST_ID) + 20
 
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
-// #define DEBUG_PERMALINK 1
+// #define DEBUG_PERMALINK_HOMEPAGE 1
+#define DEBUG_PERMALINK 1
 
 #ifdef DEBUG_PERMALINK
 static bool is_post_permalink = false;
+# ifdef DEBUG_PERMALINK_HOMEPAGE
 static bool is_homepage_request;
+# endif
 #endif
 
 typedef enum _routine_edge_status_t {
@@ -638,7 +641,7 @@ uint64 interp_request_boundary(bool is_request_start)
 
     update_user_session();
 
-#ifdef DEBUG_PERMALINK
+#ifdef DEBUG_PERMALINK_HOMEPAGE
     if (current_session.user_level < 2 &&
         strcmp("GET / HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
       is_homepage_request = true;
@@ -740,8 +743,15 @@ static void block_request(zend_execute_data *from_execute_data, control_flow_met
     request_blocked = true;
     address = get_current_request_address();
 
+    if (strcmp("GET /publications_page/ HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
+      SPOT("wait\n");
+    if (strcmp("GET /?p=18 HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
+      SPOT("wait\n");
+
     plog(current_app, PLOG_TYPE_CFG_ALERT, "alert on request %08lld 0x%llx: %s\n",
          current_request_id, get_current_request_start_time(), address);
+    if (from_execute_data != NULL)
+      plog_stacktrace(current_app, PLOG_TYPE_CFG_ALERT, from_execute_data);
   }
 
   if (from_execute_data == NULL) {
@@ -1174,6 +1184,7 @@ static bool is_unconditional_fallthrough(const zend_op *op)
     case ZEND_RETURN:
     case ZEND_JMP:
     case ZEND_JMPZ:
+    case ZEND_JMPNZ:
     case ZEND_JMPZNZ:
     case ZEND_JMPZ_EX:
     case ZEND_JMPNZ_EX:
@@ -1238,6 +1249,11 @@ static request_input_type_t get_request_input_type(zend_execute_data *execute_da
 }
 #endif
 
+static inline bool is_call_opcode(zend_uchar opcode)
+{
+  return (opcode == ZEND_DO_FCALL || opcode == ZEND_DO_ICALL);
+}
+
 static void inflate_call(zend_execute_data *execute_data,
                          zend_op_array *op_array, const zend_op *call_op,
                          const zend_op **args, uint *arg_count)
@@ -1249,7 +1265,7 @@ static void inflate_call(zend_execute_data *execute_data,
   *arg_count = 0;
 
   do {
-    if (walk->opcode == ZEND_DO_FCALL) {
+    if (is_call_opcode(walk->opcode)) {
       init_count++;
       continue;
     }
@@ -1327,6 +1343,12 @@ static void post_propagate_builtin(zend_op_array *op_array, const zend_op *op)
   zend_execute_data *execute_data = op_context.execute_data;
   const zend_op *args[0x20];
   uint arg_count;
+
+#ifdef DEBUG_PERMALINK
+  if (request_has_taint && op_context.cfm->cfg->routine_hash == 0x2d637c9c &&
+      strcmp("GET /?p=18 HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
+    SPOT("wait\n");
+#endif
 
   inflate_call(execute_data, op_array, op, args, &arg_count);
 
@@ -1684,6 +1706,12 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
   if (op->opcode == ZEND_CALL_TRAMPOLINE)
     return; // meta opcode--skip it: will process the destination next
 
+#ifdef DEBUG_PERMALINK
+  if (request_has_taint && op_context.cfm != NULL && op_context.cfm->cfg->routine_hash == 0x2d637c9c && op_context.cur.index == 4 &&
+      strcmp("GET /?p=18 HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
+    SPOT("wait\n");
+#endif
+
   switch (stack_motion) {
     case STACK_MOTION_LEAVE:
       remove_implicit_taint();
@@ -1702,9 +1730,6 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       }
 
       if (IS_CFI_EVO()) {
-        if ((op-1)->opcode == ZEND_DO_FCALL && op_context.last_builtin_name != NULL)
-          post_propagate_builtin(op_array, op-1);
-
         if (execute_data == implicit_taint_call_chain.start_frame) {
           implicit_taint_call_chain.start_frame = NULL;
 
@@ -1716,8 +1741,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
           plog(current_app, PLOG_TYPE_CFG, "call chain resumed at %04d(L%04d)\n",
                op_context.cur.index, op->lineno);
         }
-      }
-      break;
+      } break;
     case STACK_MOTION_CALL: { // post-indicator: `op` is the call site
       stack_step(execute_data, op_array);
       if (op_context.cfm == NULL) {
@@ -1734,8 +1758,11 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
 
       op_context.implicit_taint = NULL; // reset for new frame
       pending_implicit_taint.end_op = NULL;
+    } break;
+    case STACK_MOTION_NONE: // what if `(op-1)` was not the last one executed? `op_context->prev` will be lost after builtin with callback
+      if (IS_CFI_EVO() && is_call_opcode((op-1)->opcode) && op_context.last_builtin_name != NULL)
+        post_propagate_builtin(op_array, op-1);
       break;
-    }
   }
 
   op_context.execute_data = execute_data; /* N.B.: only after processing stack motion */
@@ -1746,7 +1773,7 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
   PRINT("    op_context at op %d in %s\n", op_context.cur.index,
          op_context.cfm == NULL ? "<missing>" : op_context.cfm->routine_name);
 
-#ifdef DEBUG_PERMALINK
+#ifdef DEBUG_PERMALINK_HOMEPAGE
   if (is_post_permalink && is_homepage_request && op_context.cfm != NULL &&
       op_context.cfm->cfg != NULL && op_context.cfm->cfg->routine_hash == 0x60abbe22)
   {
@@ -1773,9 +1800,23 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
       SPOT("wait\n"); // get_theme_mod() where it didn't activate implicit taint
   }
 #endif
+#ifdef DEBUG_PERMALINK
+  if (is_post_permalink && op_context.cfm != NULL && op_context.cfm->cfg != NULL) {
+    if (strcmp("GET /?p=18 HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0) {
+      if (op_context.cfm->cfg->routine_hash == 0x131cfe86 && op_context.cur.index == 6)
+        SPOT("wait\n"); // wp_redirect_admin_locations() where it didn't activate implicit taint
+    } else if (strcmp("GET /publications_page/ HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0) {
+      if (op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 334)
+        SPOT("wait\n"); // parse_request() where I can't see the rewritten query parameters
+      else if (op_context.cfm->cfg->routine_hash == 0x34743cbc && op_context.cur.index == 35)
+        SPOT("wait\n"); // WP:build_query_string() where the string assign/concat is losing taint
+    }
+  }
+#endif
 
   switch (op->opcode) {
     case ZEND_DO_FCALL:
+    case ZEND_DO_ICALL:
       fcall_executing(execute_data, op_array, (zend_op *) op);
       //if (op_context.implicit_taint != NULL && implicit_taint_call_chain.start_frame == NULL)
       //  implicit_taint_call_chain.start_frame = execute_data;
@@ -1888,7 +1929,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
   }
 
 #ifdef OPMON_DEBUG
-  if (!is_loopback && op_context.prev.op != NULL && op_context.prev.op->opcode == ZEND_DO_FCALL &&
+  if (!is_loopback && op_context.prev.op != NULL && is_call_opcode(op_context.prev.op->opcode) &&
       op_context.last_builtin_name != NULL && strcmp(op_context.last_builtin_name, "file_put_contents") == 0) {
     const zval *filepath;
     const zend_op *args[0x20];

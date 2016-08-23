@@ -370,6 +370,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
 
       switch (op->opcode) {
         case ZEND_DO_FCALL:
+        case ZEND_DO_ICALL:
           fcall = peek_fcall_init();
           if (fcall->routine_name != NULL)
             dump_fcall_opcode(cfm.app, op_array, op, fcall->routine_name);
@@ -409,6 +410,7 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
 
       switch (op->opcode) {
         case ZEND_DO_FCALL:
+        case ZEND_DO_ICALL:
           fcall = peek_fcall_init();
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER)
             add_dataflow_fcall(cfm.app, fqn->function.caller_hash, i, op_array, fcall->routine_name);
@@ -528,7 +530,8 @@ static function_fqn_t *register_new_function(zend_op_array *op_array)
           to_routine_hash = hash_routine(routine_name);
           push_fcall_init(cfm.app, i, op->opcode, to_routine_hash, routine_name);
         } break;
-        case ZEND_DO_FCALL: {
+        case ZEND_DO_FCALL:
+        case ZEND_DO_ICALL: {
           fcall_init_t *fcall = pop_fcall_init();
           if (fcall->routine_hash > BUILTIN_ROUTINE_HASH_PLACEHOLDER) {
             PRINT("Opcode %d calls function 0x%x\n", i, fcall->routine_hash);
@@ -796,6 +799,7 @@ compiled_edge_target_t get_compiled_edge_target(zend_op *op, uint op_index)
       target.index = op_index + (OP_JMP_ADDR(op, op->op2) - op);
       break;
     case ZEND_DO_FCALL:
+    case ZEND_DO_ICALL:
     case ZEND_INCLUDE_OR_EVAL:
       target.type = COMPILED_EDGE_CALL;
       break;

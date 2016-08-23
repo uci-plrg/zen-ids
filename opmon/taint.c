@@ -568,6 +568,13 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
     case ZEND_ASSIGN:
       clobber_operand_taint(app, execute_data, stack_frame, op, TAINT_OPERAND_2, TAINT_OPERAND_1);
       break;
+    case ZEND_ASSIGN_CONCAT:
+      propagate_zval_taint(app, execute_data, stack_frame, op, false/*merge*/,
+                           get_operand_zval(execute_data, op+1, TAINT_OPERAND_1),
+                           get_operand_index_name(op+1, TAINT_OPERAND_1),
+                           get_operand_zval(execute_data, op, TAINT_OPERAND_2),
+                           get_operand_index_name(op, TAINT_OPERAND_2));
+      break;
     case ZEND_ADD:
     case ZEND_SUB:
     case ZEND_MUL:
@@ -706,7 +713,8 @@ void propagate_taint(application_t *app, zend_execute_data *execute_data,
       break;
     /****************** calls *****************/
     case ZEND_DO_FCALL:
-      // pop args
+    case ZEND_DO_ICALL:
+      // nop
       break;
     /****************** branches *****************/
     case ZEND_THROW: /* {1} =d=> {fast-ret,thrown} */
