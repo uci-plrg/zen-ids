@@ -891,13 +891,16 @@ void plog_taint(application_t *app, taint_variable_t *taint_var)
   print_taint(plog, taint_var);
 }
 
-void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash)
+void plog_taint_var(application_t *app, taint_variable_t *taint_var, const zval *taintee)
 {
   //bool plogged = true;
+  uint64 hash = (uint64) taintee;
   FILE *plog = ((cfg_files_t *) app->cfg_files)->persistence;
 
-  fprintf(plog, "\t<tainted-op> %s:%d (0x%llx)\n\t", taint_var->tainted_at_file,
-          taint_var->tainted_at->lineno, hash);
+  fprintf(plog, "\t<tainted-op> ");
+  // if (taintee != NULL && Z_TYPE_P(taintee) == IS_STRING) // may be unreadable
+  //   fprintf(plog, "\"%s\" ", Z_STRVAL_P(taintee));
+  fprintf(plog, "%s:%d (0x%llx)\n\t", taint_var->tainted_at_file, taint_var->tainted_at->lineno, hash);
   print_taint(plog, taint_var);
 
   /*

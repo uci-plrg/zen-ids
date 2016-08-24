@@ -921,7 +921,7 @@ void taint_var_add(application_t *app, const zval *taintee, taint_variable_t *ta
     return; // bug?
 
 #ifdef PLOG_TAINT
-  plog_taint_var(app, taint, (uint64) taintee);
+  plog_taint_var(app, taint, taintee);
 #endif
 
   if (sctable_lookup(&taint_table, hash) == NULL)

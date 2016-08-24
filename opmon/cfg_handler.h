@@ -6,12 +6,12 @@
 #include "cfg.h"
 #include "taint.h"
 
-#define PLOG_TAINT 1
+//#define PLOG_TAINT 1
 #define PLOG_CFG 1
 #define PLOG_CFG_BLOCK 1
 //#define PLOG_CFG_DETAIL 1
-#define PLOG_DB 1
-#define PLOG_DB_MOD 1
+//#define PLOG_DB 1
+//#define PLOG_DB_MOD 1
 //#define PLOG_FILE_MOD 1
 //#define PLOG_FILE_OUTPUT 1
 //#define PLOG_SYS_WRITE 1
@@ -87,7 +87,7 @@ void plog_call(application_t *app, const char *tag, const char *callee_name,
 
 #ifdef PLOG_TAINT
 void plog_taint(application_t *app, taint_variable_t *taint_var);
-void plog_taint_var(application_t *app, taint_variable_t *taint_var, uint64 hash);
+void plog_taint_var(application_t *app, taint_variable_t *taint_var, const zval *taintee);
 #endif
 
 /* print the tag */

@@ -168,7 +168,7 @@ static uint evo_start_count;
 #define EVO_QUERY(query) { query, sizeof(query) - 1 }
 
 // #define DEBUG_PERMALINK_HOMEPAGE 1
-#define DEBUG_PERMALINK 1
+// #define DEBUG_PERMALINK 1
 
 #ifdef DEBUG_PERMALINK
 static bool is_post_permalink = false;
@@ -1549,6 +1549,7 @@ static void create_request_input(zend_op_array *op_array, const zend_op *op, con
   plog(current_app, PLOG_TYPE_TAINT, "create request input at %04d(L%04d)%s\n",
        OP_INDEX(op_array, op), op->lineno, site_relative_path(current_app, op_array));
   taint_var_add(current_app, value, taint_var);
+  reset_dataflow_stack();
 }
 
 static void init_implicit_taint(zend_execute_data *execute_data, const zend_op *jump_op)
@@ -1808,8 +1809,24 @@ static void monitor_opcode(zend_execute_data *execute_data, const zend_op *op, i
     } else if (strcmp("GET /publications_page/ HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0) {
       if (op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 334)
         SPOT("wait\n"); // parse_request() where I can't see the rewritten query parameters
-      else if (op_context.cfm->cfg->routine_hash == 0x34743cbc && op_context.cur.index == 35)
-        SPOT("wait\n"); // WP:build_query_string() where the string assign/concat is losing taint
+      else if (op_context.cfm->cfg->routine_hash == 0x34743cbc && op_context.cur.index == 32)
+        SPOT("wait\n"); // WP:build_query_string() where the rewrite taint is still in the `query_vars` array
+      else if (op_context.cfm->cfg->routine_hash == 0x190ae247 && op_context.cur.index == 6)
+        SPOT("wait\n"); // fill_query_vars() where the rewrite taint may still be on the `query_vars` array
+      else if (op_context.cfm->cfg->routine_hash == 0xe5ed9fe && op_context.cur.index == 561)
+        SPOT("wait\n"); // parse_query() where the rewrite taint may still be on the `query_vars` array
+      else if (op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 11)
+        SPOT("wait\n"); // WP:parse_request where it creates the `query_vars` array
+      else if (op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 336)
+        SPOT("wait\n"); // WP:parse_request where it assigns something to the `query_vars` array
+      else if (op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 407)
+        SPOT("wait\n"); // WP:parse_request where "pagename" might be added to the `query_vars` array
+      else if (op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 460)
+        SPOT("wait\n"); // WP:parse_request where "pagename" is already added to the `query_vars` array
+      else if (op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 247)
+        SPOT("wait\n"); // WP:parse_request where implicit taint is messed up at the builtin `parse_str`
+      else if (op_context.cfm->cfg->routine_hash == 0x25466f54 && op_context.cur.index == 210)
+        SPOT("wait\n"); // WP_Query:get_posts where implicit taint is not found on isset/isempty
     }
   }
 #endif
@@ -2064,7 +2081,7 @@ static inline void intra_monitor_opcode(zend_execute_data *execute_data, zend_op
         plog(current_app, PLOG_TYPE_TAINT, "+implicit on %04d(L%04d)%s until %04d(L%04d)\n",
              OP_INDEX(op_array, op), op->lineno, site_relative_path(current_app, op_array),
              OP_INDEX(op_array, op_context.implicit_taint->end_op), op_context.implicit_taint->end_op->lineno);
-        plog_taint_var(current_app, op_context.implicit_taint->taint, 0);
+        plog_taint_var(current_app, op_context.implicit_taint->taint, NULL);
 #endif
 
         taint_lowers_op_user_level = op_context.implicit_taint->taint;
@@ -2574,6 +2591,7 @@ static inline void file_read_trigger(zend_execute_data *execute_data, const char
       plog(current_app, PLOG_TYPE_TAINT, "file-read at %04d(L%04d)%s\n",
            op_context.cur.index, call_op->lineno, site_relative_path(current_app, op_array));
       taint_var_add(current_app, return_value, var);
+      reset_dataflow_stack();
     }
 
     if (squashed > 0)
@@ -3114,6 +3132,7 @@ void db_fetch_trigger(uint32_t field_count, const char **table_names, const char
              op_context.cur.index, op->lineno, site_relative_path(current_app, op_array));
 
         taint_var_add(current_app, values[i], var);
+        reset_dataflow_stack();
       }
     }
   }
@@ -3158,11 +3177,18 @@ monitor_query_flags_t db_query(const char *query)
 
 static void propagate_internal_dataflow()
 {
-  zend_bool has_taint = false, is_transfer = false, free_src = false;
+  zend_bool has_taint = false, is_transfer = false, free_src = false, applied_implicit_taint = false;
   zend_dataflow_t *dataflow_frame = dataflow_stack_base;
 
   if (!IS_CFI_EVO() || op_context.execute_data == NULL || !request_has_taint)
     return;
+
+#ifdef DEBUG_PERMALINK
+  if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
+      op_context.cfm->cfg->routine_hash == 0x278c883c && op_context.cur.index == 247 &&
+      strcmp("GET /publications_page/ HTTP/1.1", ((php_server_context_t *) SG(server_context))->r->the_request) == 0)
+    SPOT("wait\n"); // in WP:parse_query() where it parses the query into `perma_query_vars`
+#endif
 
   for (; dataflow_frame < dataflow_hooks->dataflow_stack; dataflow_frame++) {
     if (dataflow_frame->src == NULL) {
@@ -3197,20 +3223,12 @@ static void propagate_internal_dataflow()
                op_context.cur.op->lineno, site_relative_path(current_app, stack_frame));
 
           taint_var_add(current_app, dataflow_frame->dst, op_context.implicit_taint->taint);
-          op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
           has_taint = true;
+          applied_implicit_taint = true;
         } else {
-#ifdef DEBUG_PERMALINK
-          if (op_context.cfm != NULL && op_context.cfm->cfg != NULL &&
-              op_context.cfm->cfg->routine_hash == 0x63be5693 &&
-              Z_TYPE_P(dataflow_frame->src) == IS_STRING &&
-              (strncmp(Z_STRVAL_P(dataflow_frame->src), "a:69:{s:47:", 11) == 0 ||
-               strcmp(Z_STRVAL_P(dataflow_frame->src), "/%postname%/") == 0))
-            SPOT("wait\n"); // in get_option() where writes to `alloptions`
-#endif
-
           has_taint = propagate_zval_taint(current_app, op_context.execute_data, stack_frame,
-                                           op_context.cur.op, true, dataflow_frame->src, "internal",
+                                           op_context.cur.op, true /*clobber*/,
+                                           dataflow_frame->src, "internal",
                                            dataflow_frame->dst, "internal");
         }
       }
@@ -3223,6 +3241,9 @@ static void propagate_internal_dataflow()
       dataflow_frame->container->u.v.reserve |= HASH_RESERVE_TAINT;
     }
   }
+
+  if (applied_implicit_taint)
+    op_context.implicit_taint->last_applied_op_index = op_context.cur.index;
 
   reset_dataflow_stack();
 }
