@@ -13,3 +13,8 @@ This repository contains the dynamically linked ZenIDS extension for the referen
 3. Build:
   * `cd opmon && $PHP_HOME/scripts/phpize && ./current-config && make -j7 install`
     * Use option `current-config -d` for a debug build
+
+### Tools
+
+1. Application profiles can be built with the [zen-ids-profile](https://github.com/uci-plrg/zen-ids-profile) Java tools. 
+  * In the paper, these are referred to as *trusted profiles*.
