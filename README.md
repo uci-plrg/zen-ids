@@ -19,11 +19,13 @@ This repository contains the dynamically linked ZenIDS extension for the referen
 3. Build:
   * `cd opmon && $PHP_HOME/scripts/phpize && ./current-config && make -j && sudo make -j install`
     * Use option `current-config -d` for a debug build.
-4. Configure:
+
+### Configure:
   * `cd $PHP_HOME && mkdir conf.d/ext && cp $ZEN_IDS_HOME/opmon.ini.default $PHP_HOME/conf.d/ext/opmon.ini`
   * Add all the variables defined in the "Environment" section (above) to the PHP script `/etc/apache2/envvars`.
     * To source a script that defines these variables, use syntax `. /path/to/.zen-ids-rc`.
     * Note that the keyword `source` is not recognized in this file.
+  * `sudo chown -R www-data:www-data $ZEN_IDS_EVOLUTION` (or whatever user is running your Apache HTTP server)
 
 ### Tools
 
