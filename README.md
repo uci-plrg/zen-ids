@@ -1,4 +1,4 @@
-# zen-ids
+# Zen IDS
 Introspective intrusion detection system for PHP applications.
 
 This repository contains the dynamically linked ZenIDS extension for the reference implementation of the PHP interpreter. This extension requires a slightly modified version of PHP, which can be found in the `interp-opt` branch of the [zen-ids-php](https://github.com/uci-plrg/zen-ids-php) repository.
