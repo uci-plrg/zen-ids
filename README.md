@@ -33,7 +33,7 @@ This repository contains the dynamically linked ZenIDS extension for the referen
 1. Add the [scripts](https://github.com/uci-plrg/zen-ids/tree/interp-opt/scripts) directory to the `$PATH`
   * Same for all dependent projects and tool projects
 1. Create a sample PHP file, e.g.:
-  * `echo "<?php phpinfo(); ?>" > /var/www/html/info.php"`
+  * `echo "<?php phpinfo(); ?>" > /var/www/html/info.php`
 2. Start apache
   * To debug apache, use script `adb`
 3. Load `$host/info.php` in a browser (or `wget "http://$host/info.php"`)
