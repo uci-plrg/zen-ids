@@ -25,7 +25,7 @@ This repository contains the dynamically linked ZenIDS extension for the referen
 1. `cd $PHP_HOME && mkdir conf.d/ext && cp $ZEN_IDS_HOME/opmon.ini.default $PHP_HOME/conf.d/ext/opmon.ini`
 2. Add all the variables defined in the "Environment" section (above) to the PHP script `/etc/apache2/envvars`.
   * To source a script that defines these variables, use syntax `. /path/to/.zen-ids-rc`.
-  * Note that the keyword `source` is not recognized in this file.
+  * Note that the bash keyword `source` is not recognized in this file.
 3. `sudo chown -R www-data:www-data $ZEN_IDS_EVOLUTION` (or whatever user is running your Apache HTTP server)
 
 ### Test
@@ -42,8 +42,9 @@ This repository contains the dynamically linked ZenIDS extension for the referen
 
 ### Tools
 
-1. Application profiles can be built with the [zen-ids-profile](https://github.com/uci-plrg/zen-ids-profile) Java tools. 
+1. Application profiles can be built with the Java tools in the [zen-ids-profile](https://github.com/uci-plrg/zen-ids-profile) project. 
   * In the paper, these are referred to as *trusted profiles*.
+  * See the next section on "Experiments" for details.
  
 ### Experiments
 
