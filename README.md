@@ -18,3 +18,7 @@ This repository contains the dynamically linked ZenIDS extension for the referen
 
 1. Application profiles can be built with the [zen-ids-profile](https://github.com/uci-plrg/zen-ids-profile) Java tools. 
   * In the paper, these are referred to as *trusted profiles*.
+ 
+### Experiments
+
+See the [experiment documentation](https://github.com/uci-plrg/zen-ids/blob/interp-opt/EXPERIMENTS.md).
