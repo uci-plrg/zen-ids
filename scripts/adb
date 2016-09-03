@@ -5,6 +5,6 @@
                      && exit
 
 source /etc/apache2/envvars
-source /root/.rc
+[ -e /root/.rc ] && source /root/.rc
 
 gdb -q --args /usr/sbin/apache2 -X -d /etc/apache2

@@ -9,8 +9,8 @@ function usage() {
        "Exiting now." && \
   exit
 
-[ -z "$PHP_DATASET_DIR" ] && \
-  echo "This script requires the environment variable PHP_DATASET_DIR." \
+[ -z "$ZEN_IDS_DATASETS" ] && \
+  echo "This script requires the environment variable ZEN_IDS_DATASETS." \
        "Exiting now." && \
   exit
 
@@ -50,7 +50,7 @@ then
   exit
 fi
 
-rundir=$PHP_DATASET_DIR/runs
+rundir=$ZEN_IDS_DATASETS/runs
 mkdir -p $rundir
 
 logdir=$PHP_HOME/logs
@@ -82,6 +82,6 @@ run_log="$run_data_dir/$script_basename.log"
 mv $log $run_log
 echo "    Output: $run_log"
 
-run_catalog=$PHP_DATASET_DIR/runs.tab
+run_catalog=$ZEN_IDS_DATASETS/runs.tab
 echo "$run_log" >> $run_catalog
 

@@ -1,0 +1,35 @@
+extension_dir = ${ZEN_IDS_HOME}/opmon/modules
+extension = opmon.so
+
+opmon_dataset_dir = ${ZEN_IDS_DATASETS}
+opmon_file_evo_log_dir = ${ZEN_IDS_EVOLUTION}
+
+; 1 = Error
+; 2 = Warning
+; 3 = Message
+; 4 = Detail
+opmon_verbose = 1
+
+; 1 = Training
+; 2 = DB CFI
+; 3 = DGC CFI
+; 4 = File CFI
+; 5 = Rigid CFI
+opmon_cfi_mode = 1
+
+; 0 = None
+; 1 = DB
+; 2 = File
+opmon_request_id_synch = 1
+
+; 0 = disabled
+; 1 = enabled
+opmon_request_edge_enabled = 1
+
+; 0 = disabled
+; 1 = enabled
+opmon_opcode_dump_enabled = 1
+
+; 0 = disabled
+; 1 = enabled
+opmon_cfi_bailout = 0
