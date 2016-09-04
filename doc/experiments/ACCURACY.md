@@ -1,6 +1,6 @@
 # Instructions for a False Positive/Negative Experiment
 
-This document begins with a high-level discussion of various factors that affect the quality and relevance of the experimental results. Following this, we provide step-by-step instructions for conducting the kind of record/replay experiment that we reported in the Zen IDS paper.
+This document begins with a high-level discussion of various factors that affect the quality and relevance of the experimental results. Following this, we provide step-by-step instructions for conducting the kind of record/replay experiment that we reported in the ZenIDS paper.
 
 ## Discussion
 
@@ -28,7 +28,7 @@ Set up an HTTP recorder on all instances of Apache that comprise the live webser
 
 #### Building the *Trusted Profile*
 
-The general procedure for building the *trusted profile* is to repeat the following sequence:
+First [configure](https://github.com/uci-plrg/zen-ids/blob/interp-opt/CONFIG.md) Zen IDS in training mode and restart the webserver. The general procedure for building the *trusted profile* is to repeat the following sequence:
 
 1. Execute some HTTP requests (e.g. from a crawler, or an HTTP replay).
   * Zen IDS generates a composite profile of the request executions.
@@ -70,3 +70,13 @@ Since today's web applications use complex interactions such as JavaScript callb
 
 #### Test for False Positives/Negatives
 
+First deploy the *trusted profile* for the experiment and [configure](https://github.com/uci-plrg/zen-ids/blob/interp-opt/CONFIG.md) Zen IDS in one of the monitoring modes. After restarting the webserver, replay the remaining set of HTTP requests that were not used during training. ZenIDS will report requests to the file `persistence.log` in the generated profile. Each alert is prefixed with `<cfg> alert` and specifies the URL of the request. Following each alert is an entry prefixed `<cfg> call unverified` indicating an inter-procedural call taken during execution of the alerting request that was not found in the *trusted profile* (i.e., causes of the alert). The `persistence.log` additionally contains an entry prefixed by `@` for each HTTP request, to provide context and make it easy to count the total number of requests.
+
+##### Unique Alerts
+
+To identify the set of unique alerts, simply group them according to two criteria:
+
+1. Alerts on identical request content (recorded in the `request.tab` of the generated profile), and
+2. Alerts having the same set of untrusted inter-procedural calls.
+
+The number of resulting groups is the number of unique alerts. 
