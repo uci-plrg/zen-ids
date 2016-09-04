@@ -6,13 +6,13 @@ This document begins with a high-level discussion of various factors that affect
 
 #### Choosing a Representative Scenario
 
-The accuracy of Zen IDS depends on several factors of the deployment and usage scenario. For example, Zen IDS will probably perform well for an application with a large user base and high traffic, regardless of all other factors--but accuracy will decrease as the user base and traffic volume are reduced. For this reason, there is no universal accuracy benchmark for Zen IDS. It can only be measured for a specific deployment scenario, which must be carefully selected to represent whatever real-world conditions are of interest.
+The accuracy of ZenIDS depends on several factors of the deployment and usage scenario. For example, ZenIDS will probably perform well for an application with a large user base and high traffic, regardless of all other factors--but accuracy will decrease as the user base and traffic volume are reduced. For this reason, there is no universal accuracy benchmark for ZenIDS. It can only be measured for a specific deployment scenario, which must be carefully selected to represent whatever real-world conditions are of interest.
 
 For this reason, we recommend recording live HTTP traffic to a real installation having significant traffic volume. In our experiments we recorded traffic with a modified version of [gor](https://github.com/buger/gor) that can replay traffic synchronously, which (a) preserves request sequence, and (b) minimizes the overall replay duration (though this may not work for applications that are sensitive to specific request timing). If live traffic is not available, it is also possible to simulate traffic using any means of generating HTTP requests, though the relevance of the results will depend on how realistic the request generator is.
 
 #### Repeatability
 
-The record/replay approach makes the experiment repeatable if the application only consumes data from local configuration and user input. For applications that consume external data, for example from Twitter feeds, the external source may or may not affect the accuracy of Zen IDS. If the experiment is intended to be precisely repeatable, it will usually be possible to record external inputs along with the HTTP request inputs. This requires extending the PHP interpreter to record network communication initiated by the application (contact us for suggestions about how to do this).
+The record/replay approach makes the experiment repeatable if the application only consumes data from local configuration and user input. For applications that consume external data, for example from Twitter feeds, the external source may or may not affect the accuracy of ZenIDS. If the experiment is intended to be precisely repeatable, it will usually be possible to record external inputs along with the HTTP request inputs. This requires extending the PHP interpreter to record network communication initiated by the application (contact us for suggestions about how to do this).
 
 #### Avoid Spamming
 
@@ -20,7 +20,7 @@ Many PHP applications generate communications with users, such as an automated e
 
 ## How to Conduct a Record/Replay Experiment
 
-This section describes how to conduct the kind of record/replay experiment reported in the Zen IDS paper.
+This section describes how to conduct the kind of record/replay experiment reported in the ZenIDS paper.
 
 #### Record Live HTTP Traffic
 
@@ -28,10 +28,10 @@ Set up an HTTP recorder on all instances of Apache that comprise the live webser
 
 #### Building the *Trusted Profile*
 
-First [configure](https://github.com/uci-plrg/zen-ids/blob/interp-opt/CONFIG.md) Zen IDS in training mode and restart the webserver. The general procedure for building the *trusted profile* is to repeat the following sequence:
+First [configure](https://github.com/uci-plrg/zen-ids/blob/interp-opt/CONFIG.md) ZenIDS in training mode and restart the webserver. The general procedure for building the *trusted profile* is to repeat the following sequence:
 
 1. Execute some HTTP requests (e.g. from a crawler, or an HTTP replay).
-  * Zen IDS generates a composite profile of the request executions.
+  * ZenIDS generates a composite profile of the request executions.
   * Use utility `select-run -w 1` to find the newly generated profile.
     * The numeric argument indicates the index of the session, in reverse chronological order, where a session is delimited by Apache restart.
 2. Merge the new profile together with previously generated profiles (if any).
@@ -41,7 +41,7 @@ First [configure](https://github.com/uci-plrg/zen-ids/blob/interp-opt/CONFIG.md)
     * The `$dataset` is a directory. It will be created if it does not exist (though its parent must exist).
 3. Deploy the *trusted profile* to all Apache instances.
   * Copy the file `cfg.set` from `$dataset` to `$ZEN_IDS_DATASETS`, renaming it to the application name as specified in `opmon.site.roots` (see the [Deployment Instructions](https://github.com/uci-plrg/zen-ids/blob/interp-opt/README.md)).
-  * Note that Zen IDS generates only deltas with the deployed *trusted profile*, so the resulting new profile will only merge successfully with the `$dataset` from which the *trusted profile* was deployed.
+  * Note that ZenIDS generates only deltas with the deployed *trusted profile*, so the resulting new profile will only merge successfully with the `$dataset` from which the *trusted profile* was deployed.
 
 The *trusted profile* for the test phase of the experiment can be any result of step 3, though normally the last *trusted profile* would be used since it will be the most complete.
 
@@ -55,7 +55,7 @@ For applications that are open to public crawlers, such as those sent by search 
 
 ##### Profile Replay
 
-Since today's web applications use complex interactions such as JavaScript callbacks, it is rarely sufficient to build a *trusted profile* by simply crawling the site. Some prefix of the recorded HTTP traffic will need to be included in the *trusted profile*. For experiments that intend to test the accuracy of Zen IDS with a minimal set of training requests, we suggest the following steps to determine when the training process has converged:
+Since today's web applications use complex interactions such as JavaScript callbacks, it is rarely sufficient to build a *trusted profile* by simply crawling the site. Some prefix of the recorded HTTP traffic will need to be included in the *trusted profile*. For experiments that intend to test the accuracy of ZenIDS with a minimal set of training requests, we suggest the following steps to determine when the training process has converged:
 
 1. Replay a set of HTTP requests.
   * If the *dataset* is beginning to converge, replay half as many requests as the last round.
@@ -70,7 +70,7 @@ Since today's web applications use complex interactions such as JavaScript callb
 
 #### Test for False Positives/Negatives
 
-First deploy the *trusted profile* for the experiment and [configure](https://github.com/uci-plrg/zen-ids/blob/interp-opt/CONFIG.md) Zen IDS in one of the monitoring modes. After restarting the webserver, replay the remaining set of HTTP requests that were not used during training. ZenIDS will report requests to the file `persistence.log` in the generated profile. Each alert is prefixed with `<cfg> alert` and specifies the URL of the request. Following each alert is an entry prefixed `<cfg> call unverified` indicating an inter-procedural call taken during execution of the alerting request that was not found in the *trusted profile* (i.e., causes of the alert). The `persistence.log` additionally contains an entry prefixed by `@` for each HTTP request, to provide context and make it easy to count the total number of requests.
+First deploy the *trusted profile* for the experiment and [configure](https://github.com/uci-plrg/zen-ids/blob/interp-opt/CONFIG.md) ZenIDS in one of the monitoring modes. After restarting the webserver, replay the remaining set of HTTP requests that were not used during training. ZenIDS will report requests to the file `persistence.log` in the generated profile. Each alert is prefixed with `<cfg> alert` and specifies the URL of the request. Following each alert is an entry prefixed `<cfg> call unverified` indicating an inter-procedural call taken during execution of the alerting request that was not found in the *trusted profile* (i.e., causes of the alert). The `persistence.log` additionally contains an entry prefixed by `@` for each HTTP request, to provide context and make it easy to count the total number of requests.
 
 ##### Unique Alerts
 

@@ -1,7 +1,7 @@
 
-# Security Experiments with Zen IDS 
+# Security Experiments with ZenIDS 
 
-This document gives an overview of the workflow for the two kinds of security experiments reported in the Zen IDS paper:
+This document gives an overview of the workflow for the two kinds of security experiments reported in the ZenIDS paper:
 false positive/negative and exploit detection. It also gives an overview of performance benchmarking.
 Due to privacy concerns, we are unable to provide the HTTP data used in our published experiments.
 
@@ -9,10 +9,10 @@ Due to privacy concerns, we are unable to provide the HTTP data used in our publ
 
 1. Install the PHP application in a live Apache instance and record some HTTP traffic.
   * We recommend HTTP recorder [gor](https://github.com/buger/gor)
-2. Install the same PHP application in the Apache instance where Zen IDS is installed.
-  * Manually verify that the application works normally with Zen IDS running.
+2. Install the same PHP application in the Apache instance where ZenIDS is installed.
+  * Manually verify that the application works normally with ZenIDS running.
 2. If the application has an authentication scheme:
-  * Instrument the login mechanism with the Zen IDS `set_user_level($level)` function.
+  * Instrument the login mechanism with the ZenIDS `set_user_level($level)` function.
   * Verify that the Apache error log contains entries recognizing user login and logout, including cookie authentication.
 4. Crawl the application with `wget`
 4. Create and deploy the initial *trusted profile* 
@@ -28,10 +28,10 @@ For complete instructions, see the
 
 1. Pick your favorite exploit
   * We recommend [exploit-db.com](http://exploit-db.com)
-  * Zen IDS can only detect exploits that manipulate control flow at the script level. This excludes:
+  * ZenIDS can only detect exploits that manipulate control flow at the script level. This excludes:
     * Data-only attacks such as conventional XSS and SQLi
     * Attacks on the native code of the interpreter
-2. Install the vulnerable PHP application in the Apache instance where Zen IDS is installed.
+2. Install the vulnerable PHP application in the Apache instance where ZenIDS is installed.
 3. Verify the exploit by running the POC.
 4. Create a *trusted profile* for the application
   * Crawl it with `wget`
@@ -47,10 +47,10 @@ For complete instructions, see the
 ### Overview: Performance Benchmark
 
 1. Choose an FP/FN experiment as the basis for the benchmark. 
-2. Build the Zen IDS fork of PHP without the Zen IDS extension or any of its hooks
+2. Build the ZenIDS fork of PHP without the ZenIDS extension or any of its hooks
 2. Replay some of the basis HTTP traffic
-  * Select a segment of traffic that takes at least 2 minutes to replay--otherwise the standard deviation will outweigh the Zen IDS overhead
-3. Rebuild PHP with the Zen IDS extension
+  * Select a segment of traffic that takes at least 2 minutes to replay--otherwise the standard deviation will outweigh the ZenIDS overhead
+3. Rebuild PHP with the ZenIDS extension
 4. Deploy the *trusted profile* from the basis experiment 
 5. Replay the same segment of HTTP traffic (step 3) and compare the running time
 
