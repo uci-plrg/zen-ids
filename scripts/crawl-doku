@@ -15,7 +15,7 @@ do
 done
 shift $(( $OPTIND-1 ))
 
-cat $SCRIPT_SAFE/php-cfi/data/user-agents.tab | while read u
+cat $ZEN_IDS_HOME/data/user-agents.tab | while read u
 do
   echo "Crawl with agent $u"
 
