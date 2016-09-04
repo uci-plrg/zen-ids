@@ -26,6 +26,21 @@ For complete instructions, see the
 
 ### Overview: Exploit Experiment
 
+1. Pick your favorite exploit
+  * We recommend [exploit-db.com](http://exploit-db.com)
+  * Zen IDS can only detect exploits that manipulate control flow at the script level. This excludes:
+    * Data-only attacks such as conventional XSS and SQLi
+    * Attacks on the native code of the interpreter
+2. Install the vulnerable PHP application in the Apache instance where Zen IDS is installed.
+3. Verify the exploit by running the POC.
+4. Create a *trusted profile* for the application
+  * Crawl it with `wget`
+  * Use a variety of features in ways that appear normal
+  * Create and deploy the resulting profile
+5. Test the vulnerability scenario:
+  * Continue to use and crawl the application, counting the number of false alerts (if any)
+  * Run the POC and verify the expected alert
+
 For complete instructions, see the 
 [Exploit Experiment](https://github.com/uci-plrg/zen-ids/blob/interp-opt/doc/experiments/EXPLOIT.md) page.
 
