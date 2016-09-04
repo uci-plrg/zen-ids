@@ -35,7 +35,7 @@ For complete instructions, see the
 3. Verify the exploit by running the POC.
 4. Create a *trusted profile* for the application
   * Crawl it with `wget`
-  * Use a variety of features in ways that appear normal
+  * Access the application in a browser, using a variety of features in ways that appear normal
   * Create and deploy the resulting profile
 5. Test the vulnerability scenario:
   * Continue to use and crawl the application, counting the number of false alerts (if any)
@@ -45,6 +45,14 @@ For complete instructions, see the
 [Exploit Experiment](https://github.com/uci-plrg/zen-ids/blob/interp-opt/doc/experiments/EXPLOIT.md) page.
 
 ### Overview: Performance Benchmark
+
+1. Choose an FP/FN experiment as the basis for the benchmark. 
+2. Build the Zen IDS fork of PHP without the Zen IDS extension or any of its hooks
+2. Replay some of the basis HTTP traffic
+  * Select a segment of traffic that takes at least 2 minutes to replay--otherwise the standard deviation will outweigh the Zen IDS overhead
+3. Rebuild PHP with the Zen IDS extension
+4. Deploy the *trusted profile* from the basis experiment 
+5. Replay the same segment of HTTP traffic (step 3) and compare the running time
 
 For complete instructions, see the 
 [Performance Benchmark](https://github.com/uci-plrg/zen-ids/blob/interp-opt/doc/experiments/PERFORMANCE.md) page.
