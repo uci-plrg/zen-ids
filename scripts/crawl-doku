@@ -1,0 +1,58 @@
+#!/bin/bash
+
+i=0
+url="http://my.server.com"
+dir="./my.server.com/"
+
+count=0
+limit=1000000
+
+while getopts "c:" option
+do
+  case $option in
+    c) limit=$OPTARG;;
+  esac
+done
+shift $(( $OPTIND-1 ))
+
+cat $SCRIPT_SAFE/php-cfi/data/user-agents.tab | while read u
+do
+  echo "Crawl with agent $u"
+
+  if [ "$i" -gt 20 ]
+  then # sometimes fetch all pages, including large files
+    reject=""
+    reject_regex=""
+    i=0
+  else # usually skip the large files so it doesn't take forever
+    reject=".pdf,.ps,.gz,.zip,.bib,.tar,.ppt,.tgz,wiki:syntax"
+    reject_regex="*wiki:syntax*,*playground:playground*"
+    i=$(( $i + 1 ))
+  fi
+
+  rm -rf $dir
+	wget --recursive --force-html --tries=1 --user-agent="$u" \
+    -R "$reject" \
+    --execute robots=off \
+    "$url/eecs221/"
+
+  if [ "$i" -eq 0 ] # sometimes crawl XML also (usually skip to speed things up)
+  then
+    grep -Rl "^<?xml" $dir | while read f
+    do
+      echo "Crawl sitemap $f"
+
+      grep -o "$url[^<\"]\+" "$f" | while read u
+      do
+        wget --recursive --force-html --tries=1 --user-agent="$u" \
+        -R "$reject" \
+        --reject-regex "$reject_regex" \
+        --execute robots=off \
+        $u
+      done
+    done
+  fi
+
+  count=$(( $count + 1 ))
+  [ "$count" -ge "$limit" ] && break
+done
