@@ -28,6 +28,18 @@ This repository contains the dynamically linked ZenIDS extension for the referen
   * Note that the bash keyword `source` is not recognized in this file.
 3. `sudo chown -R www-data:www-data $ZEN_IDS_EVOLUTION` (or whatever user is running your Apache HTTP server)
 
+### Application Deployment
+
+ZenIDS identifies a deployed application by its top-level directory. Although it is possible for multiple applications to share a single set of PHP libraries, it is much more common for each application to provide its own libraries. Shared libraries will only cause problems for ZenIDS if the application uses library files as request entry points--i.e., a request specifically names a library file in the base part of the URL. Since this would be very strange, we do not currently support it.
+
+Create a file `opmon.site.roots` in the webserver's public HTML directory and add the relative path to each application's top-level directory on a line by itself (not starting or ending with a `/`). For example, the following `opmon.site.roots` specifies an instance of `DokuWiki`, and instance of `GitList`, and an application occupying the web root URL (`.`):
+
+    .
+    dokuwiki
+    gitlist
+
+For HTTP requests for files within the `dokuwiki/` directory, ZenIDS will generate profile data in the directory `$(select-run -w 1)/worker*/dokuwiki`. Similar for `gitlist`. The profile directory for the root application will be named to match the public HTML directory name--for example, if the web root is `/var/www/html`, then the root application's profile data appears in `$(select-run -w 1)/worker*/html`. The `worker*` directory will be named to match the process name of the Apache fork that served the request.
+
 ### Test
 
 1. Add the [scripts](https://github.com/uci-plrg/zen-ids/tree/interp-opt/scripts) directory to the `$PATH`
