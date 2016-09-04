@@ -40,7 +40,7 @@ The general procedure for building the *trusted profile* is to repeat the follow
     * It also works with just one input profile (i.e., unity merge).
     * The `$dataset` is a directory. It will be created if it does not exist (though its parent must exist).
 3. Deploy the *trusted profile* to all Apache instances.
-  * Copy the file `cfg.set` from `$dataset` to `$ZEN_IDS_DATASETS`, renaming it to the application name as specified in `opmon.site.roots` (see the [Deployment Instructions](https://github.com/uci-plrg/zen-ids/blob/interp-opt/README.md).
+  * Copy the file `cfg.set` from `$dataset` to `$ZEN_IDS_DATASETS`, renaming it to the application name as specified in `opmon.site.roots` (see the [Deployment Instructions](https://github.com/uci-plrg/zen-ids/blob/interp-opt/README.md)).
   * Note that Zen IDS generates only deltas with the deployed *trusted profile*, so the resulting new profile will only merge successfully with the `$dataset` from which the *trusted profile* was deployed.
 
 The *trusted profile* for the test phase of the experiment can be any result of step 3, though normally the last *trusted profile* would be used since it will be the most complete.
@@ -51,8 +51,22 @@ In our experiments, we generated the *trusted profile* using a combination of cr
 
 ##### Crawling
 
-For applications that are open to public crawlers, such as those sent by search engines, it is important to include crawl requests in the *trusted profile* to avoid false positives in the experiment. The behavior of real crawlers is erratic and cannot be reliably sampled from recorded HTTP traffic. For example, we observed the same crawler to start with a shallow investigation of our site, and then return several weeks later to make a thorough crawl of all links. We have no idea why this happens, but we know that the second crawl will generate a flood of false positives unless the *trusted profile* includes a thorough crawl of the site, including links the XML documents such as sitemaps. Our [crawl script for DokuWiki] gives an example of basic crawling that is sufficient for record/replay experiments.
+For applications that are open to public crawlers, such as those sent by search engines, it is important to include crawl requests in the *trusted profile* to avoid false positives in the experiment. The behavior of real crawlers is erratic and cannot be reliably sampled from recorded HTTP traffic. For example, we observed the same crawler to start with a shallow investigation of our site, and then return several weeks later to make a thorough crawl of all links. We have no idea why this happens, but we know that the second crawl will generate a flood of false positives unless the *trusted profile* includes a thorough crawl of the site, including links the XML documents such as sitemaps. Our [crawl script for DokuWiki](https://github.com/uci-plrg/zen-ids/blob/interp-opt/scripts/crawl-doku) gives an example of basic crawling that is sufficient for record/replay experiments.
 
+##### Profile Replay
+
+Since today's web applications use complex interactions such as JavaScript callbacks, it is rarely sufficient to build a *trusted profile* by simply crawling the site. Some prefix of the recorded HTTP traffic will need to be included in the *trusted profile*. For experiments that intend to test the accuracy of Zen IDS with a minimal set of training requests, we suggest the following steps to determine when the training process has converged:
+
+1. Replay a set of HTTP requests.
+  * If the *dataset* is beginning to converge, replay half as many requests as the last round.
+  * If the *dataset* is not nearing convergence, replay twice as many requests as the last round.
+  * For a new *dataset*, the set of reqeusts is arbitrary--just pick something reasonable and adjust as prescribed here.
+2. If the generated file `routine-edge.run` is large (more than a few bytes):
+  * Merge the generated profile into the *dataset* and continue with step 1.
+3. If the generated files are very small, discard the generated profile and either:
+  * Continue at step 1 with a smaller sample, or
+  * Stop profiling--the *dataset* is complete.
+  * Note that if the generated profile is very small on just the second round, it may indicate that the first round was too large. In that case, keep trying a smaller first round until the second round yields a significant profile.
 
 #### Test for False Positives/Negatives
 
